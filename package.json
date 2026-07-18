@@ -1,0 +1,20 @@
+{
+  "name": "sourcetrace",
+  "private": true,
+  "packageManager": "pnpm@11.14.0",
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"pnpm dev:api\" \"pnpm dev:web\"",
+    "dev:api": "uv run --project apps/api uvicorn sourcetrace.main:app --reload --port 8000",
+    "dev:web": "pnpm --dir apps/web dev",
+    "build": "pnpm --dir apps/web build",
+    "generate:api": "uv run --project apps/api python apps/api/scripts/export_openapi.py && pnpm --dir apps/web generate:api",
+    "format": "uv run --project apps/api ruff format apps/api && pnpm --dir apps/web format",
+    "check": "uv run --project apps/api ruff check apps/api && uv run --project apps/api mypy apps/api/src && pnpm --dir apps/web typecheck",
+    "test": "pnpm test:api && pnpm test:web",
+    "test:api": "uv run --project apps/api pytest apps/api/tests",
+    "test:web": "pnpm --dir apps/web test:unit"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

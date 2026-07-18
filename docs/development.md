@@ -1,0 +1,75 @@
+# 开发约定
+
+## 环境准备
+
+需要 Python 3.12+、uv、Node.js 22+、pnpm 和 Docker。首次启动：
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d postgres redis
+uv sync --project apps/api --all-groups
+pnpm install
+uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
+pnpm dev
+```
+
+## 日常流程
+
+1. 从一个可验证的用户行为定义改动，不按技术层批量铺空代码。
+2. 在对应 feature 内完成 Router、Service、Repository 的最小纵向切片。
+3. 先写纯业务单元测试，再按风险补充 API/数据库集成测试。
+4. API schema 变化后运行 `pnpm generate:api` 更新前端类型。
+5. 提交前运行 `pnpm check`、`pnpm test` 和 `pnpm build`。
+
+## 新增后端模块
+
+例如新增 `documents`：
+
+```text
+modules/documents/
+  __init__.py
+  models.py
+  schemas.py
+  repository.py
+  service.py
+  router.py
+  dependencies.py
+```
+
+不需要数据库时不要创建 `models.py` 和 `repository.py`；依赖装配简单时也不创建
+`dependencies.py`。Router 在 `api/router.py` 注册。模块测试对应放在 `tests/unit/` 和
+`tests/integration/`，不把测试塞进源码目录。
+
+## 数据库迁移
+
+```powershell
+uv run --project apps/api alembic -c apps/api/alembic.ini revision --autogenerate -m "add documents"
+uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
+uv run --project apps/api alembic -c apps/api/alembic.ini downgrade -1
+```
+
+自动生成后必须审阅 SQL。外键明确 `ON DELETE` 行为，查询、连接和排序字段按实际访问
+模式建索引。不要在应用启动时隐式建表。
+
+## 测试策略
+
+- 单元测试不连接数据库、Redis 或真实模型服务。
+- 集成测试使用隔离测试库，外部模型通过 HTTP fake 或确定性 adapter 替换。
+- 契约测试校验 OpenAPI 能生成前端类型，并覆盖每个供应商适配器的超时与错误映射。
+- 端到端测试只覆盖上传、摄取、提问、引用跳转等关键旅程。
+- RAG 效果通过 `evals/` 中版本化样本评测，不把主观示例当准确率。
+
+## API 与错误
+
+所有业务接口放在 `/api/v1` 下。错误响应必须使用统一结构；业务代码抛出 `AppError`
+子类，由全局处理器映射为 HTTP 响应。不要在 Service 中抛 `HTTPException`。
+
+## 配置与秘密
+
+后端配置集中在 `core/config.py`，前端只读取 `VITE_` 前缀变量。新增配置时同步更新
+`.env.example`，示例值不能是真实密钥。生产环境由部署平台注入配置，不复制开发 `.env`。
+
+## 架构决策记录
+
+对数据库替换、认证方式、队列实现、模型供应商抽象等难以逆转的决定，在 `docs/adr/`
+新增编号文档，记录背景、决定、替代方案与后果。小型可逆实现不需要 ADR。
