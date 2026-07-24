@@ -43,7 +43,8 @@ scripts/          开发、契约生成和质量检查脚本
 data/uploads/     本地开发上传目录，不提交用户文件
 ```
 
-详细边界见 [架构说明](docs/architecture.md) 和 [开发约定](docs/development.md)。
+产品范围与验收标准见 [规格说明](docs/specification.md)，工程边界见
+[架构说明](docs/architecture.md)，本地流程见 [开发约定](docs/development.md)。
 
 ## 当前阶段
 

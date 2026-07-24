@@ -105,3 +105,18 @@ pnpm build
 - 修改架构边界时同步更新 `docs/architecture.md`，重要取舍写入 `docs/adr/`。
 - 不填写未经版本化评测集运行得到的准确率、召回率、延迟等数字。
 - 遇到需求不明确时，优先实现可逆的最小纵向切片，并记录假设。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses the single-context domain documentation layout. See
+`docs/agents/domain.md`.
