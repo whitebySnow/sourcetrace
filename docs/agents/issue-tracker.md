@@ -13,6 +13,24 @@ current Git remote.
 - Apply or remove labels with `gh issue edit <number>`.
 - Close an issue with `gh issue close <number>`.
 
+## Source-of-truth boundary
+
+GitHub Issues are the execution tracker, not a second product specification. Product behavior and
+acceptance baselines live in `docs/specification.md`; engineering boundaries live in
+`docs/architecture.md`, accepted ADRs, and `AGENTS.md`.
+
+Each implementation issue should contain only:
+
+1. its parent issue or milestone;
+2. links to the relevant canonical specification or architecture sections;
+3. the outcome and scope of this task;
+4. acceptance criteria specific enough to verify the task; and
+5. dependencies or blockers.
+
+Do not copy the full product specification into an issue. If an issue intentionally changes a
+canonical decision, update the canonical document and the issue together. If they conflict, stop
+implementation, report the conflict, and wait for the sources to be reconciled and reviewed.
+
 ## Pull requests as a triage surface
 
 Pull requests as a request surface: **no**.
