@@ -16,6 +16,23 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql+asyncpg://sourcetrace:sourcetrace-ci-${{ github.run_id }}@localhost:5432/sourcetrace
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: sourcetrace
+          POSTGRES_USER: sourcetrace
+          POSTGRES_PASSWORD: sourcetrace-ci-${{ github.run_id }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sourcetrace -d sourcetrace"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout
@@ -46,6 +63,9 @@ jobs:
         run: |
           pnpm generate:api
           git diff --exit-code -- apps/web/openapi.json apps/web/src/shared/api/schema.d.ts
+
+      - name: Verify database migrations
+        run: uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
 
       - name: Static checks
         run: pnpm check

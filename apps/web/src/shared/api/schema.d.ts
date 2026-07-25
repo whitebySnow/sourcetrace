@@ -38,10 +38,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge-bases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge Bases */
+        get: operations["list_knowledge_bases_api_v1_knowledge_bases_get"];
+        put?: never;
+        /** Create Knowledge Base */
+        post: operations["create_knowledge_base_api_v1_knowledge_bases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-bases/{knowledge_base_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Knowledge Base */
+        get: operations["get_knowledge_base_api_v1_knowledge_bases__knowledge_base_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Knowledge Base */
+        delete: operations["delete_knowledge_base_api_v1_knowledge_bases__knowledge_base_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ErrorResponse */
+        ErrorResponse: {
+            /** Type */
+            type: string;
+            /** Title */
+            title: string;
+            /** Status */
+            status: number;
+            /** Detail */
+            detail: string;
+            /** Instance */
+            instance: string;
+            /** Code */
+            code: string;
+            /** Request Id */
+            request_id: string;
+            /** Errors */
+            errors?: components["schemas"]["FieldError"][] | null;
+        };
+        /** FieldError */
+        FieldError: {
+            /** Field */
+            field: string;
+            /** Message */
+            message: string;
+            /** Code */
+            code: string;
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -50,6 +114,38 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /** KnowledgeBaseCreate */
+        KnowledgeBaseCreate: {
+            /** Name */
+            name: string;
+        };
+        /** KnowledgeBaseListResponse */
+        KnowledgeBaseListResponse: {
+            /** Items */
+            items: components["schemas"]["KnowledgeBaseResponse"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** KnowledgeBaseResponse */
+        KnowledgeBaseResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** ReadinessResponse */
         ReadinessResponse: {
@@ -108,6 +204,160 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+        };
+    };
+    list_knowledge_bases_api_v1_knowledge_bases_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBaseListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_knowledge_base_api_v1_knowledge_bases_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeBaseCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBaseResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_knowledge_base_api_v1_knowledge_bases__knowledge_base_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                knowledge_base_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBaseResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_knowledge_base_api_v1_knowledge_bases__knowledge_base_id__delete: {
+        parameters: {
+            query: {
+                confirm: boolean;
+            };
+            header?: never;
+            path: {
+                knowledge_base_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
