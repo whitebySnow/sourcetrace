@@ -16,6 +16,7 @@ def test_knowledge_base_lifecycle_is_exposed_in_openapi() -> None:
     assert "204" in item["delete"]["responses"]
     assert "404" in item["delete"]["responses"]
     assert "422" in item["delete"]["responses"]
+    assert collection["post"]["responses"]["422"]["description"] == "Validation Error"
 
     error_schema = collection["post"]["responses"]["409"]["content"]["application/json"]["schema"]
     assert error_schema["$ref"] == "#/components/schemas/ErrorResponse"

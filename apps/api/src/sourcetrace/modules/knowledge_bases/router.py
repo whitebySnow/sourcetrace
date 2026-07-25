@@ -38,7 +38,10 @@ PageLimit = Annotated[int, Query(ge=1, le=100)]
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_409_CONFLICT: {"model": ErrorResponse},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": "Validation Error",
+        },
     },
 )
 async def create_knowledge_base(
@@ -59,7 +62,12 @@ async def create_knowledge_base(
 @router.get(
     "",
     response_model=KnowledgeBaseListResponse,
-    responses={status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse}},
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": "Validation Error",
+        }
+    },
 )
 async def list_knowledge_bases(
     service: ServiceDependency,
@@ -85,7 +93,10 @@ async def list_knowledge_bases(
     response_model=KnowledgeBaseResponse,
     responses={
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": "Validation Error",
+        },
     },
 )
 async def get_knowledge_base(
@@ -108,7 +119,10 @@ async def get_knowledge_base(
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": "Validation Error",
+        },
     },
 )
 async def delete_knowledge_base(
