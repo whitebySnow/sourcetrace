@@ -2,7 +2,12 @@
   color: #202522;
   background: #f5f7f5;
   font-family:
-    Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    Inter,
+    "Segoe UI",
+    "Microsoft YaHei",
+    system-ui,
+    -apple-system,
+    sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -63,9 +68,34 @@ a {
   border-radius: 6px;
 }
 
-.environment {
-  color: #68716b;
-  font-size: 13px;
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topnav a {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px;
+  color: #5e6962;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.topnav a:last-child {
+  width: 36px;
+  padding: 0;
+}
+
+.topnav a:hover,
+.topnav a.router-link-active {
+  color: #1f6f4a;
+  background: #edf4ef;
 }
 
 @media (max-width: 640px) {

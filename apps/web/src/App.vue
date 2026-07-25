@@ -1,16 +1,23 @@
 <script setup lang="ts">
-import { BookOpenText } from "@lucide/vue";
-import { RouterView } from "vue-router";
+import { Activity, BookOpenText } from "@lucide/vue";
+import { RouterLink, RouterView } from "vue-router";
 </script>
 
 <template>
   <div class="app-shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="SourceTrace 首页">
-        <span class="brand-mark"><BookOpenText :size="19" aria-hidden="true" /></span>
+        <span class="brand-mark"
+          ><BookOpenText :size="19" aria-hidden="true"
+        /></span>
         <span>SourceTrace</span>
       </a>
-      <span class="environment">本地开发</span>
+      <nav class="topnav" aria-label="主导航">
+        <RouterLink to="/">知识库</RouterLink>
+        <RouterLink to="/system" title="系统状态" aria-label="系统状态">
+          <Activity :size="18" aria-hidden="true" />
+        </RouterLink>
+      </nav>
     </header>
     <main>
       <RouterView />
