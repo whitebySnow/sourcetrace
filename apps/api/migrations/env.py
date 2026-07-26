@@ -5,14 +5,14 @@ from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from sourcetrace.core.config import get_settings
-from sourcetrace.modules.knowledge_bases.models import KnowledgeBase
+from sourcetrace.db.model_registry import MODEL_METADATA
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
-target_metadata = KnowledgeBase.metadata
+target_metadata = MODEL_METADATA
 
 
 def run_migrations_offline() -> None:

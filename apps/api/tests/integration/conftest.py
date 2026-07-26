@@ -13,7 +13,7 @@ from sourcetrace.main import create_app
 
 
 @pytest.fixture
-async def client() -> AsyncIterator[AsyncClient]:
+async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     schema = f"test_{uuid4().hex}"
     engine = create_async_engine(
         get_settings().database_url,
@@ -25,9 +25,25 @@ async def client() -> AsyncIterator[AsyncClient]:
         await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
         await connection.run_sync(Base.metadata.create_all)
 
+    yield session_factory
+
+    async with engine.begin() as connection:
+        await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+    await engine.dispose()
+
+
+@pytest.fixture
+async def session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    async with session_factory() as database_session:
+        yield database_session
+
+
+@pytest.fixture
+async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
     async def override_session() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
+        yield session
 
     app = create_app()
     app.dependency_overrides[get_session] = override_session
@@ -36,7 +52,3 @@ async def client() -> AsyncIterator[AsyncClient]:
         base_url="http://testserver",
     ) as test_client:
         yield test_client
-
-    async with engine.begin() as connection:
-        await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-    await engine.dispose()
