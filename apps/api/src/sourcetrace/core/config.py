@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("data/uploads")
     max_upload_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
     max_pdf_pages: int = Field(default=500, ge=1)
+    ingestion_tokenizer: str = "cl100k_base"
+    ingestion_chunk_size: int = Field(default=500, gt=0)
+    ingestion_chunk_overlap: int = Field(default=80, ge=0)
+    ingestion_chunking_config_version: str = "token-window-v1"
 
     llm_provider: str = "mock"
     llm_model: str = "mock-chat"

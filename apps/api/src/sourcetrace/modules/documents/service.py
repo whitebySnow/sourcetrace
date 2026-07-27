@@ -8,7 +8,7 @@ from tempfile import SpooledTemporaryFile
 from typing import Protocol
 from uuid import UUID
 
-from sourcetrace.modules.documents.models import Document, DocumentVersion
+from sourcetrace.modules.documents.models import Document, DocumentVersion, IngestionRun
 from sourcetrace.modules.documents.repository import DocumentWriteConflictError
 
 
@@ -37,6 +37,10 @@ class PdfFileTooLargeError(ValueError):
 
 
 class InvalidPdfSignatureError(ValueError):
+    pass
+
+
+class IngestionQueueUnavailableError(Exception):
     pass
 
 
@@ -73,6 +77,7 @@ class DocumentUpload:
 class DocumentVersionRecord:
     document: Document
     version: DocumentVersion
+    ingestion_run: IngestionRun | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,10 @@ class DocumentStoragePort(Protocol):
         checksum_sha256: str,
         content: SpooledTemporaryFile[bytes],
     ) -> str: ...
+
+
+class IngestionQueuePort(Protocol):
+    async def enqueue(self, version_id: UUID) -> None: ...
 
 
 class KnowledgeBaseReaderPort(Protocol):
@@ -142,6 +151,11 @@ class DocumentRepositoryPort(Protocol):
         limit: int,
         after: tuple[datetime, UUID] | None,
     ) -> list[tuple[Document, DocumentVersion]]: ...
+
+    async def get_latest_ingestion_runs(
+        self,
+        document_version_ids: list[UUID],
+    ) -> dict[UUID, IngestionRun]: ...
 
     async def commit(self) -> None: ...
 
@@ -254,8 +268,15 @@ class DocumentService:
         )
         has_more = len(rows) > limit
         selected = rows[:limit]
+        runs = await self._repository.get_latest_ingestion_runs(
+            [version.id for _, version in selected]
+        )
         items = [
-            DocumentVersionRecord(document=document, version=version)
+            DocumentVersionRecord(
+                document=document,
+                version=version,
+                ingestion_run=runs.get(version.id),
+            )
             for document, version in selected
         ]
         next_cursor = self._encode_cursor(items[-1].version) if has_more else None
@@ -288,12 +309,14 @@ class DocumentUploadService:
         knowledge_bases: KnowledgeBaseReaderPort,
         validator: PdfValidatorPort,
         storage: DocumentStoragePort,
+        ingestion_queue: IngestionQueuePort,
         max_upload_bytes: int,
     ) -> None:
         self._documents = documents
         self._knowledge_bases = knowledge_bases
         self._validator = validator
         self._storage = storage
+        self._ingestion_queue = ingestion_queue
         self._max_upload_bytes = max_upload_bytes
 
     async def upload(
@@ -319,6 +342,8 @@ class DocumentUploadService:
                 file_size_bytes=file_size,
                 page_count=metadata.page_count,
             )
+            if not registration.deduplicated or registration.version.status == "pending":
+                await self._ingestion_queue.enqueue(registration.version.id)
         return DocumentUpload(registration=registration)
 
     async def _stage(

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     event,
     func,
@@ -97,6 +98,94 @@ class DocumentVersion(UUIDPrimaryKeyMixin, Base):
             "created_at",
             "id",
         ),
+    )
+
+
+class IngestionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ingestion_runs"
+
+    document_version_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    run_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, server_default="pending")
+    stage: Mapped[str] = mapped_column(String(24), nullable=False, server_default="queued")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    retryable: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    parser_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    tokenizer: Mapped[str] = mapped_column(String(64), nullable=False)
+    chunk_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunking_config_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_version_id",
+            "run_number",
+            name="uq_ingestion_runs_version_sequence",
+        ),
+        CheckConstraint("run_number > 0", name="ingestion_run_number_positive"),
+        CheckConstraint("attempt_count >= 0", name="ingestion_attempt_count_nonnegative"),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'chunked', 'completed', 'failed')",
+            name="ingestion_status_valid",
+        ),
+        CheckConstraint(
+            "stage IN ('queued', 'parsing', 'chunking', 'chunked', 'completed', 'failed')",
+            name="ingestion_stage_valid",
+        ),
+        CheckConstraint("chunk_size > 0", name="ingestion_chunk_size_positive"),
+        CheckConstraint(
+            "chunk_overlap >= 0 AND chunk_overlap < chunk_size",
+            name="ingestion_chunk_overlap_valid",
+        ),
+    )
+
+
+class Chunk(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "chunks"
+
+    document_version_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ingestion_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("ingestion_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunking_config_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_version_id",
+            "chunking_config_version",
+            "page_number",
+            "page_chunk_index",
+            name="uq_chunks_stable_position",
+        ),
+        UniqueConstraint(
+            "document_version_id",
+            "chunking_config_version",
+            "chunk_index",
+            name="uq_chunks_stable_order",
+        ),
+        CheckConstraint("page_number > 0", name="chunk_page_number_positive"),
+        CheckConstraint("chunk_index >= 0", name="chunk_index_nonnegative"),
+        CheckConstraint("page_chunk_index >= 0", name="chunk_page_index_nonnegative"),
+        CheckConstraint("token_count > 0", name="chunk_token_count_positive"),
+        CheckConstraint("length(text) > 0", name="chunk_text_not_empty"),
+        Index("ix_chunks_document_version_order", "document_version_id", "chunk_index"),
     )
 
 

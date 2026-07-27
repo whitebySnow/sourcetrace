@@ -21,8 +21,9 @@ API 默认运行在 `http://localhost:8000`，Web 默认运行在 `http://localh
 ## 常用命令
 
 ```powershell
-pnpm dev          # 同时启动 API 与 Web
+pnpm dev          # 同时启动 API、摄取 Worker 与 Web
 pnpm dev:api      # 仅启动 API
+pnpm dev:worker   # 仅启动 Dramatiq 摄取 Worker
 pnpm dev:web      # 仅启动 Web
 pnpm check        # 后端静态检查与前端类型检查
 pnpm test         # 运行后端和前端测试

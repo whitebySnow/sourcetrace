@@ -92,6 +92,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge-bases/{knowledge_base_id}/documents/{version_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Document Ingestion */
+        post: operations["retry_document_ingestion_api_v1_knowledge_bases__knowledge_base_id__documents__version_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -125,6 +142,16 @@ export interface components {
             page_count: number;
             /** Status */
             status: string;
+            /** Stage */
+            stage: string;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Retryable */
+            retryable: boolean;
+            /** Failure Code */
+            failure_code?: string | null;
+            /** Failure Message */
+            failure_message?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -159,6 +186,16 @@ export interface components {
             page_count: number;
             /** Status */
             status: string;
+            /** Stage */
+            stage: string;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Retryable */
+            retryable: boolean;
+            /** Failure Code */
+            failure_code?: string | null;
+            /** Failure Message */
+            failure_message?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -200,6 +237,11 @@ export interface components {
             /** Code */
             code: string;
         };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -208,6 +250,24 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /** IngestionRetryResponse */
+        IngestionRetryResponse: {
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Status */
+            status: string;
+            /** Stage */
+            stage: string;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Retryable */
+            retryable: boolean;
+            /** Failure Code */
+            failure_code?: string | null;
         };
         /** KnowledgeBaseCreate */
         KnowledgeBaseCreate: {
@@ -252,6 +312,19 @@ export interface components {
             checks: {
                 [key: string]: "ok" | "not_configured";
             };
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -561,6 +634,74 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_document_ingestion_api_v1_knowledge_bases__knowledge_base_id__documents__version_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                knowledge_base_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionRetryResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

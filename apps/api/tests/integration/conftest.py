@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -10,6 +10,20 @@ from sourcetrace.core.config import get_settings
 from sourcetrace.db.base import Base
 from sourcetrace.db.session import get_session
 from sourcetrace.main import create_app
+from sourcetrace.modules.documents.router import get_ingestion_queue
+
+
+class RecordingIngestionQueue:
+    def __init__(self) -> None:
+        self.version_ids: list[UUID] = []
+
+    async def enqueue(self, version_id: UUID) -> None:
+        self.version_ids.append(version_id)
+
+
+@pytest.fixture
+def ingestion_queue() -> RecordingIngestionQueue:
+    return RecordingIngestionQueue()
 
 
 @pytest.fixture
@@ -41,12 +55,16 @@ async def session(
 
 
 @pytest.fixture
-async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+async def client(
+    session: AsyncSession,
+    ingestion_queue: RecordingIngestionQueue,
+) -> AsyncIterator[AsyncClient]:
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
     app = create_app()
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_ingestion_queue] = lambda: ingestion_queue
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://testserver",

@@ -1,10 +1,11 @@
-from sourcetrace.core.logging import configure_logging, get_logger
+from dramatiq.cli import main as dramatiq_main
+
+from sourcetrace.core.logging import configure_logging
 
 
 def main() -> None:
     configure_logging("INFO")
-    get_logger(__name__).info("worker_placeholder_started")
-    raise SystemExit("Worker queue adapter will be added with document ingestion.")
+    dramatiq_main(["sourcetrace.workers.tasks"])
 
 
 if __name__ == "__main__":

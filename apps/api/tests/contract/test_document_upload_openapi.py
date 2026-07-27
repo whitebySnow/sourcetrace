@@ -22,3 +22,8 @@ def test_document_upload_and_listing_are_exposed_in_openapi() -> None:
     parameters = {parameter["name"]: parameter for parameter in listing["parameters"]}
     assert parameters["limit"]["schema"]["default"] == 20
     assert parameters["cursor"]["required"] is False
+
+    retry = document["paths"][
+        "/api/v1/knowledge-bases/{knowledge_base_id}/documents/{version_id}/retry"
+    ]["post"]
+    assert set(retry["responses"]) >= {"202", "404", "409", "503"}
