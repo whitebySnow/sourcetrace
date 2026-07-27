@@ -7,17 +7,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sourcetrace.core.config import get_settings
 from sourcetrace.core.errors import AppError, ErrorResponse
 from sourcetrace.db.session import get_session
+from sourcetrace.modules.documents.ingestion import (
+    DocumentIngestionCoordinator,
+    IngestionNotRetryableError,
+)
+from sourcetrace.modules.documents.queue import DramatiqIngestionQueue
 from sourcetrace.modules.documents.repository import DocumentRepository
 from sourcetrace.modules.documents.schemas import (
     DocumentUploadResponse,
     DocumentVersionItem,
     DocumentVersionListResponse,
+    IngestionRetryResponse,
 )
 from sourcetrace.modules.documents.service import (
     DocumentService,
     DocumentUpload,
     DocumentUploadService,
+    DocumentVersionNotFoundError,
     DocumentVersionRecord,
+    IngestionQueueUnavailableError,
     InvalidDocumentCursorError,
     InvalidDocumentNameError,
     InvalidPdfSignatureError,
@@ -28,7 +36,6 @@ from sourcetrace.modules.documents.validation import (
     CorruptPdfError,
     EncryptedPdfError,
     PdfPageLimitExceededError,
-    PdfTextNotFoundError,
     PypdfDocumentValidator,
 )
 from sourcetrace.modules.knowledge_bases.repository import KnowledgeBaseRepository
@@ -52,8 +59,13 @@ def get_knowledge_base_service(
     return KnowledgeBaseService(KnowledgeBaseRepository(session))
 
 
+def get_ingestion_queue() -> DramatiqIngestionQueue:
+    return DramatiqIngestionQueue()
+
+
 def get_document_upload_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    ingestion_queue: Annotated[DramatiqIngestionQueue, Depends(get_ingestion_queue)],
 ) -> DocumentUploadService:
     settings = get_settings()
     return DocumentUploadService(
@@ -61,7 +73,18 @@ def get_document_upload_service(
         knowledge_bases=KnowledgeBaseService(KnowledgeBaseRepository(session)),
         validator=PypdfDocumentValidator(max_pages=settings.max_pdf_pages),
         storage=LocalDocumentStorage(settings.upload_dir),
+        ingestion_queue=ingestion_queue,
         max_upload_bytes=settings.max_upload_bytes,
+    )
+
+
+def get_ingestion_coordinator(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ingestion_queue: Annotated[DramatiqIngestionQueue, Depends(get_ingestion_queue)],
+) -> DocumentIngestionCoordinator:
+    return DocumentIngestionCoordinator(
+        repository=DocumentRepository(session),
+        queue=ingestion_queue,
     )
 
 
@@ -81,6 +104,7 @@ def _item(record: DocumentVersionRecord) -> DocumentVersionItem:
     version = record.version
     if version.file_size_bytes is None or version.page_count is None:
         raise RuntimeError("uploaded document version is missing file metadata")
+    run = record.ingestion_run
     return DocumentVersionItem(
         document_id=record.document.id,
         version_id=version.id,
@@ -89,7 +113,12 @@ def _item(record: DocumentVersionRecord) -> DocumentVersionItem:
         checksum_sha256=version.checksum_sha256,
         file_size_bytes=version.file_size_bytes,
         page_count=version.page_count,
-        status=version.status,
+        status=run.status if run is not None else version.status,
+        stage=run.stage if run is not None else "queued",
+        attempt_count=run.attempt_count if run is not None else 0,
+        retryable=run.retryable if run is not None else False,
+        failure_code=run.failure_code if run is not None else None,
+        failure_message=run.failure_message if run is not None else None,
         created_at=version.created_at,
     )
 
@@ -128,6 +157,7 @@ def _upload_response(upload: DocumentUpload, request_id: str) -> DocumentUploadR
             "model": ErrorResponse,
             "description": "Unprocessable Content",
         },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
     },
 )
 async def upload_document(
@@ -169,12 +199,6 @@ async def upload_document(
             message="PDF exceeds the configured page limit",
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         ) from error
-    except PdfTextNotFoundError as error:
-        raise AppError(
-            code="PDF_TEXT_NOT_FOUND",
-            message="PDF contains no extractable text; OCR is not supported",
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        ) from error
     except CorruptPdfError as error:
         raise AppError(
             code="PDF_CORRUPT",
@@ -186,6 +210,12 @@ async def upload_document(
             code="INVALID_DOCUMENT_NAME",
             message="Document file name is invalid",
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        ) from error
+    except IngestionQueueUnavailableError as error:
+        raise AppError(
+            code="INGESTION_QUEUE_UNAVAILABLE",
+            message="Document processing is temporarily unavailable",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         ) from error
     if upload.registration.deduplicated:
         response.status_code = status.HTTP_200_OK
@@ -233,3 +263,41 @@ async def list_document_versions(
         items=[_item(item) for item in page.items],
         next_cursor=page.next_cursor,
     )
+
+
+@router.post(
+    "/{version_id}/retry",
+    response_model=IngestionRetryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
+async def retry_document_ingestion(
+    knowledge_base_id: UUID,
+    version_id: UUID,
+    coordinator: Annotated[DocumentIngestionCoordinator, Depends(get_ingestion_coordinator)],
+) -> IngestionRetryResponse:
+    try:
+        result = await coordinator.retry(knowledge_base_id, version_id)
+    except DocumentVersionNotFoundError as error:
+        raise AppError(
+            code="DOCUMENT_VERSION_NOT_FOUND",
+            message="Document version not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        ) from error
+    except IngestionNotRetryableError as error:
+        raise AppError(
+            code="INGESTION_NOT_RETRYABLE",
+            message="This ingestion run cannot be retried",
+            status_code=status.HTTP_409_CONFLICT,
+        ) from error
+    except IngestionQueueUnavailableError as error:
+        raise AppError(
+            code="INGESTION_QUEUE_UNAVAILABLE",
+            message="Document processing is temporarily unavailable",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from error
+    return IngestionRetryResponse(version_id=version_id, **result.__dict__)

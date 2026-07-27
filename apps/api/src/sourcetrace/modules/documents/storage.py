@@ -24,6 +24,12 @@ class LocalDocumentStorage:
         await asyncio.to_thread(self._store_sync, storage_key, content)
         return storage_key
 
+    def source_path(self, storage_key: str) -> Path:
+        candidate = self._root.joinpath(*storage_key.split("/")).resolve()
+        if self._root not in candidate.parents:
+            raise ValueError("document storage key escapes the configured root")
+        return candidate
+
     async def stage_knowledge_base_deletion(
         self,
         knowledge_base_id: UUID,

@@ -5,6 +5,7 @@ export type DocumentVersion = components["schemas"]["DocumentVersionItem"];
 export type DocumentUpload = components["schemas"]["DocumentUploadResponse"];
 export type DocumentVersionPage =
   components["schemas"]["DocumentVersionListResponse"];
+export type IngestionRetry = components["schemas"]["IngestionRetryResponse"];
 
 export async function listDocumentVersions(
   knowledgeBaseId: string,
@@ -38,6 +39,27 @@ export async function uploadDocument(
         const form = new FormData();
         form.append("file", file);
         return form;
+      },
+    },
+  );
+  if (error) {
+    throw toApiClientError(error);
+  }
+  return data;
+}
+
+export async function retryDocumentIngestion(
+  knowledgeBaseId: string,
+  versionId: string,
+): Promise<IngestionRetry> {
+  const { data, error } = await apiClient.POST(
+    "/api/v1/knowledge-bases/{knowledge_base_id}/documents/{version_id}/retry",
+    {
+      params: {
+        path: {
+          knowledge_base_id: knowledgeBaseId,
+          version_id: versionId,
+        },
       },
     },
   );

@@ -1,11 +1,12 @@
 from datetime import datetime
+from hashlib import blake2b
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
-from sourcetrace.modules.documents.models import Document, DocumentVersion
+from sourcetrace.modules.documents.models import Chunk, Document, DocumentVersion, IngestionRun
 
 
 class DocumentWriteConflictError(Exception):
@@ -31,6 +32,36 @@ def _is_concurrent_write(error: IntegrityError) -> bool:
 class DocumentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._ingestion_locks: dict[UUID, tuple[AsyncConnection, int]] = {}
+
+    async def try_acquire_ingestion_lock(self, version_id: UUID) -> bool:
+        bind = self._session.bind
+        if isinstance(bind, AsyncConnection):
+            engine = bind.engine
+        elif isinstance(bind, AsyncEngine):
+            engine = bind
+        else:
+            raise RuntimeError("document repository requires an async database engine")
+        connection = await engine.connect()
+        key = int.from_bytes(blake2b(version_id.bytes, digest_size=8).digest(), signed=True)
+        acquired = bool(
+            await connection.scalar(select(func.pg_try_advisory_lock(key)))
+        )
+        if not acquired:
+            await connection.close()
+            return False
+        self._ingestion_locks[version_id] = (connection, key)
+        return True
+
+    async def release_ingestion_lock(self, version_id: UUID) -> None:
+        held = self._ingestion_locks.pop(version_id, None)
+        if held is None:
+            return
+        connection, key = held
+        try:
+            await connection.scalar(select(func.pg_advisory_unlock(key)))
+        finally:
+            await connection.close()
 
     async def create_document(self, knowledge_base_id: UUID, name: str) -> Document:
         document = Document(knowledge_base_id=knowledge_base_id, name=name)
@@ -113,6 +144,77 @@ class DocumentRepository:
     async def get_version(self, version_id: UUID) -> DocumentVersion | None:
         statement = select(DocumentVersion).where(DocumentVersion.id == version_id)
         return await self._session.scalar(statement)
+
+    async def create_ingestion_run(
+        self,
+        document_version_id: UUID,
+        *,
+        parser_version: str,
+        tokenizer: str,
+        chunk_size: int,
+        chunk_overlap: int,
+        chunking_config_version: str,
+    ) -> IngestionRun:
+        latest_number = await self._session.scalar(
+            select(IngestionRun.run_number)
+            .where(IngestionRun.document_version_id == document_version_id)
+            .order_by(IngestionRun.run_number.desc())
+            .limit(1)
+        )
+        run = IngestionRun(
+            document_version_id=document_version_id,
+            run_number=1 if latest_number is None else latest_number + 1,
+            parser_version=parser_version,
+            tokenizer=tokenizer,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            chunking_config_version=chunking_config_version,
+        )
+        self._session.add(run)
+        await self._session.flush()
+        await self._session.refresh(run)
+        return run
+
+    async def get_latest_ingestion_run(
+        self,
+        document_version_id: UUID,
+    ) -> IngestionRun | None:
+        statement = (
+            select(IngestionRun)
+            .where(IngestionRun.document_version_id == document_version_id)
+            .order_by(IngestionRun.run_number.desc())
+            .limit(1)
+        )
+        return await self._session.scalar(statement)
+
+    async def create_chunks(self, chunks: list[Chunk]) -> None:
+        self._session.add_all(chunks)
+        await self._session.flush()
+
+    async def list_chunks(self, document_version_id: UUID) -> list[Chunk]:
+        result = await self._session.scalars(
+            select(Chunk)
+            .where(Chunk.document_version_id == document_version_id)
+            .order_by(Chunk.chunk_index)
+        )
+        return list(result)
+
+    async def get_latest_ingestion_runs(
+        self,
+        document_version_ids: list[UUID],
+    ) -> dict[UUID, IngestionRun]:
+        if not document_version_ids:
+            return {}
+        result = await self._session.scalars(
+            select(IngestionRun)
+            .where(IngestionRun.document_version_id.in_(document_version_ids))
+            .order_by(
+                IngestionRun.document_version_id,
+                IngestionRun.run_number.desc(),
+            )
+            .distinct(IngestionRun.document_version_id)
+        )
+        return {run.document_version_id: run for run in result}
 
     async def list_versions(
         self,

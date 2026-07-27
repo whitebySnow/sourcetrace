@@ -13,6 +13,13 @@ uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
 pnpm dev
 ```
 
+`pnpm dev` 会同时运行 API、Dramatiq 摄取 Worker 和 Web。只调试后台摄取时可运行
+`pnpm dev:worker`；Worker 与 API 共享应用代码，但作为独立进程消费 Redis 任务。
+
+摄取使用 Dramatiq 是因为项目需要 Redis 队列的确认、有限重试与退避语义，标准库不提供
+跨进程可靠队列。文本切分使用 tiktoken 是因为片段窗口必须按模型 token 计数并可重放，
+字符或空白切分无法提供等价边界。
+
 ## 日常流程
 
 1. 从一个可验证的用户行为定义改动，不按技术层批量铺空代码。

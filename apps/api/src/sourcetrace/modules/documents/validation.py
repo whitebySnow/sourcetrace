@@ -19,10 +19,6 @@ class PdfPageLimitExceededError(ValueError):
     pass
 
 
-class PdfTextNotFoundError(ValueError):
-    pass
-
-
 class PypdfDocumentValidator:
     def __init__(self, *, max_pages: int) -> None:
         self._max_pages = max_pages
@@ -39,11 +35,10 @@ class PypdfDocumentValidator:
             page_count = len(reader.pages)
             if page_count > self._max_pages:
                 raise PdfPageLimitExceededError
-            has_text = any((page.extract_text() or "").strip() for page in reader.pages)
-            if page_count == 0 or not has_text:
-                raise PdfTextNotFoundError
+            if page_count == 0:
+                raise CorruptPdfError
             return PdfMetadata(page_count=page_count)
-        except (EncryptedPdfError, PdfPageLimitExceededError, PdfTextNotFoundError):
+        except (EncryptedPdfError, PdfPageLimitExceededError, CorruptPdfError):
             raise
         except (PdfReadError, EOFError, ValueError, TypeError) as error:
             raise CorruptPdfError from error

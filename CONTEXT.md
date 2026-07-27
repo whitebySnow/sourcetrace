@@ -31,3 +31,11 @@ _Avoid_: Current file
 **Duplicate Content**:
 Content whose SHA-256 checksum already belongs to a document version in the same knowledge base, regardless of file name.
 _Avoid_: Duplicate file name
+
+**Ingestion Run**:
+A replayable processing attempt for one document version, including parser and chunking configuration, progress, retry count, and a sanitized outcome.
+_Avoid_: Redis job, background request
+
+**Chunk**:
+A stable, page-local token window derived from one document version and owned by an ingestion run.
+_Avoid_: Paragraph, vector

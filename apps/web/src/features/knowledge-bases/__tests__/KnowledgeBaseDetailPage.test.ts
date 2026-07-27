@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientError } from "@/shared/api/client";
 
@@ -11,12 +11,14 @@ const {
   deleteKnowledgeBase,
   listDocumentVersions,
   uploadDocument,
+  retryDocumentIngestion,
 } = vi.hoisted(() => ({
   push: vi.fn(),
   getKnowledgeBase: vi.fn(),
   deleteKnowledgeBase: vi.fn(),
   listDocumentVersions: vi.fn(),
   uploadDocument: vi.fn(),
+  retryDocumentIngestion: vi.fn(),
 }));
 
 vi.mock("vue-router", () => ({
@@ -32,11 +34,12 @@ vi.mock("../api/knowledgeBases", () => ({
 vi.mock("@/features/documents/api/documents", () => ({
   listDocumentVersions,
   uploadDocument,
+  retryDocumentIngestion,
 }));
 
 describe("KnowledgeBaseDetailPage", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     getKnowledgeBase.mockResolvedValue({
       id: "4a43e866-5694-4d4c-955d-69d1a58a2a17",
       name: "Agent 工程资料",
@@ -44,6 +47,142 @@ describe("KnowledgeBaseDetailPage", () => {
       updated_at: "2026-07-25T08:00:00Z",
     });
     listDocumentVersions.mockResolvedValue({ items: [], next_cursor: null });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("polls active ingestion every two seconds and stops at a terminal state", async () => {
+    vi.useFakeTimers();
+    const pending = {
+      document_id: "2d26f860-9374-4f86-b5c7-821355328cbc",
+      version_id: "006871ac-1c11-4854-ae6e-084a67cac73a",
+      name: "processing.pdf",
+      version_number: 1,
+      checksum_sha256: "c".repeat(64),
+      file_size_bytes: 1024,
+      page_count: 2,
+      status: "processing",
+      stage: "parsing",
+      attempt_count: 1,
+      retryable: false,
+      failure_code: null,
+      failure_message: null,
+      created_at: "2026-07-27T08:00:00Z",
+    };
+    listDocumentVersions
+      .mockResolvedValueOnce({ items: [pending], next_cursor: null })
+      .mockResolvedValueOnce({
+        items: [{ ...pending, status: "chunked", stage: "chunked" }],
+        next_cursor: null,
+      });
+    mount(KnowledgeBaseDetailPage);
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(listDocumentVersions).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await flushPromises();
+    expect(listDocumentVersions).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(listDocumentVersions).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers manual retry only for recoverable failures", async () => {
+    const failed = {
+      document_id: "2d26f860-9374-4f86-b5c7-821355328cbc",
+      version_id: "006871ac-1c11-4854-ae6e-084a67cac73a",
+      name: "failed.pdf",
+      version_number: 1,
+      checksum_sha256: "d".repeat(64),
+      file_size_bytes: 1024,
+      page_count: 2,
+      status: "failed",
+      stage: "failed",
+      attempt_count: 3,
+      retryable: true,
+      failure_code: "STORAGE_UNAVAILABLE",
+      failure_message: "Storage is temporarily unavailable",
+      created_at: "2026-07-27T08:00:00Z",
+    };
+    listDocumentVersions.mockResolvedValue({
+      items: [failed],
+      next_cursor: null,
+    });
+    retryDocumentIngestion.mockResolvedValue({
+      version_id: failed.version_id,
+      status: "pending",
+      stage: "queued",
+      attempt_count: 0,
+      retryable: false,
+      failure_code: null,
+    });
+    const wrapper = mount(KnowledgeBaseDetailPage);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Storage is temporarily unavailable");
+    await wrapper.get('[data-test="retry-ingestion"]').trigger("click");
+    await flushPromises();
+
+    expect(retryDocumentIngestion).toHaveBeenCalledWith(
+      "4a43e866-5694-4d4c-955d-69d1a58a2a17",
+      failed.version_id,
+    );
+    expect(wrapper.text()).toContain("待处理");
+  });
+
+  it("polls active documents loaded from later pages until they are terminal", async () => {
+    vi.useFakeTimers();
+    const base = {
+      document_id: "2d26f860-9374-4f86-b5c7-821355328cbc",
+      version_id: "006871ac-1c11-4854-ae6e-084a67cac73a",
+      name: "older.pdf",
+      version_number: 1,
+      checksum_sha256: "e".repeat(64),
+      file_size_bytes: 1024,
+      page_count: 2,
+      attempt_count: 1,
+      retryable: false,
+      failure_code: null,
+      failure_message: null,
+      created_at: "2026-07-27T08:00:00Z",
+    };
+    const recent = {
+      ...base,
+      version_id: "106871ac-1c11-4854-ae6e-084a67cac73a",
+      name: "recent.pdf",
+      status: "chunked",
+      stage: "chunked",
+    };
+    const active = { ...base, status: "processing", stage: "parsing" };
+    listDocumentVersions
+      .mockResolvedValueOnce({ items: [recent], next_cursor: "cursor-2" })
+      .mockResolvedValueOnce({ items: [active], next_cursor: null })
+      .mockResolvedValueOnce({ items: [recent], next_cursor: "cursor-2" })
+      .mockResolvedValueOnce({
+        items: [{ ...active, status: "chunked", stage: "chunked" }],
+        next_cursor: null,
+      });
+    const wrapper = mount(KnowledgeBaseDetailPage);
+    await flushPromises();
+    const loadMore = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("加载更多"));
+    expect(loadMore).toBeDefined();
+    await loadMore!.trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    expect(listDocumentVersions).toHaveBeenNthCalledWith(
+      4,
+      "4a43e866-5694-4d4c-955d-69d1a58a2a17",
+      "cursor-2",
+    );
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(listDocumentVersions).toHaveBeenCalledTimes(4);
   });
 
   it("requires confirmation before permanently deleting", async () => {
