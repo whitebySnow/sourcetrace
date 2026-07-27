@@ -119,9 +119,15 @@ def _upload_response(upload: DocumentUpload, request_id: str) -> DocumentUploadR
             "description": "Exact duplicate resolved to the existing document version",
         },
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_413_CONTENT_TOO_LARGE: {"model": ErrorResponse},
+        status.HTTP_413_CONTENT_TOO_LARGE: {
+            "model": ErrorResponse,
+            "description": "Content Too Large",
+        },
         status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: {"model": ErrorResponse},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": "Unprocessable Content",
+        },
     },
 )
 async def upload_document(
@@ -191,7 +197,10 @@ async def upload_document(
     response_model=DocumentVersionListResponse,
     responses={
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": "Unprocessable Content",
+        },
     },
 )
 async def list_document_versions(
