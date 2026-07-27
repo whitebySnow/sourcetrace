@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     upload_dir: Path = Path("data/uploads")
     max_upload_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
+    max_pdf_pages: int = Field(default=500, ge=1)
 
     llm_provider: str = "mock"
     llm_model: str = "mock-chat"

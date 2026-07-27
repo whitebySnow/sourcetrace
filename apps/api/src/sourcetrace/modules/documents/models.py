@@ -3,10 +3,12 @@ from uuid import UUID
 
 from sqlalchemy import (
     DDL,
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -49,6 +51,14 @@ class DocumentVersion(UUIDPrimaryKeyMixin, Base):
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(24),
+        server_default="pending",
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -73,6 +83,20 @@ class DocumentVersion(UUIDPrimaryKeyMixin, Base):
             "checksum_sha256 ~ '^[0-9a-f]{64}$'",
             name="document_version_checksum_sha256",
         ),
+        CheckConstraint(
+            "file_size_bytes IS NULL OR file_size_bytes > 0",
+            name="document_version_file_size_positive",
+        ),
+        CheckConstraint(
+            "page_count IS NULL OR page_count > 0",
+            name="document_version_page_count_positive",
+        ),
+        Index(
+            "ix_document_versions_knowledge_base_created_id",
+            "knowledge_base_id",
+            "created_at",
+            "id",
+        ),
     )
 
 
@@ -89,6 +113,9 @@ event.listen(
                OR NEW.knowledge_base_id IS DISTINCT FROM OLD.knowledge_base_id
                OR NEW.version_number IS DISTINCT FROM OLD.version_number
                OR NEW.checksum_sha256 IS DISTINCT FROM OLD.checksum_sha256
+               OR NEW.storage_key IS DISTINCT FROM OLD.storage_key
+               OR NEW.file_size_bytes IS DISTINCT FROM OLD.file_size_bytes
+               OR NEW.page_count IS DISTINCT FROM OLD.page_count
                OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
                 RAISE EXCEPTION 'document version identity is immutable'
                     USING ERRCODE = 'check_violation';

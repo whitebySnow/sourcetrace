@@ -3,12 +3,21 @@ import {
   AlertTriangle,
   ArrowLeft,
   BookOpen,
+  CheckCircle2,
   FileText,
   LoaderCircle,
   Trash2,
+  Upload,
 } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+
+import {
+  type DocumentVersion,
+  listDocumentVersions,
+  uploadDocument,
+} from "@/features/documents/api/documents";
+import { ApiClientError } from "@/shared/api/client";
 
 import {
   deleteKnowledgeBase,
@@ -23,9 +32,19 @@ const loading = ref(true);
 const deleting = ref(false);
 const showDelete = ref(false);
 const errorMessage = ref("");
+const successMessage = ref("");
+const documents = ref<DocumentVersion[]>([]);
+const nextCursor = ref<string | null>();
+const selectedFile = ref<File>();
+const fileInput = ref<HTMLInputElement>();
+const uploading = ref(false);
+const loadingMore = ref(false);
 const id = String(route.params.id);
 
 function errorText(error: unknown, fallback: string) {
+  if (error instanceof ApiClientError && error.requestId) {
+    return `${error.message}（请求 ID：${error.requestId}）`;
+  }
   return error instanceof Error ? error.message : fallback;
 }
 
@@ -39,13 +58,92 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "待处理",
+    processing: "处理中",
+    completed: "已完成",
+    failed: "失败",
+  };
+  return labels[status] ?? status;
+}
+
 async function load() {
   try {
     knowledgeBase.value = await getKnowledgeBase(id);
+    const page = await listDocumentVersions(id);
+    documents.value = page.items;
+    nextCursor.value = page.next_cursor;
   } catch (error) {
     errorMessage.value = errorText(error, "无法加载知识库。");
   } finally {
     loading.value = false;
+  }
+}
+
+function selectFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  selectedFile.value = input.files?.[0];
+  successMessage.value = "";
+}
+
+async function submitUpload() {
+  if (!selectedFile.value) return;
+  uploading.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const result = await uploadDocument(id, selectedFile.value);
+    const item: DocumentVersion = {
+      document_id: result.document_id,
+      version_id: result.version_id,
+      name: result.name,
+      version_number: result.version_number,
+      checksum_sha256: result.checksum_sha256,
+      file_size_bytes: result.file_size_bytes,
+      page_count: result.page_count,
+      status: result.status,
+      created_at: result.created_at,
+    };
+    const existingIndex = documents.value.findIndex(
+      (document) => document.version_id === item.version_id,
+    );
+    if (existingIndex === -1) {
+      documents.value.unshift(item);
+    } else {
+      documents.value[existingIndex] = item;
+    }
+    successMessage.value = result.deduplicated
+      ? "相同内容已存在，已显示原版本。"
+      : "文档已登记，等待处理。";
+    selectedFile.value = undefined;
+    if (fileInput.value) fileInput.value.value = "";
+  } catch (error) {
+    errorMessage.value = errorText(error, "无法上传文档。");
+  } finally {
+    uploading.value = false;
+  }
+}
+
+async function loadMore() {
+  if (!nextCursor.value) return;
+  loadingMore.value = true;
+  errorMessage.value = "";
+  try {
+    const page = await listDocumentVersions(id, nextCursor.value);
+    documents.value.push(...page.items);
+    nextCursor.value = page.next_cursor;
+  } catch (error) {
+    errorMessage.value = errorText(error, "无法加载更多文档。");
+  } finally {
+    loadingMore.value = false;
   }
 }
 
@@ -115,6 +213,10 @@ onMounted(load);
         <AlertTriangle :size="18" aria-hidden="true" />
         <span>{{ errorMessage }}</span>
       </div>
+      <div v-if="successMessage" class="message success-message" role="status">
+        <CheckCircle2 :size="18" aria-hidden="true" />
+        <span>{{ successMessage }}</span>
+      </div>
 
       <section class="documents" aria-labelledby="documents-title">
         <div class="section-heading">
@@ -122,11 +224,78 @@ onMounted(load);
             <h2 id="documents-title">文档</h2>
             <p>该知识库中的证据来源。</p>
           </div>
+          <div class="upload-controls">
+            <label class="file-picker">
+              <FileText :size="16" aria-hidden="true" />
+              <span>{{ selectedFile?.name ?? "选择 PDF" }}</span>
+              <input
+                ref="fileInput"
+                data-test="pdf-input"
+                type="file"
+                accept=".pdf,application/pdf"
+                @change="selectFile"
+              />
+            </label>
+            <button
+              class="upload-button"
+              data-test="upload-document"
+              type="button"
+              :disabled="!selectedFile || uploading"
+              @click="submitUpload"
+            >
+              <LoaderCircle
+                v-if="uploading"
+                :size="16"
+                class="spinning"
+                aria-hidden="true"
+              />
+              <Upload v-else :size="16" aria-hidden="true" />
+              <span>{{ uploading ? "上传中..." : "上传" }}</span>
+            </button>
+          </div>
         </div>
-        <div class="empty-documents">
+        <div v-if="documents.length === 0" class="empty-documents">
           <FileText :size="27" aria-hidden="true" />
           <strong>尚未添加文档</strong>
-          <span>文档上传与处理将在下一阶段实现。</span>
+          <span>选择 PDF 添加证据来源。</span>
+        </div>
+        <div v-else class="document-list">
+          <article
+            v-for="document in documents"
+            :key="document.version_id"
+            class="document-row"
+          >
+            <span class="document-icon">
+              <FileText :size="19" aria-hidden="true" />
+            </span>
+            <div class="document-main">
+              <strong>{{ document.name }}</strong>
+              <span>
+                版本 {{ document.version_number }} ·
+                {{ document.page_count }} 页 ·
+                {{ formatFileSize(document.file_size_bytes) }}
+              </span>
+            </div>
+            <span class="status-badge">{{ statusLabel(document.status) }}</span>
+            <time :datetime="document.created_at">
+              {{ formatDate(document.created_at) }}
+            </time>
+          </article>
+          <button
+            v-if="nextCursor"
+            class="load-more-button"
+            type="button"
+            :disabled="loadingMore"
+            @click="loadMore"
+          >
+            <LoaderCircle
+              v-if="loadingMore"
+              :size="16"
+              class="spinning"
+              aria-hidden="true"
+            />
+            <span>{{ loadingMore ? "加载中..." : "加载更多" }}</span>
+          </button>
         </div>
       </section>
     </template>
@@ -233,6 +402,8 @@ h1 {
   line-height: 1.55;
 }
 .delete-button,
+.upload-button,
+.load-more-button,
 .secondary-button,
 .danger-button {
   display: inline-flex;
@@ -252,6 +423,20 @@ h1 {
 }
 .delete-button:hover {
   background: #fff3f2;
+}
+.upload-button {
+  color: #fff;
+  background: #1f6f4a;
+  border: 1px solid #1f6f4a;
+}
+.upload-button:hover:not(:disabled) {
+  background: #195d3e;
+}
+.load-more-button {
+  margin: 16px auto 0;
+  color: #315d47;
+  background: #fff;
+  border: 1px solid #b9c9bf;
 }
 .secondary-button {
   color: #39443d;
@@ -284,10 +469,20 @@ button:disabled {
   background: #fff7f6;
   border-color: #eac7c3;
 }
+.success-message {
+  margin-bottom: 18px;
+  color: #23623f;
+  background: #f2faf5;
+  border-color: #bddac8;
+}
 .documents {
   border-top: 1px solid #dfe5e0;
 }
 .section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
   padding: 24px 0 18px;
 }
 .section-heading h2 {
@@ -312,6 +507,92 @@ button:disabled {
 }
 .empty-documents span {
   font-size: 14px;
+}
+.upload-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.file-picker {
+  display: flex;
+  width: min(260px, 36vw);
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: #414c45;
+  background: #fff;
+  border: 1px solid #cbd5cd;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.file-picker span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+.file-picker:focus-within {
+  outline: 2px solid #4a8b69;
+  outline-offset: 2px;
+}
+.document-list {
+  border-top: 1px solid #dfe5e0;
+}
+.document-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto 150px;
+  align-items: center;
+  gap: 12px;
+  min-height: 74px;
+  padding: 12px 4px;
+  border-bottom: 1px solid #e5eae6;
+}
+.document-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #416250;
+  background: #edf3ef;
+  border-radius: 6px;
+}
+.document-main {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+.document-main strong {
+  overflow: hidden;
+  color: #26332b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-main span,
+.document-row time {
+  color: #6b756e;
+  font-size: 13px;
+}
+.document-row time {
+  text-align: right;
+}
+.status-badge {
+  padding: 4px 8px;
+  color: #7a5716;
+  background: #fff7df;
+  border: 1px solid #ead79d;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
 }
 .dialog-backdrop {
   position: fixed;
@@ -365,6 +646,25 @@ button:disabled {
   .heading-icon {
     width: 44px;
     height: 44px;
+  }
+  .section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .upload-controls {
+    width: 100%;
+  }
+  .file-picker {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+  .document-row {
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+  }
+  .document-row time {
+    grid-column: 2 / -1;
+    text-align: left;
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,12 +87,18 @@ class DocumentRepository:
         knowledge_base_id: UUID,
         version_number: int,
         checksum_sha256: str,
+        storage_key: str | None = None,
+        file_size_bytes: int | None = None,
+        page_count: int | None = None,
     ) -> DocumentVersion:
         version = DocumentVersion(
             document_id=document_id,
             knowledge_base_id=knowledge_base_id,
             version_number=version_number,
             checksum_sha256=checksum_sha256,
+            storage_key=storage_key,
+            file_size_bytes=file_size_bytes,
+            page_count=page_count,
         )
         self._session.add(version)
         try:
@@ -106,6 +113,36 @@ class DocumentRepository:
     async def get_version(self, version_id: UUID) -> DocumentVersion | None:
         statement = select(DocumentVersion).where(DocumentVersion.id == version_id)
         return await self._session.scalar(statement)
+
+    async def list_versions(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        limit: int,
+        after: tuple[datetime, UUID] | None,
+    ) -> list[tuple[Document, DocumentVersion]]:
+        statement = (
+            select(Document, DocumentVersion)
+            .join(DocumentVersion, DocumentVersion.document_id == Document.id)
+            .where(Document.knowledge_base_id == knowledge_base_id)
+        )
+        if after is not None:
+            created_at, version_id = after
+            statement = statement.where(
+                or_(
+                    DocumentVersion.created_at < created_at,
+                    and_(
+                        DocumentVersion.created_at == created_at,
+                        DocumentVersion.id < version_id,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            DocumentVersion.created_at.desc(),
+            DocumentVersion.id.desc(),
+        ).limit(limit)
+        rows = (await self._session.execute(statement)).all()
+        return [(row.Document, row.DocumentVersion) for row in rows]
 
     async def commit(self) -> None:
         await self._session.commit()
