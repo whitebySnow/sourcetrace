@@ -16,6 +16,14 @@ _Avoid_: File, upload
 An immutable snapshot of a document's content, identified by its SHA-256 checksum and sequence number.
 _Avoid_: Revision, copy
 
+**Source File**:
+The validated PDF bytes stored for a document version and addressed by a storage key outside the database.
+_Avoid_: Database blob, parsed text
+
+**Pending Version**:
+An accepted document version whose source file is stored but whose asynchronous ingestion has not completed.
+_Avoid_: Uploaded document, indexed version
+
 **Latest Version**:
 The document version with the greatest sequence number. Searchability is a separate lifecycle decision.
 _Avoid_: Current file

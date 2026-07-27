@@ -2,11 +2,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from sourcetrace.api.dependencies import get_knowledge_base_service
 from sourcetrace.core.errors import AppError, ErrorResponse
-from sourcetrace.db.session import get_session
-from sourcetrace.modules.knowledge_bases.repository import KnowledgeBaseRepository
 from sourcetrace.modules.knowledge_bases.schemas import (
     KnowledgeBaseCreate,
     KnowledgeBaseListResponse,
@@ -20,12 +18,6 @@ from sourcetrace.modules.knowledge_bases.service import (
 )
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
-
-
-def get_knowledge_base_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> KnowledgeBaseService:
-    return KnowledgeBaseService(KnowledgeBaseRepository(session))
 
 
 ServiceDependency = Annotated[KnowledgeBaseService, Depends(get_knowledge_base_service)]

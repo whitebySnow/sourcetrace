@@ -4,12 +4,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sourcetrace.api.recovery import reconcile_staged_document_deletions
 from sourcetrace.api.router import api_router
 from sourcetrace.core.config import get_settings
 from sourcetrace.core.errors import install_exception_handlers
 from sourcetrace.core.logging import configure_logging, get_logger
 from sourcetrace.core.middleware import RequestContextMiddleware
-from sourcetrace.db.session import close_database
+from sourcetrace.db.session import close_database, session_factory
+from sourcetrace.modules.documents.storage import LocalDocumentStorage
+from sourcetrace.modules.knowledge_bases.repository import KnowledgeBaseRepository
 
 
 @asynccontextmanager
@@ -17,6 +20,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
     logger = get_logger(__name__)
+    try:
+        async with session_factory() as session:
+            recovery = await reconcile_staged_document_deletions(
+                LocalDocumentStorage(settings.upload_dir),
+                KnowledgeBaseRepository(session),
+            )
+        if recovery.restored or recovery.finalized or recovery.failed:
+            logger.info(
+                "staged_document_cleanups_reconciled",
+                restored=recovery.restored,
+                finalized=recovery.finalized,
+                failed=recovery.failed,
+            )
+    except Exception:
+        logger.exception("staged_document_cleanup_reconciliation_deferred")
     logger.info("application_started", environment=settings.app_env)
     yield
     await close_database()
