@@ -116,6 +116,8 @@ class AnswerHistoryItem(BaseModel):
     llm_model: str
     prompt_version: str
     retrieval_version: str
+    retrieval_query: str
+    query_rewrite_version: str
     workflow_version: str
     created_at: datetime
     completed_at: datetime | None

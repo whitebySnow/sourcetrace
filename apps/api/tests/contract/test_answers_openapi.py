@@ -33,6 +33,10 @@ def test_answer_stream_history_and_source_are_exposed_in_openapi() -> None:
     assert cancellation["responses"]["200"]["content"]["application/json"][
         "schema"
     ]["$ref"] == "#/components/schemas/AnswerCancellationResponse"
+    history_required = set(
+        document["components"]["schemas"]["AnswerHistoryItem"]["required"]
+    )
+    assert {"retrieval_query", "query_rewrite_version"} <= history_required
     assert set(document["components"]["schemas"]["CitationResponse"]["required"]) >= {
         "id",
         "document_id",

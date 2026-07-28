@@ -80,6 +80,10 @@ uv run --project apps/api alembic -c apps/api/alembic.ini downgrade -1
 `LLM_API_KEY` 和 `LLM_MODEL` 后，API 进程直接请求供应商；回答模型权重不会下载到本机，
 也不会进入仓库或 Docker 镜像。本项目默认模型名仅是远程供应商路由标识。
 
+追问查询改写使用同一供应商，并由 `LLM_QUESTION_REWRITE_PROMPT_VERSION` 记录提示词版本。
+`ANSWER_CONTEXT_QUESTION_LIMIT` 限制可用于指代消解的近期用户问题数量；历史模型回答不会
+发送给改写器，也不会成为后续回答证据。
+
 可使用以下命令做最小连通性检查：
 
 ```powershell

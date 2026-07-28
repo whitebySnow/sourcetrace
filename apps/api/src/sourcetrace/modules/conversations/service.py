@@ -1,4 +1,5 @@
 from base64 import urlsafe_b64decode, urlsafe_b64encode
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -80,6 +81,13 @@ class ConversationRepositoryPort(Protocol):
         limit: int,
         after: tuple[datetime, UUID] | None,
     ) -> list[Question]: ...
+
+    async def list_recent_questions(
+        self,
+        conversation_id: UUID,
+        *,
+        limit: int,
+    ) -> Sequence[Question]: ...
 
     async def commit(self) -> None: ...
 
@@ -178,3 +186,16 @@ class ConversationService:
             _encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
         )
         return QuestionPage(items=items, next_cursor=next_cursor)
+
+    async def recent_questions(
+        self,
+        knowledge_base_id: UUID,
+        conversation_id: UUID,
+        *,
+        limit: int,
+    ) -> Sequence[Question]:
+        await self.get(knowledge_base_id, conversation_id)
+        return await self._repository.list_recent_questions(
+            conversation_id,
+            limit=limit,
+        )

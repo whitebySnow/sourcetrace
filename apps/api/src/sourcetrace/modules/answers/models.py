@@ -59,6 +59,8 @@ class AnswerRun(UUIDPrimaryKeyMixin, Base):
     llm_model: Mapped[str] = mapped_column(String(255), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     retrieval_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    retrieval_query: Mapped[str] = mapped_column(Text, nullable=False)
+    query_rewrite_version: Mapped[str] = mapped_column(String(64), nullable=False)
     workflow_version: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

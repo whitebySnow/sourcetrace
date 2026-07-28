@@ -26,6 +26,7 @@ class AnswerRepository:
         llm_model: str,
         prompt_version: str,
         retrieval_version: str,
+        query_rewrite_version: str,
         workflow_version: str,
     ) -> AnswerRun:
         run = AnswerRun(
@@ -37,6 +38,8 @@ class AnswerRepository:
             llm_model=llm_model,
             prompt_version=prompt_version,
             retrieval_version=retrieval_version,
+            retrieval_query=question.content,
+            query_rewrite_version=query_rewrite_version,
             workflow_version=workflow_version,
         )
         self._session.add(run)
@@ -68,6 +71,15 @@ class AnswerRepository:
             update(AnswerRun)
             .where(AnswerRun.id == run_id, AnswerRun.status == "pending")
             .values(status="running")
+            .returning(AnswerRun.id)
+        )
+        return updated_id is not None
+
+    async def set_retrieval_query(self, run_id: UUID, query: str) -> bool:
+        updated_id = await self._session.scalar(
+            update(AnswerRun)
+            .where(AnswerRun.id == run_id, AnswerRun.status == "running")
+            .values(retrieval_query=query)
             .returning(AnswerRun.id)
         )
         return updated_id is not None

@@ -23,5 +23,14 @@ class AnswerGenerator(Protocol):
     ) -> AsyncIterator[str]: ...
 
 
+class QuestionRewriter(Protocol):
+    async def rewrite(
+        self,
+        *,
+        question: str,
+        recent_questions: Sequence[str],
+    ) -> str: ...
+
+
 class EmbeddingProvider(Protocol):
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]: ...
