@@ -33,3 +33,7 @@ data/uploads/*
 data/postgres/
 data/redis/
 logs/
+
+# Local browser verification
+.playwright-cli/
+output/playwright/

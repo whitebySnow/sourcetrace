@@ -9,6 +9,8 @@ const {
   push,
   getKnowledgeBase,
   deleteKnowledgeBase,
+  createConversation,
+  listConversations,
   listDocumentVersions,
   uploadDocument,
   retryDocumentIngestion,
@@ -16,6 +18,8 @@ const {
   push: vi.fn(),
   getKnowledgeBase: vi.fn(),
   deleteKnowledgeBase: vi.fn(),
+  createConversation: vi.fn(),
+  listConversations: vi.fn(),
   listDocumentVersions: vi.fn(),
   uploadDocument: vi.fn(),
   retryDocumentIngestion: vi.fn(),
@@ -37,6 +41,11 @@ vi.mock("@/features/documents/api/documents", () => ({
   retryDocumentIngestion,
 }));
 
+vi.mock("@/features/conversations/api/conversations", () => ({
+  createConversation,
+  listConversations,
+}));
+
 describe("KnowledgeBaseDetailPage", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -46,6 +55,7 @@ describe("KnowledgeBaseDetailPage", () => {
       created_at: "2026-07-25T08:00:00Z",
       updated_at: "2026-07-25T08:00:00Z",
     });
+    listConversations.mockResolvedValue({ items: [], next_cursor: null });
     listDocumentVersions.mockResolvedValue({ items: [], next_cursor: null });
   });
 
