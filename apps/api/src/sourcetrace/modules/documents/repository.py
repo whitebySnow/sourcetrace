@@ -145,6 +145,26 @@ class DocumentRepository:
         statement = select(DocumentVersion).where(DocumentVersion.id == version_id)
         return await self._session.scalar(statement)
 
+    async def get_source(
+        self,
+        knowledge_base_id: UUID,
+        document_id: UUID,
+        version_id: UUID,
+    ) -> tuple[Document, DocumentVersion] | None:
+        row = (
+            await self._session.execute(
+                select(Document, DocumentVersion)
+                .join(DocumentVersion, DocumentVersion.document_id == Document.id)
+                .where(
+                    Document.knowledge_base_id == knowledge_base_id,
+                    Document.id == document_id,
+                    DocumentVersion.id == version_id,
+                    DocumentVersion.knowledge_base_id == knowledge_base_id,
+                )
+            )
+        ).one_or_none()
+        return (row.Document, row.DocumentVersion) if row is not None else None
+
     async def create_ingestion_run(
         self,
         document_version_id: UUID,

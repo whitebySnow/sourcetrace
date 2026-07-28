@@ -74,6 +74,21 @@ uv run --project apps/api alembic -c apps/api/alembic.ini downgrade -1
 直接使用底层 Transformers 需要自行重复这些模型特定推理规则，更容易产生与查询侧不一致的
 向量。适配器仍显式请求归一化并校验维度与范数，避免第三方模型输出静默污染 pgvector。
 
+## 回答模型供应商
+
+回答生成通过 OpenAI 兼容的远程 Chat Completions API 接入。配置 `LLM_BASE_URL`、
+`LLM_API_KEY` 和 `LLM_MODEL` 后，API 进程直接请求供应商；回答模型权重不会下载到本机，
+也不会进入仓库或 Docker 镜像。本项目默认模型名仅是远程供应商路由标识。
+
+可使用以下命令做最小连通性检查：
+
+```powershell
+uv run --project apps/api python apps/api/scripts/probe_llm_provider.py
+```
+
+探针只输出模型名、流式分片数和字符数，不输出密钥、提示词或回答正文。单元、集成和契约
+测试仍必须使用 fake 或 HTTP mock，不依赖真实供应商，也不产生模型费用。
+
 自动生成后必须审阅 SQL。外键明确 `ON DELETE` 行为，查询、连接和排序字段按实际访问
 模式建索引。不要在应用启动时隐式建表。
 

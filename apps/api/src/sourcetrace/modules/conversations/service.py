@@ -136,14 +136,26 @@ class ConversationService:
         conversation_id: UUID,
         content: str,
     ) -> Question:
-        await self.get(knowledge_base_id, conversation_id)
-        question = await self._repository.create_question(
-            conversation_id,
+        question = await self.stage_question(
             knowledge_base_id,
+            conversation_id,
             content,
         )
         await self._repository.commit()
         return question
+
+    async def stage_question(
+        self,
+        knowledge_base_id: UUID,
+        conversation_id: UUID,
+        content: str,
+    ) -> Question:
+        await self.get(knowledge_base_id, conversation_id)
+        return await self._repository.create_question(
+            conversation_id,
+            knowledge_base_id,
+            content,
+        )
 
     async def list_questions(
         self,

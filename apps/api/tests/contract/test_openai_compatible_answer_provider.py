@@ -1,0 +1,142 @@
+import json
+from collections.abc import AsyncIterator
+
+import httpx
+import pytest
+
+from sourcetrace.rag.llm import (
+    LlmProviderError,
+    OpenAICompatibleAnswerGenerator,
+    OpenAICompatibleConfig,
+)
+from sourcetrace.rag.ports import RetrievalCandidate
+
+
+def _evidence() -> list[RetrievalCandidate]:
+    return [
+        RetrievalCandidate(
+            chunk_id="chunk-1",
+            content="BGE-M3 dense vectors are normalized before indexing.",
+            score=0.91,
+            citation_id="citation-1",
+        )
+    ]
+
+
+def _config() -> OpenAICompatibleConfig:
+    return OpenAICompatibleConfig(
+        base_url="https://gateway.example/v1",
+        api_key="test-secret",
+        model="gpt-5.6-luna",
+        timeout_seconds=30,
+        prompt_version="grounded-answer-v1",
+    )
+
+
+async def _collect(stream: AsyncIterator[str]) -> list[str]:
+    return [item async for item in stream]
+
+
+async def test_provider_streams_openai_chat_deltas_with_configured_model() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers["authorization"]
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Vectors "}}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"are normalized."}}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(
+                question="How are vectors stored?",
+                evidence=_evidence(),
+            )
+        )
+
+    assert deltas == ["Vectors ", "are normalized."]
+    assert captured["url"] == "https://gateway.example/v1/chat/completions"
+    assert captured["authorization"] == "Bearer test-secret"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["model"] == "gpt-5.6-luna"
+    assert payload["stream"] is True
+    assert "citation-1" in payload["messages"][0]["content"]
+    assert "BGE-M3 dense vectors" in payload["messages"][0]["content"]
+
+
+@pytest.mark.parametrize(
+    ("upstream", "expected_code"),
+    [("timeout", "LLM_TIMEOUT"), ("server_error", "LLM_PROVIDER_UNAVAILABLE")],
+)
+async def test_provider_maps_upstream_failures_without_leaking_details(
+    upstream: str,
+    expected_code: str,
+) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if upstream == "timeout":
+            raise httpx.ReadTimeout("private gateway timeout detail", request=request)
+        return httpx.Response(500, text="private upstream response")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(
+                provider.stream_answer(question="Question", evidence=_evidence())
+            )
+
+    assert error.value.code == expected_code
+    assert "private" not in str(error.value)
+
+
+async def test_provider_rejects_a_stream_that_ends_without_completion() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b'data: {"choices":[{"delta":{"content":"Partial"}}]}\n\n',
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(
+                provider.stream_answer(question="Question", evidence=_evidence())
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+async def test_provider_rejects_a_length_truncated_completion() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Partial"},'
+                b'"finish_reason":"length"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(
+                provider.stream_answer(question="Question", evidence=_evidence())
+            )
+
+    assert error.value.code == "LLM_INCOMPLETE_RESPONSE"
