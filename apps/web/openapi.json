@@ -1523,6 +1523,14 @@
             "type": "string",
             "title": "Retrieval Version"
           },
+          "retrieval_query": {
+            "type": "string",
+            "title": "Retrieval Query"
+          },
+          "query_rewrite_version": {
+            "type": "string",
+            "title": "Query Rewrite Version"
+          },
           "workflow_version": {
             "type": "string",
             "title": "Workflow Version"
@@ -1568,6 +1576,8 @@
           "llm_model",
           "prompt_version",
           "retrieval_version",
+          "retrieval_query",
+          "query_rewrite_version",
           "workflow_version",
           "created_at",
           "completed_at",

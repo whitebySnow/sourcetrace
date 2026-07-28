@@ -9,6 +9,7 @@ from sourcetrace.rag.llm import (
     LlmProviderError,
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleConfig,
+    OpenAICompatibleQuestionRewriter,
 )
 from sourcetrace.rag.ports import RetrievalCandidate
 
@@ -179,3 +180,68 @@ async def test_consumer_cancellation_closes_the_upstream_response_stream() -> No
         await response_stream.aclose()
 
     assert upstream.closed is True
+
+
+async def test_question_rewriter_uses_only_recent_user_questions() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "retrieval_query": (
+                                        "Why are BGE-M3 dense vectors normalized?"
+                                    )
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rewriter = OpenAICompatibleQuestionRewriter(_config(), client=client)
+
+        rewritten = await rewriter.rewrite(
+            question="Why is it normalized?",
+            recent_questions=[
+                "What is BGE-M3 dense retrieval?",
+                "How are its vectors stored?",
+            ],
+        )
+
+    assert rewritten == "Why are BGE-M3 dense vectors normalized?"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["stream"] is False
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    assert [message["role"] for message in messages] == ["system", "user"]
+    serialized = json.dumps(messages)
+    assert "What is BGE-M3 dense retrieval?" in serialized
+    assert "How are its vectors stored?" in serialized
+    assert "UNSUPPORTED PRIOR ANSWER" not in serialized
+
+
+async def test_question_rewriter_rejects_an_invalid_response_shape() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rewriter = OpenAICompatibleQuestionRewriter(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await rewriter.rewrite(
+                question="Why is it normalized?",
+                recent_questions=["How are BGE-M3 vectors stored?"],
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"

@@ -55,6 +55,33 @@ def _grounded_prompt(
     ]
 
 
+def _question_rewrite_prompt(
+    question: str,
+    recent_questions: Sequence[str],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Rewrite the current user question into a standalone retrieval query. "
+                "Use recent user questions only to resolve references. Do not answer the "
+                "question, add facts, or use outside knowledge. Keep the current question's "
+                "language. Return JSON with exactly one string field named retrieval_query."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "recent_user_questions": list(recent_questions),
+                    "current_question": question,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
 def _delta_content(payload: Any) -> str | None:
     if not isinstance(payload, dict):
         return None
@@ -147,6 +174,74 @@ class OpenAICompatibleAnswerGenerator:
                 )
         except LlmProviderError:
             raise
+        except httpx.TimeoutException as error:
+            raise LlmProviderError(
+                "LLM_TIMEOUT",
+                "Language model request timed out",
+            ) from error
+        except httpx.HTTPError as error:
+            raise LlmProviderError(
+                "LLM_PROVIDER_UNAVAILABLE",
+                "Language model is temporarily unavailable",
+            ) from error
+
+
+class OpenAICompatibleQuestionRewriter:
+    def __init__(
+        self,
+        config: OpenAICompatibleConfig,
+        *,
+        client: httpx.AsyncClient,
+    ) -> None:
+        self.config = config
+        self._client = client
+
+    async def rewrite(
+        self,
+        *,
+        question: str,
+        recent_questions: Sequence[str],
+    ) -> str:
+        url = f"{self.config.base_url.rstrip('/')}/chat/completions"
+        try:
+            response = await self._client.post(
+                url,
+                headers={"Authorization": f"Bearer {self.config.api_key}"},
+                json={
+                    "model": self.config.model,
+                    "messages": _question_rewrite_prompt(question, recent_questions),
+                    "stream": False,
+                },
+                timeout=self.config.timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError
+            choices = payload.get("choices")
+            if not isinstance(choices, list) or len(choices) != 1:
+                raise ValueError
+            choice = choices[0]
+            if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+                raise ValueError
+            message = choice.get("message")
+            if not isinstance(message, dict):
+                raise ValueError
+            content = message.get("content")
+            if not isinstance(content, str):
+                raise ValueError
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict) or set(parsed) != {"retrieval_query"}:
+                raise ValueError
+            query = parsed["retrieval_query"]
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError
+            return query.strip()
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            raise LlmProviderError(
+                "LLM_INVALID_RESPONSE",
+                "Language model returned an invalid response",
+            ) from error
         except httpx.TimeoutException as error:
             raise LlmProviderError(
                 "LLM_TIMEOUT",

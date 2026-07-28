@@ -29,6 +29,18 @@ class StagingConversationService:
         assert content == self.question.content
         return self.question
 
+    async def recent_questions(
+        self,
+        knowledge_base_id: UUID,
+        conversation_id: UUID,
+        *,
+        limit: int,
+    ) -> list[Question]:
+        assert knowledge_base_id == self.question.knowledge_base_id
+        assert conversation_id == self.question.conversation_id
+        assert limit == 4
+        return []
+
 
 class FailingAnswerRepository:
     def __init__(self) -> None:
@@ -42,11 +54,17 @@ class FailingAnswerRepository:
 
 
 class UnusedRetrievalService:
+    async def resolve_query(self, *, question: str, **kwargs: object) -> str:
+        return question
+
     async def search(self, **kwargs: object) -> list[object]:
         raise AssertionError("retrieval must not start")
 
 
 class ExplodingRetrievalService:
+    async def resolve_query(self, *, question: str, **kwargs: object) -> str:
+        return question
+
     async def search(self, **kwargs: object) -> list[object]:
         raise RuntimeError("unexpected retrieval failure")
 
@@ -80,6 +98,9 @@ class DisconnectRepository:
     async def mark_running(self, run_id: UUID) -> bool:
         return True
 
+    async def set_retrieval_query(self, run_id: UUID, query: str) -> bool:
+        return True
+
     async def cancel(self, run_id: UUID) -> bool:
         self.cancelled = True
         return True
@@ -110,10 +131,12 @@ async def test_question_is_not_committed_when_answer_run_creation_fails() -> Non
             llm_model="gpt-5.6-luna",
             prompt_version="grounded-answer-v1",
             retrieval_version="pgvector-cosine-v1",
+            query_rewrite_version="follow-up-query-v1",
             workflow_version="linear-grounded-v1",
         ),
         minimum_score=0.5,
         minimum_evidence=1,
+        context_question_limit=4,
     )
 
     with pytest.raises(RuntimeError, match="database rejected answer run"):
@@ -139,10 +162,12 @@ async def test_disconnecting_during_retrieval_cancels_the_run() -> None:
             llm_model="gpt-5.6-luna",
             prompt_version="grounded-answer-v1",
             retrieval_version="pgvector-cosine-v1",
+            query_rewrite_version="follow-up-query-v1",
             workflow_version="linear-grounded-v1",
         ),
         minimum_score=0.5,
         minimum_evidence=1,
+        context_question_limit=4,
     )
     events = await service.start(
         knowledge_base_id=conversations.question.knowledge_base_id,
@@ -171,10 +196,12 @@ async def test_unexpected_workflow_error_marks_the_run_failed() -> None:
             llm_model="gpt-5.6-luna",
             prompt_version="grounded-answer-v1",
             retrieval_version="pgvector-cosine-v1",
+            query_rewrite_version="follow-up-query-v1",
             workflow_version="linear-grounded-v1",
         ),
         minimum_score=0.5,
         minimum_evidence=1,
+        context_question_limit=4,
     )
     events = await service.start(
         knowledge_base_id=conversations.question.knowledge_base_id,

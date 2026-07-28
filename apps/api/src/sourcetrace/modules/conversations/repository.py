@@ -99,5 +99,19 @@ class ConversationRepository:
         )
         return list(result)
 
+    async def list_recent_questions(
+        self,
+        conversation_id: UUID,
+        *,
+        limit: int,
+    ) -> list[Question]:
+        result = await self._session.scalars(
+            select(Question)
+            .where(Question.conversation_id == conversation_id)
+            .order_by(Question.created_at.desc(), Question.id.desc())
+            .limit(limit)
+        )
+        return list(reversed(list(result)))
+
     async def commit(self) -> None:
         await self._session.commit()

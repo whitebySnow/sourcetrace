@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from sourcetrace.rag.ports import EmbeddingProvider
+from sourcetrace.rag.ports import EmbeddingProvider, QuestionRewriter
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,13 +34,28 @@ class RetrievalService:
         *,
         repository: RetrievalRepositoryPort,
         embedding_provider: EmbeddingProvider,
+        question_rewriter: QuestionRewriter,
         top_k: int,
     ) -> None:
         if top_k <= 0:
             raise ValueError("retrieval top_k must be positive")
         self._repository = repository
         self._embedding_provider = embedding_provider
+        self._question_rewriter = question_rewriter
         self._top_k = top_k
+
+    async def resolve_query(
+        self,
+        *,
+        question: str,
+        recent_questions: Sequence[str],
+    ) -> str:
+        if not recent_questions:
+            return question
+        return await self._question_rewriter.rewrite(
+            question=question,
+            recent_questions=recent_questions,
+        )
 
     async def search(
         self,

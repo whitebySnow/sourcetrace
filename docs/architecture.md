@@ -119,6 +119,12 @@ BGE-M3 通过 `EmbeddingProvider` 端口接入，适配器负责批处理、1024
 Citation 指向不可变文档版本和片段，并复制页码与短摘录，保证历史回答可审计且来源文件仍能
 按版本打开。
 
+追问解析只读取按时间排序的最近若干条 Question，默认上限为 4；Answer 和 Citation 不进入
+改写器输入。改写器将当前问题转换为独立 Retrieval Query，每轮仍使用 Conversation 绑定的
+Knowledge Base 重新执行向量检索。最终回答生成器接收用户原始问题和本轮新检索到的证据，
+因此回答语言跟随原问题，Citation excerpt 保留文档原文。实际 Retrieval Query 与改写提示词
+版本写入 Answer Run，供重放和评测使用。
+
 当前回答工作流采用可回放的线性基线：问题嵌入 -> 知识库及 Active Searchable Version 范围
 检索 -> 证据门控 -> LLM 流式生成 -> 引用校验 -> 持久化最终回答或拒答。供应商分片在校验前
 可作为临时 SSE delta 展示，只有通过引用校验的最终结果才成为持久事实。后续若引入

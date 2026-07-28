@@ -76,6 +76,7 @@ class AnswerExecutionMetadata:
     llm_model: str
     prompt_version: str
     retrieval_version: str
+    query_rewrite_version: str
     workflow_version: str
 
 
@@ -112,6 +113,7 @@ class AnswerRepositoryPort(Protocol):
         llm_model: str,
         prompt_version: str,
         retrieval_version: str,
+        query_rewrite_version: str,
         workflow_version: str,
     ) -> AnswerRun: ...
 
@@ -128,6 +130,8 @@ class AnswerRepositoryPort(Protocol):
     async def fail(self, run_id: UUID, *, code: str, message: str) -> bool: ...
 
     async def mark_running(self, run_id: UUID) -> bool: ...
+
+    async def set_retrieval_query(self, run_id: UUID, query: str) -> bool: ...
 
     async def get_status(self, run_id: UUID) -> AnswerRunStatus | None: ...
 
@@ -165,11 +169,14 @@ class AnswerService:
         metadata: AnswerExecutionMetadata,
         minimum_score: float,
         minimum_evidence: int,
+        context_question_limit: int,
     ) -> None:
         if not -1.0 <= minimum_score <= 1.0:
             raise ValueError("minimum retrieval score must be between -1 and 1")
         if minimum_evidence <= 0:
             raise ValueError("minimum evidence count must be positive")
+        if context_question_limit <= 0:
+            raise ValueError("context question limit must be positive")
         self._repository = repository
         self._conversations = conversations
         self._retrieval = retrieval
@@ -177,6 +184,7 @@ class AnswerService:
         self._metadata = metadata
         self._minimum_score = minimum_score
         self._minimum_evidence = minimum_evidence
+        self._context_question_limit = context_question_limit
 
     async def start(
         self,
@@ -185,6 +193,11 @@ class AnswerService:
         conversation_id: UUID,
         content: str,
     ) -> AsyncIterator[AnswerEvent]:
+        recent_questions = await self._conversations.recent_questions(
+            knowledge_base_id,
+            conversation_id,
+            limit=self._context_question_limit,
+        )
         question = await self._conversations.stage_question(
             knowledge_base_id,
             conversation_id,
@@ -196,10 +209,16 @@ class AnswerService:
             llm_model=self._metadata.llm_model,
             prompt_version=self._metadata.prompt_version,
             retrieval_version=self._metadata.retrieval_version,
+            query_rewrite_version=self._metadata.query_rewrite_version,
             workflow_version=self._metadata.workflow_version,
         )
         await self._repository.commit()
-        return self._stream(run=run, knowledge_base_id=knowledge_base_id, content=content)
+        return self._stream(
+            run=run,
+            knowledge_base_id=knowledge_base_id,
+            content=content,
+            recent_questions=[item.content for item in recent_questions],
+        )
 
     async def request_cancel(
         self,
@@ -251,12 +270,14 @@ class AnswerService:
         run: AnswerRun,
         knowledge_base_id: UUID,
         content: str,
+        recent_questions: list[str],
     ) -> AsyncIterator[AnswerEvent]:
         run_id = run.id
         execution = self._execute_stream(
             run=run,
             knowledge_base_id=knowledge_base_id,
             content=content,
+            recent_questions=recent_questions,
         )
         try:
             async for event in execution:
@@ -290,6 +311,7 @@ class AnswerService:
         run: AnswerRun,
         knowledge_base_id: UUID,
         content: str,
+        recent_questions: list[str],
     ) -> AsyncIterator[AnswerEvent]:
         if not await self._repository.mark_running(run.id):
             yield await self._cancel(run.id)
@@ -297,9 +319,31 @@ class AnswerService:
         await self._repository.commit()
         yield AnswerStatusEvent(run_id=run.id, status="retrieving")
         try:
+            retrieval_query = await self._retrieval.resolve_query(
+                question=content,
+                recent_questions=recent_questions,
+            )
+        except LlmProviderError as error:
+            if not await self._fail(run.id, error.code, error.safe_message):
+                yield await self._cancel(run.id)
+                return
+            yield AnswerErrorEvent(
+                run_id=run.id,
+                code=error.code,
+                message=error.safe_message,
+            )
+            return
+        if await self._is_cancel_requested(run.id):
+            yield await self._cancel(run.id)
+            return
+        if not await self._repository.set_retrieval_query(run.id, retrieval_query):
+            yield await self._cancel(run.id)
+            return
+        await self._repository.commit()
+        try:
             retrieved = await self._retrieval.search(
                 knowledge_base_id=knowledge_base_id,
-                query=content,
+                query=retrieval_query,
             )
         except EmbeddingProviderError as error:
             if not await self._fail(run.id, error.code, error.safe_message):
@@ -501,6 +545,8 @@ class AnswerService:
             llm_model=run.llm_model,
             prompt_version=run.prompt_version,
             retrieval_version=run.retrieval_version,
+            retrieval_query=run.retrieval_query,
+            query_rewrite_version=run.query_rewrite_version,
             workflow_version=run.workflow_version,
             created_at=run.created_at,
             completed_at=run.completed_at,

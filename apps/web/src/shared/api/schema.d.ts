@@ -357,6 +357,10 @@ export interface components {
             prompt_version: string;
             /** Retrieval Version */
             retrieval_version: string;
+            /** Retrieval Query */
+            retrieval_query: string;
+            /** Query Rewrite Version */
+            query_rewrite_version: string;
             /** Workflow Version */
             workflow_version: string;
             /**

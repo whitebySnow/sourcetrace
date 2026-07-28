@@ -56,8 +56,12 @@ _Avoid_: Chat session, global conversation
 An immutable user-authored prompt recorded inside one conversation; it is history, not evidence and not an answer run.
 _Avoid_: Query result, message
 
+**Retrieval Query**:
+The standalone query actually embedded for one answer run, derived from the current question and a bounded list of recent user questions. It is replay metadata, not evidence.
+_Avoid_: Previous answer, conversation transcript
+
 **Answer Run**:
-A replayable attempt to answer one question, recording its lifecycle state, outcome, and the model, prompt, retrieval, and workflow versions used. At most one run may be active per conversation.
+A replayable attempt to answer one question, recording its lifecycle state, outcome, retrieval query, and the model, prompt, query-rewrite, retrieval, and workflow versions used. At most one run may be active per conversation.
 _Avoid_: Assistant message, response
 
 **Cancellation**:

@@ -19,8 +19,27 @@ from sourcetrace.modules.knowledge_bases.service import KnowledgeBaseService
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
 from sourcetrace.modules.retrieval.service import RetrievalService
 from sourcetrace.rag.embeddings import BgeM3EmbeddingProvider, EmbeddingConfig
-from sourcetrace.rag.llm import OpenAICompatibleAnswerGenerator, OpenAICompatibleConfig
-from sourcetrace.rag.ports import AnswerGenerator, EmbeddingProvider
+from sourcetrace.rag.llm import (
+    OpenAICompatibleAnswerGenerator,
+    OpenAICompatibleConfig,
+    OpenAICompatibleQuestionRewriter,
+)
+from sourcetrace.rag.ports import AnswerGenerator, EmbeddingProvider, QuestionRewriter
+
+
+def _openai_compatible_config(*, prompt_version: str) -> OpenAICompatibleConfig:
+    settings = get_settings()
+    if settings.llm_provider != "openai-compatible":
+        raise RuntimeError(f"unsupported LLM provider: {settings.llm_provider}")
+    if settings.llm_api_key is None:
+        raise RuntimeError("LLM API key is not configured")
+    return OpenAICompatibleConfig(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key.get_secret_value(),
+        model=settings.llm_model,
+        timeout_seconds=settings.llm_timeout_seconds,
+        prompt_version=prompt_version,
+    )
 
 
 def get_knowledge_base_service(
@@ -80,18 +99,19 @@ def get_query_embedding_provider() -> EmbeddingProvider:
 
 async def get_answer_generator() -> AsyncIterator[AnswerGenerator]:
     settings = get_settings()
-    if settings.llm_provider != "openai-compatible":
-        raise RuntimeError(f"unsupported LLM provider: {settings.llm_provider}")
-    if settings.llm_api_key is None:
-        raise RuntimeError("LLM API key is not configured")
     async with httpx.AsyncClient() as client:
         yield OpenAICompatibleAnswerGenerator(
-            OpenAICompatibleConfig(
-                base_url=settings.llm_base_url,
-                api_key=settings.llm_api_key.get_secret_value(),
-                model=settings.llm_model,
-                timeout_seconds=settings.llm_timeout_seconds,
-                prompt_version=settings.llm_prompt_version,
+            _openai_compatible_config(prompt_version=settings.llm_prompt_version),
+            client=client,
+        )
+
+
+async def get_question_rewriter() -> AsyncIterator[QuestionRewriter]:
+    settings = get_settings()
+    async with httpx.AsyncClient() as client:
+        yield OpenAICompatibleQuestionRewriter(
+            _openai_compatible_config(
+                prompt_version=settings.llm_question_rewrite_prompt_version
             ),
             client=client,
         )
@@ -108,6 +128,7 @@ def get_answer_service(
         Depends(get_query_embedding_provider),
     ],
     generator: Annotated[AnswerGenerator, Depends(get_answer_generator)],
+    question_rewriter: Annotated[QuestionRewriter, Depends(get_question_rewriter)],
 ) -> AnswerService:
     settings = get_settings()
     return AnswerService(
@@ -116,6 +137,7 @@ def get_answer_service(
         retrieval=RetrievalService(
             repository=PgVectorRetrievalRepository(session),
             embedding_provider=embedding_provider,
+            question_rewriter=question_rewriter,
             top_k=settings.retrieval_top_k,
         ),
         generator=generator,
@@ -124,8 +146,10 @@ def get_answer_service(
             llm_model=settings.llm_model,
             prompt_version=settings.llm_prompt_version,
             retrieval_version=settings.retrieval_config_version,
+            query_rewrite_version=settings.llm_question_rewrite_prompt_version,
             workflow_version=settings.answer_workflow_version,
         ),
         minimum_score=settings.retrieval_minimum_score,
         minimum_evidence=settings.retrieval_minimum_evidence,
+        context_question_limit=settings.answer_context_question_limit,
     )

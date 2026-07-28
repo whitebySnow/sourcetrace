@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -12,9 +13,11 @@ from sourcetrace.api.dependencies import (
     get_answer_generator,
     get_document_source_storage,
     get_query_embedding_provider,
+    get_question_rewriter,
 )
 from sourcetrace.db.session import get_session
 from sourcetrace.main import create_app
+from sourcetrace.modules.answers.models import AnswerRun
 from sourcetrace.modules.answers.repository import AnswerRepository
 from sourcetrace.modules.conversations.models import Question
 from sourcetrace.modules.documents.models import Chunk
@@ -113,6 +116,87 @@ class BlockingAnswerGenerator:
             self.closed = True
 
 
+class NeverQuestionRewriter:
+    async def rewrite(self, **kwargs: object) -> str:
+        raise AssertionError("question rewriting must not start without history")
+
+
+def _answer_app():
+    app = create_app()
+    app.dependency_overrides[get_question_rewriter] = NeverQuestionRewriter
+    return app
+
+
+class RecordingQuestionRewriter:
+    def __init__(
+        self,
+        retrieval_query: str = "Why are BGE-M3 dense vectors normalized before storage?",
+    ) -> None:
+        self.calls: list[tuple[str, list[str]]] = []
+        self.retrieval_query = retrieval_query
+
+    async def rewrite(
+        self,
+        *,
+        question: str,
+        recent_questions: Sequence[str],
+    ) -> str:
+        self.calls.append((question, list(recent_questions)))
+        return self.retrieval_query
+
+
+class RewrittenQueryEmbeddingProvider:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+        self.queries.extend(texts)
+        assert texts == ["Why are BGE-M3 dense vectors normalized before storage?"]
+        return [[1.0, *([0.0] * 1023)]]
+
+
+class NoMatchingEvidenceEmbeddingProvider:
+    async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+        assert texts == ["What color is the Moon?"]
+        return [[0.0, 1.0, *([0.0] * 1022)]]
+
+
+class ChineseRewrittenQueryEmbeddingProvider:
+    async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+        assert texts == ["BGE-M3 稠密向量为什么要在存储前归一化?"]
+        return [[1.0, *([0.0] * 1023)]]
+
+
+class FollowUpAnswerGenerator:
+    def stream_answer(
+        self,
+        *,
+        question: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> AsyncIterator[str]:
+        assert question == "Why is it normalized?"
+        assert evidence[0].content == "Vectors are normalized before storage."
+        return self._stream(evidence[0].citation_id)
+
+    async def _stream(self, citation_id: str) -> AsyncIterator[str]:
+        yield f"It is normalized for cosine retrieval. [{citation_id}]"
+
+
+class ChineseFollowUpAnswerGenerator:
+    def stream_answer(
+        self,
+        *,
+        question: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> AsyncIterator[str]:
+        assert question == "它为什么需要归一化?"
+        assert evidence[0].content == "Vectors are normalized before storage."
+        return self._stream(evidence[0].citation_id)
+
+    async def _stream(self, citation_id: str) -> AsyncIterator[str]:
+        yield f"归一化后可以稳定进行余弦相似度检索。 [{citation_id}]"
+
+
 async def _create_searchable_evidence(
     session: AsyncSession,
     knowledge_base_id: UUID,
@@ -172,7 +256,7 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
-    app = create_app()
+    app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
     app.dependency_overrides[get_answer_generator] = GroundedAnswerGenerator
@@ -271,13 +355,230 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["citations"] == citations
 
 
+async def test_follow_up_uses_bounded_questions_for_fresh_retrieval(
+    session: AsyncSession,
+) -> None:
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    rewriter = RecordingQuestionRewriter()
+    embedding = RewrittenQueryEmbeddingProvider()
+    app = _answer_app()
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_query_embedding_provider] = lambda: embedding
+    app.dependency_overrides[get_question_rewriter] = lambda: rewriter
+    app.dependency_overrides[get_answer_generator] = FollowUpAnswerGenerator
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        knowledge_base_response = await client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "Follow-up research"},
+        )
+        knowledge_base_id = UUID(knowledge_base_response.json()["id"])
+        conversation_response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations",
+            json={"title": "BGE-M3 discussion"},
+        )
+        conversation_id = UUID(conversation_response.json()["id"])
+        started_at = datetime(2026, 7, 28, 8, 0, tzinfo=UTC)
+        session.add_all(
+            [
+                Question(
+                    id=uuid4(),
+                    knowledge_base_id=knowledge_base_id,
+                    conversation_id=conversation_id,
+                    content=f"History question {index}",
+                    created_at=started_at + timedelta(minutes=index),
+                )
+                for index in range(1, 6)
+            ]
+        )
+        await session.commit()
+        await _create_searchable_evidence(session, knowledge_base_id)
+
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
+            f"{conversation_id}/answers",
+            json={"content": "Why is it normalized?"},
+        )
+        history_response = await client.get(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
+            f"{conversation_id}/answers"
+        )
+
+    assert response.status_code == 200
+    assert _events(response.text)[-1][0] == "final"
+    assert rewriter.calls == [
+        (
+            "Why is it normalized?",
+            [
+                "History question 2",
+                "History question 3",
+                "History question 4",
+                "History question 5",
+            ],
+        )
+    ]
+    assert embedding.queries == [
+        "Why are BGE-M3 dense vectors normalized before storage?"
+    ]
+    persisted = history_response.json()["items"][0]
+    assert persisted["retrieval_query"] == (
+        "Why are BGE-M3 dense vectors normalized before storage?"
+    )
+    assert persisted["query_rewrite_version"] == "follow-up-query-v1"
+
+
+async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
+    session: AsyncSession,
+) -> None:
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    rewriter = RecordingQuestionRewriter("What color is the Moon?")
+    app = _answer_app()
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_query_embedding_provider] = (
+        NoMatchingEvidenceEmbeddingProvider
+    )
+    app.dependency_overrides[get_question_rewriter] = lambda: rewriter
+    app.dependency_overrides[get_answer_generator] = NeverAnswerGenerator
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        knowledge_base_response = await client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "Untrusted history"},
+        )
+        knowledge_base_id = UUID(knowledge_base_response.json()["id"])
+        conversation_response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations",
+            json={"title": "Unsupported prior answer"},
+        )
+        conversation_id = UUID(conversation_response.json()["id"])
+        prior_question = Question(
+            id=uuid4(),
+            knowledge_base_id=knowledge_base_id,
+            conversation_id=conversation_id,
+            content="What is the Moon made of?",
+            created_at=datetime(2026, 7, 28, 8, 0, tzinfo=UTC),
+        )
+        session.add(prior_question)
+        await session.flush()
+        session.add(
+            AnswerRun(
+                id=uuid4(),
+                question_id=prior_question.id,
+                knowledge_base_id=knowledge_base_id,
+                conversation_id=conversation_id,
+                status="completed",
+                outcome="answered",
+                answer_text="UNSUPPORTED PRIOR ANSWER: The Moon is green.",
+                llm_provider="openai-compatible",
+                llm_model="gpt-5.6-luna",
+                prompt_version="grounded-answer-v1",
+                retrieval_version="pgvector-cosine-v1",
+                retrieval_query="What is the Moon made of?",
+                query_rewrite_version="legacy-direct-query-v1",
+                workflow_version="linear-grounded-v1",
+                completed_at=datetime(2026, 7, 28, 8, 1, tzinfo=UTC),
+            )
+        )
+        await session.commit()
+        await _create_searchable_evidence(session, knowledge_base_id)
+
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
+            f"{conversation_id}/answers",
+            json={"content": "What color is it?"},
+        )
+        history_response = await client.get(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
+            f"{conversation_id}/answers"
+        )
+
+    events = _events(response.text)
+    assert events[-1][0] == "refusal"
+    assert events[-1][1]["code"] == "INSUFFICIENT_EVIDENCE"
+    assert rewriter.calls == [
+        ("What color is it?", ["What is the Moon made of?"])
+    ]
+    assert "UNSUPPORTED PRIOR ANSWER" not in json.dumps(rewriter.calls)
+    current = next(
+        item
+        for item in history_response.json()["items"]
+        if item["question_content"] == "What color is it?"
+    )
+    assert current["outcome"] == "refused"
+    assert current["answer"] is None
+
+
+async def test_follow_up_answer_uses_question_language_and_preserves_source_text(
+    session: AsyncSession,
+) -> None:
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    rewriter = RecordingQuestionRewriter(
+        "BGE-M3 稠密向量为什么要在存储前归一化?"
+    )
+    app = _answer_app()
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_query_embedding_provider] = (
+        ChineseRewrittenQueryEmbeddingProvider
+    )
+    app.dependency_overrides[get_question_rewriter] = lambda: rewriter
+    app.dependency_overrides[get_answer_generator] = ChineseFollowUpAnswerGenerator
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        knowledge_base_response = await client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "多语言追问"},
+        )
+        knowledge_base_id = UUID(knowledge_base_response.json()["id"])
+        conversation_response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations",
+            json={"title": "BGE-M3 讨论"},
+        )
+        conversation_id = UUID(conversation_response.json()["id"])
+        session.add(
+            Question(
+                id=uuid4(),
+                knowledge_base_id=knowledge_base_id,
+                conversation_id=conversation_id,
+                content="BGE-M3 向量如何存储?",
+                created_at=datetime(2026, 7, 28, 8, 0, tzinfo=UTC),
+            )
+        )
+        await session.commit()
+        await _create_searchable_evidence(session, knowledge_base_id)
+
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
+            f"{conversation_id}/answers",
+            json={"content": "它为什么需要归一化?"},
+        )
+
+    final = _events(response.text)[-1]
+    assert final[0] == "final"
+    assert str(final[1]["answer"]).startswith("归一化后")
+    citations = final[1]["citations"]
+    assert isinstance(citations, list)
+    assert citations[0]["excerpt"] == "Vectors are normalized before storage."
+
+
 async def test_insufficient_evidence_is_refused_and_persisted(
     session: AsyncSession,
 ) -> None:
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
-    app = create_app()
+    app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
     app.dependency_overrides[get_answer_generator] = NeverAnswerGenerator
@@ -326,7 +627,7 @@ async def test_uncited_model_output_is_refused_instead_of_completed(
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
-    app = create_app()
+    app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
     app.dependency_overrides[get_answer_generator] = UncitedAnswerGenerator
@@ -375,7 +676,7 @@ async def test_answer_with_any_unretrieved_citation_is_refused(
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
-    app = create_app()
+    app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
     app.dependency_overrides[get_answer_generator] = MixedCitationAnswerGenerator
@@ -421,7 +722,7 @@ async def test_active_answer_can_be_cancelled_without_persisting_partial_text(
             yield request_session
 
     generator = BlockingAnswerGenerator()
-    app = create_app()
+    app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
     app.dependency_overrides[get_answer_generator] = lambda: generator
@@ -510,7 +811,7 @@ async def test_different_conversations_can_generate_answers_concurrently(
             yield request_session
 
     generator = BlockingAnswerGenerator()
-    app = create_app()
+    app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
     app.dependency_overrides[get_answer_generator] = lambda: generator
@@ -574,7 +875,7 @@ async def test_asgi_disconnect_persists_cancellation(
             yield request_session
 
     generator = BlockingAnswerGenerator()
-    app = create_app()
+    app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
     app.dependency_overrides[get_answer_generator] = lambda: generator
@@ -649,7 +950,7 @@ async def test_asgi_disconnect_persists_cancellation(
 async def test_startup_recovery_fails_interrupted_answer_runs(
     session: AsyncSession,
 ) -> None:
-    app = create_app()
+    app = _answer_app()
 
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
@@ -685,6 +986,7 @@ async def test_startup_recovery_fails_interrupted_answer_runs(
         llm_model="gpt-5.6-luna",
         prompt_version="grounded-answer-v1",
         retrieval_version="pgvector-cosine-v1",
+        query_rewrite_version="follow-up-query-v1",
         workflow_version="linear-grounded-v1",
     )
     await repository.commit()

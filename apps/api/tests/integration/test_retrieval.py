@@ -18,6 +18,25 @@ class QueryEmbeddingProvider:
         return [_vector(1.0, 0.0)]
 
 
+class RecordingQuestionRewriter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str]]] = []
+
+    async def rewrite(
+        self,
+        *,
+        question: str,
+        recent_questions: Sequence[str],
+    ) -> str:
+        self.calls.append((question, list(recent_questions)))
+        return "How does cosine normalization work?"
+
+
+class UnusedQuestionRewriter:
+    async def rewrite(self, **kwargs: object) -> str:
+        raise AssertionError("question rewriting must not start")
+
+
 def _vector(first: float, second: float) -> list[float]:
     return [first, second, *([0.0] * 1022)]
 
@@ -114,6 +133,7 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
     service = RetrievalService(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
+        question_rewriter=UnusedQuestionRewriter(),
         top_k=8,
     )
 
@@ -134,3 +154,30 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
     ]
     assert [item.page_number for item in evidence] == [3, 7]
     assert evidence[0].score > evidence[1].score
+
+
+async def test_retrieval_service_owns_follow_up_query_resolution(
+    session: AsyncSession,
+) -> None:
+    rewriter = RecordingQuestionRewriter()
+    service = RetrievalService(
+        repository=PgVectorRetrievalRepository(session),
+        embedding_provider=QueryEmbeddingProvider(),
+        question_rewriter=rewriter,
+        top_k=8,
+    )
+
+    direct_query = await service.resolve_query(
+        question="How are vectors normalized?",
+        recent_questions=[],
+    )
+    follow_up_query = await service.resolve_query(
+        question="How does that work?",
+        recent_questions=["What is cosine similarity?"],
+    )
+
+    assert direct_query == "How are vectors normalized?"
+    assert follow_up_query == "How does cosine normalization work?"
+    assert rewriter.calls == [
+        ("How does that work?", ["What is cosine similarity?"]),
+    ]
