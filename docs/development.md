@@ -55,6 +55,25 @@ uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
 uv run --project apps/api alembic -c apps/api/alembic.ini downgrade -1
 ```
 
+## 本地嵌入模型
+
+默认模型为固定 revision 的 `BAAI/bge-m3`，只使用 1024 维 dense embedding。Worker 首次
+执行 embedding 时才加载模型，模型缓存在宿主机 `D:\DevelopEnvironment\huggingface`。
+仓库、上传目录和 Docker 镜像均不保存模型权重。
+
+默认配置优先使用 `https://hf-mirror.com`。网络环境允许直连 Hugging Face 时，将
+`EMBEDDING_HF_ENDPOINT` 设为空；也可以先通过 ModelScope 下载完整模型目录，再把
+`EMBEDDING_MODEL` 设置为该本地目录。两种方式都应继续把文件放在统一的宿主机缓存根目录，
+不要提交模型文件。
+
+`EMBEDDING_DEVICE=cpu` 是跨机器默认值。安装匹配的 CUDA 版 PyTorch 后可改为 `cuda`，
+业务代码和数据库契约无需变化。`EMBEDDING_BATCH_SIZE` 应根据实际内存或显存 smoke test
+调整，不能把未经测量的吞吐量写入文档。
+
+项目使用 `sentence-transformers`，因为 BGE-M3 官方发布了对应的 pooling 与归一化模型图；
+直接使用底层 Transformers 需要自行重复这些模型特定推理规则，更容易产生与查询侧不一致的
+向量。适配器仍显式请求归一化并校验维度与范数，避免第三方模型输出静默污染 pgvector。
+
 自动生成后必须审阅 SQL。外键明确 `ON DELETE` 行为，查询、连接和排序字段按实际访问
 模式建索引。不要在应用启动时隐式建表。
 

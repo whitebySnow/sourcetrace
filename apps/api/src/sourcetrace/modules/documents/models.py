@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     DDL,
     BigInteger,
@@ -121,6 +122,16 @@ class IngestionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False)
     chunking_config_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding_attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="0",
+    )
+    embedding_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    embedding_model_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embedding_config_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -131,11 +142,16 @@ class IngestionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("run_number > 0", name="ingestion_run_number_positive"),
         CheckConstraint("attempt_count >= 0", name="ingestion_attempt_count_nonnegative"),
         CheckConstraint(
+            "embedding_attempt_count >= 0",
+            name="ingestion_embedding_attempt_count_nonnegative",
+        ),
+        CheckConstraint(
             "status IN ('pending', 'processing', 'chunked', 'completed', 'failed')",
             name="ingestion_status_valid",
         ),
         CheckConstraint(
-            "stage IN ('queued', 'parsing', 'chunking', 'chunked', 'completed', 'failed')",
+            "stage IN ('queued', 'parsing', 'chunking', 'chunked', 'embedding', "
+            "'indexing', 'completed', 'failed')",
             name="ingestion_stage_valid",
         ),
         CheckConstraint("chunk_size > 0", name="ingestion_chunk_size_positive"),
@@ -165,6 +181,7 @@ class Chunk(UUIDPrimaryKeyMixin, Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     chunking_config_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -186,6 +203,12 @@ class Chunk(UUIDPrimaryKeyMixin, Base):
         CheckConstraint("token_count > 0", name="chunk_token_count_positive"),
         CheckConstraint("length(text) > 0", name="chunk_text_not_empty"),
         Index("ix_chunks_document_version_order", "document_version_id", "chunk_index"),
+        Index(
+            "ix_chunks_embedding_cosine",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
 

@@ -304,7 +304,17 @@ class DocumentIngestionCoordinator:
             chunk_overlap=previous.chunk_overlap,
             chunking_config_version=previous.chunking_config_version,
         )
-        version.status = "pending"
+        if previous.embedding_model is not None:
+            run.status = "chunked"
+            run.stage = "chunked"
+            run.embedding_provider = previous.embedding_provider
+            run.embedding_model = previous.embedding_model
+            run.embedding_model_revision = previous.embedding_model_revision
+            run.embedding_dimension = previous.embedding_dimension
+            run.embedding_config_version = previous.embedding_config_version
+            version.status = "chunked"
+        else:
+            version.status = "pending"
         await self._repository.commit()
         try:
             await self._queue.enqueue(version_id)

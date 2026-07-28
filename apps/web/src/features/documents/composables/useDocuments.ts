@@ -32,7 +32,7 @@ export function useDocuments(knowledgeBaseId: string) {
 
   function hasActiveIngestion() {
     return documents.value.some((document) =>
-      ["pending", "processing"].includes(document.status),
+      ["pending", "processing", "chunked"].includes(document.status),
     );
   }
 

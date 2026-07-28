@@ -115,7 +115,11 @@ def _item(record: DocumentVersionRecord) -> DocumentVersionItem:
         page_count=version.page_count,
         status=run.status if run is not None else version.status,
         stage=run.stage if run is not None else "queued",
-        attempt_count=run.attempt_count if run is not None else 0,
+        attempt_count=(
+            max(run.attempt_count, run.embedding_attempt_count)
+            if run is not None
+            else 0
+        ),
         retryable=run.retryable if run is not None else False,
         failure_code=run.failure_code if run is not None else None,
         failure_message=run.failure_message if run is not None else None,

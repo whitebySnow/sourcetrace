@@ -199,6 +199,43 @@ class DocumentRepository:
         )
         return list(result)
 
+    async def set_chunk_embeddings(
+        self,
+        chunks: list[Chunk],
+        embeddings: list[list[float]],
+    ) -> None:
+        for chunk, embedding in zip(chunks, embeddings, strict=True):
+            chunk.embedding = embedding
+        await self._session.flush()
+
+    async def list_searchable_chunks(self, knowledge_base_id: UUID) -> list[Chunk]:
+        latest_completed = (
+            select(
+                DocumentVersion.document_id,
+                func.max(DocumentVersion.version_number).label("version_number"),
+            )
+            .where(
+                DocumentVersion.knowledge_base_id == knowledge_base_id,
+                DocumentVersion.status == "completed",
+            )
+            .group_by(DocumentVersion.document_id)
+            .subquery()
+        )
+        result = await self._session.scalars(
+            select(Chunk)
+            .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
+            .join(
+                latest_completed,
+                and_(
+                    latest_completed.c.document_id == DocumentVersion.document_id,
+                    latest_completed.c.version_number == DocumentVersion.version_number,
+                ),
+            )
+            .where(Chunk.embedding.is_not(None))
+            .order_by(DocumentVersion.document_id, Chunk.chunk_index)
+        )
+        return list(result)
+
     async def get_latest_ingestion_runs(
         self,
         document_version_ids: list[UUID],

@@ -39,3 +39,11 @@ _Avoid_: Redis job, background request
 **Chunk**:
 A stable, page-local token window derived from one document version and owned by an ingestion run.
 _Avoid_: Paragraph, vector
+
+**Searchable Version**:
+A completed document version whose chunks all have validated dense embeddings and may participate in retrieval.
+_Avoid_: Latest version, indexed file
+
+**Active Searchable Version**:
+The searchable version with the greatest version number for one document; newer incomplete versions do not replace it.
+_Avoid_: Latest version, current upload

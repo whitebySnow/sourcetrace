@@ -31,13 +31,16 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     schema = f"test_{uuid4().hex}"
     engine = create_async_engine(
         get_settings().database_url,
-        connect_args={"server_settings": {"search_path": schema}},
+        connect_args={"server_settings": {"search_path": f"{schema},public"}},
     )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with engine.begin() as connection:
         await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(lambda sync_connection: Base.metadata.create_all(
+            sync_connection,
+            checkfirst=False,
+        ))
 
     yield session_factory
 

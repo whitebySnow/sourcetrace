@@ -105,6 +105,11 @@ PostgreSQL 是业务状态和向量的权威存储。Redis 仅用于队列、短
 解析与切分阶段可独立落入 `chunked` 中间状态，供后续嵌入任务继续处理。`chunked` 版本
 不可检索；只有向量完整写入并激活后才进入 `completed`。
 
+BGE-M3 通过 `EmbeddingProvider` 端口接入，适配器负责批处理、1024 维契约和单位归一化
+校验。Chunk 向量与文档版本的 `completed` 激活在同一个 PostgreSQL 事务中提交；检索范围
+始终过滤为每个逻辑文档最新的 `completed` 版本，因此部分写入、处理失败和更新中的版本
+不会进入召回范围，历史版本仍可按稳定 ID 访问。
+
 ## 7. API 契约
 
 - 业务 API 位于 `/api/v1`，健康检查保持在 `/health` 与 `/ready`。

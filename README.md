@@ -18,6 +18,10 @@ pnpm dev
 
 API 默认运行在 `http://localhost:8000`，Web 默认运行在 `http://localhost:5173`。健康检查为 `GET /health`，依赖就绪检查为 `GET /ready`，OpenAPI 文档为 `/docs`。
 
+首次处理文档时，Worker 会通过配置的 Hugging Face 镜像下载 BGE-M3 到宿主机
+`D:\DevelopEnvironment\huggingface`。模型缓存不在仓库内，也不会写入 Docker 镜像；详细的
+镜像切换、本地模型目录和设备配置见 [开发约定](docs/development.md)。
+
 ## 常用命令
 
 ```powershell
@@ -49,7 +53,7 @@ data/uploads/     本地开发上传目录，不提交用户文件
 
 ## 当前阶段
 
-仓库已具备可运行的工程骨架、统一配置、Problem Details 错误、请求 ID、健康检查、
-前端类型化 API 客户端和测试入口。业务功能按 `docs/roadmap.md` 分阶段实现，所有效果指标
-必须来自版本化评测集，不填写虚构数值。大模型或自动化代理开始修改前必须阅读
+仓库已具备知识库、不可变文档版本、异步 PDF 解析切分和本地 dense embedding 闭环。
+业务功能按 `docs/roadmap.md` 分阶段实现，所有效果指标必须来自版本化评测集，不填写
+虚构数值。大模型或自动化代理开始修改前必须阅读
 [`AGENTS.md`](AGENTS.md)。
