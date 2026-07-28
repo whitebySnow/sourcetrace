@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref } from "vue";
 
-import { ApiClientError } from "@/shared/api/client";
+import { apiErrorText } from "@/shared/api/errors";
 
 import {
   type DocumentVersion,
@@ -22,13 +22,6 @@ export function useDocuments(knowledgeBaseId: string) {
   const successMessage = ref("");
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let unmounted = false;
-
-  function errorText(error: unknown, fallback: string) {
-    if (error instanceof ApiClientError && error.requestId) {
-      return `${error.message}（请求 ID：${error.requestId}）`;
-    }
-    return error instanceof Error ? error.message : fallback;
-  }
 
   function hasActiveIngestion() {
     return documents.value.some((document) =>
@@ -62,7 +55,7 @@ export function useDocuments(knowledgeBaseId: string) {
       }
       mergeUpdates(updates);
     } catch (error) {
-      errorMessage.value = errorText(error, "无法刷新文档处理状态。");
+      errorMessage.value = apiErrorText(error, "无法刷新文档处理状态。");
     } finally {
       schedulePoll();
     }
@@ -75,7 +68,7 @@ export function useDocuments(knowledgeBaseId: string) {
       nextCursor.value = page.next_cursor;
       schedulePoll();
     } catch (error) {
-      errorMessage.value = errorText(error, "无法加载文档。");
+      errorMessage.value = apiErrorText(error, "无法加载文档。");
     } finally {
       loading.value = false;
     }
@@ -102,7 +95,7 @@ export function useDocuments(knowledgeBaseId: string) {
       if (fileInput.value) fileInput.value.value = "";
       schedulePoll();
     } catch (error) {
-      errorMessage.value = errorText(error, "无法上传文档。");
+      errorMessage.value = apiErrorText(error, "无法上传文档。");
     } finally {
       uploading.value = false;
     }
@@ -125,7 +118,7 @@ export function useDocuments(knowledgeBaseId: string) {
       );
       schedulePoll();
     } catch (error) {
-      errorMessage.value = errorText(error, "无法重试文档处理。");
+      errorMessage.value = apiErrorText(error, "无法重试文档处理。");
     } finally {
       const next = new Set(retryingVersionIds.value);
       next.delete(document.version_id);
@@ -146,7 +139,7 @@ export function useDocuments(knowledgeBaseId: string) {
       nextCursor.value = page.next_cursor;
       schedulePoll();
     } catch (error) {
-      errorMessage.value = errorText(error, "无法加载更多文档。");
+      errorMessage.value = apiErrorText(error, "无法加载更多文档。");
     } finally {
       loadingMore.value = false;
     }

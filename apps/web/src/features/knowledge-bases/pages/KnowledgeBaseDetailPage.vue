@@ -9,8 +9,9 @@ import {
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import ConversationPanel from "@/features/conversations/components/ConversationPanel.vue";
 import DocumentPanel from "@/features/documents/components/DocumentPanel.vue";
-import { ApiClientError } from "@/shared/api/client";
+import { apiErrorText } from "@/shared/api/errors";
 
 import {
   deleteKnowledgeBase,
@@ -27,13 +28,6 @@ const showDelete = ref(false);
 const errorMessage = ref("");
 const id = String(route.params.id);
 
-function errorText(error: unknown, fallback: string) {
-  if (error instanceof ApiClientError && error.requestId) {
-    return `${error.message}（请求 ID：${error.requestId}）`;
-  }
-  return error instanceof Error ? error.message : fallback;
-}
-
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
@@ -48,7 +42,7 @@ async function load() {
   try {
     knowledgeBase.value = await getKnowledgeBase(id);
   } catch (error) {
-    errorMessage.value = errorText(error, "无法加载知识库。");
+    errorMessage.value = apiErrorText(error, "无法加载知识库。");
   } finally {
     loading.value = false;
   }
@@ -61,7 +55,7 @@ async function confirmDelete() {
     await deleteKnowledgeBase(id);
     await router.push({ name: "knowledge-bases" });
   } catch (error) {
-    errorMessage.value = errorText(error, "无法删除知识库。");
+    errorMessage.value = apiErrorText(error, "无法删除知识库。");
     showDelete.value = false;
   } finally {
     deleting.value = false;
@@ -120,6 +114,7 @@ onMounted(load);
         <AlertTriangle :size="18" aria-hidden="true" />
         <span>{{ errorMessage }}</span>
       </div>
+      <ConversationPanel :knowledge-base-id="id" />
       <DocumentPanel :knowledge-base-id="id" />
     </template>
 

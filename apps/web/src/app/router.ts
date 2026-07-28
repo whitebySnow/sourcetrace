@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+import ConversationPage from "@/features/conversations/pages/ConversationPage.vue";
 import KnowledgeBaseDetailPage from "@/features/knowledge-bases/pages/KnowledgeBaseDetailPage.vue";
 import KnowledgeBaseListPage from "@/features/knowledge-bases/pages/KnowledgeBaseListPage.vue";
 import SystemStatusPage from "@/features/system/pages/SystemStatusPage.vue";
@@ -16,6 +17,11 @@ export const router = createRouter({
       path: "/knowledge-bases/:id",
       name: "knowledge-base-detail",
       component: KnowledgeBaseDetailPage,
+    },
+    {
+      path: "/knowledge-bases/:knowledgeBaseId/conversations/:conversationId",
+      name: "conversation",
+      component: ConversationPage,
     },
     {
       path: "/system",

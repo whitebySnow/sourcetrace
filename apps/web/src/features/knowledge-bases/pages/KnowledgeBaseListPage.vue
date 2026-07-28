@@ -11,6 +11,8 @@ import {
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
+import { apiErrorText } from "@/shared/api/errors";
+
 import {
   createKnowledgeBase,
   deleteKnowledgeBase,
@@ -30,10 +32,6 @@ const showCreate = ref(false);
 const name = ref("");
 const pendingDelete = ref<KnowledgeBase>();
 
-function errorText(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
@@ -52,7 +50,7 @@ async function loadInitial() {
     items.value = page.items;
     nextCursor.value = page.next_cursor;
   } catch (error) {
-    errorMessage.value = errorText(error, "无法加载知识库。");
+    errorMessage.value = apiErrorText(error, "无法加载知识库。");
   } finally {
     loading.value = false;
   }
@@ -66,7 +64,7 @@ async function loadMore() {
     items.value.push(...page.items);
     nextCursor.value = page.next_cursor;
   } catch (error) {
-    errorMessage.value = errorText(error, "无法加载更多知识库。");
+    errorMessage.value = apiErrorText(error, "无法加载更多知识库。");
   } finally {
     loadingMore.value = false;
   }
@@ -88,7 +86,7 @@ async function submitCreate() {
     items.value.unshift(created);
     showCreate.value = false;
   } catch (error) {
-    errorMessage.value = errorText(error, "无法创建知识库。");
+    errorMessage.value = apiErrorText(error, "无法创建知识库。");
   } finally {
     saving.value = false;
   }
@@ -105,7 +103,7 @@ async function confirmDelete() {
     );
     pendingDelete.value = undefined;
   } catch (error) {
-    errorMessage.value = errorText(error, "无法删除知识库。");
+    errorMessage.value = apiErrorText(error, "无法删除知识库。");
   } finally {
     deleting.value = false;
   }

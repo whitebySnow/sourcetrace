@@ -47,3 +47,11 @@ _Avoid_: Latest version, indexed file
 **Active Searchable Version**:
 The searchable version with the greatest version number for one document; newer incomplete versions do not replace it.
 _Avoid_: Latest version, current upload
+
+**Conversation**:
+A durable question-history boundary that is permanently owned by one knowledge base and determines the scope for every future retrieval.
+_Avoid_: Chat session, global conversation
+
+**Question**:
+An immutable user-authored prompt recorded inside one conversation; it is history, not evidence and not an answer run.
+_Avoid_: Query result, message
