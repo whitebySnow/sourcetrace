@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { apiErrorText } from "@/shared/api/errors";
 
 import {
+  cancelAnswer,
   listAnswers,
   streamAnswer,
   type AnswerEvent,
@@ -31,9 +32,15 @@ export function useAnswers(knowledgeBaseId: string, conversationId: string) {
   const activeCitations = ref<Citation[]>([]);
   const activeRefusal = ref("");
   const activeFailure = ref("");
-  const activeStatus = ref<"retrieving" | "generating" | "completed">();
+  const activeStatus = ref<
+    "retrieving" | "generating" | "cancelling" | "completed" | "cancelled"
+  >();
   const activeRunId = ref("");
   const recentAnswers = ref<RecentAnswer[]>([]);
+  const cancelling = ref(false);
+  let activeController: AbortController | undefined;
+  let activeTask: Promise<boolean> | undefined;
+  let cancellationTask: Promise<void> | undefined;
 
   const answersByQuestion = computed(
     () => new Map(answers.value.map((answer) => [answer.question_id, answer])),
@@ -93,12 +100,18 @@ export function useAnswers(knowledgeBaseId: string, conversationId: string) {
       activeCitations.value = [];
       activeRefusal.value = event.message;
       activeStatus.value = "completed";
-    } else {
+    } else if (event.type === "error") {
       activeAnswer.value = "";
       activeCitations.value = [];
       activeRefusal.value = "";
       activeFailure.value = event.message;
       activeStatus.value = "completed";
+    } else {
+      activeAnswer.value = "";
+      activeCitations.value = [];
+      activeRefusal.value = "";
+      activeFailure.value = "";
+      activeStatus.value = "cancelled";
     }
   }
 
@@ -114,7 +127,21 @@ export function useAnswers(knowledgeBaseId: string, conversationId: string) {
     });
   }
 
-  async function ask(content: string): Promise<boolean> {
+  function reconcileActiveRun(runId: string): boolean {
+    const persisted = answers.value.find((answer) => answer.id === runId);
+    if (!persisted) return false;
+    activeQuestion.value = persisted.question_content;
+    activeRunId.value = persisted.id;
+    activeAnswer.value = persisted.answer ?? "";
+    activeCitations.value = persisted.citations;
+    activeRefusal.value = persisted.refusal_message ?? "";
+    activeFailure.value = persisted.failure_message ?? "";
+    activeStatus.value =
+      persisted.status === "cancelled" ? "cancelled" : "completed";
+    return true;
+  }
+
+  async function executeAsk(content: string): Promise<boolean> {
     archiveActiveAnswer();
     submitting.value = true;
     errorMessage.value = "";
@@ -125,15 +152,26 @@ export function useAnswers(knowledgeBaseId: string, conversationId: string) {
     activeFailure.value = "";
     activeRunId.value = "";
     activeStatus.value = "retrieving";
+    const controller = new AbortController();
+    activeController = controller;
     try {
       await streamAnswer(
         knowledgeBaseId,
         conversationId,
         content,
         handleEvent,
+        controller.signal,
       );
       return true;
     } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "name" in error &&
+        error.name === "AbortError"
+      ) {
+        return false;
+      }
       activeAnswer.value = "";
       activeCitations.value = [];
       activeRefusal.value = "";
@@ -141,8 +179,68 @@ export function useAnswers(knowledgeBaseId: string, conversationId: string) {
       activeStatus.value = "completed";
       return false;
     } finally {
-      submitting.value = false;
+      if (activeController === controller) activeController = undefined;
+      if (!cancellationTask) submitting.value = false;
     }
+  }
+
+  async function ask(content: string): Promise<boolean> {
+    if (activeTask) {
+      const previousTask = activeTask;
+      await cancel();
+      await previousTask;
+    }
+    const task = executeAsk(content);
+    activeTask = task;
+    try {
+      return await task;
+    } finally {
+      if (activeTask === task) activeTask = undefined;
+    }
+  }
+
+  async function performCancellation(): Promise<void> {
+    const runId = activeRunId.value;
+    cancelling.value = true;
+    activeController?.abort();
+    activeAnswer.value = "";
+    activeCitations.value = [];
+    activeRefusal.value = "";
+    activeFailure.value = "";
+    activeStatus.value = "cancelling";
+    if (!runId) {
+      activeStatus.value = "cancelled";
+      return;
+    }
+    try {
+      const result = await cancelAnswer(knowledgeBaseId, conversationId, runId);
+      if (result.status === "completed" || result.status === "failed") {
+        await load();
+        if (!reconcileActiveRun(runId)) {
+          errorMessage.value = "回答已结束，但暂时无法加载最终状态。";
+        }
+      } else {
+        activeStatus.value = "cancelled";
+      }
+    } catch (error) {
+      errorMessage.value = apiErrorText(error, "无法确认回答已取消。");
+      activeStatus.value = undefined;
+      await load();
+      reconcileActiveRun(runId);
+    } finally {
+      cancelling.value = false;
+    }
+  }
+
+  function cancel(): Promise<void> {
+    if (cancellationTask) return cancellationTask;
+    if (!submitting.value) return Promise.resolve();
+    const task = performCancellation();
+    cancellationTask = task;
+    return task.finally(() => {
+      if (cancellationTask === task) cancellationTask = undefined;
+      submitting.value = false;
+    });
   }
 
   return {
@@ -152,8 +250,10 @@ export function useAnswers(knowledgeBaseId: string, conversationId: string) {
     activeQuestion,
     activeRefusal,
     activeStatus,
+    activeRunId,
     answers,
     answersByQuestion,
+    cancelling,
     errorMessage,
     loading,
     loadingMore,
@@ -161,6 +261,7 @@ export function useAnswers(knowledgeBaseId: string, conversationId: string) {
     recentAnswers,
     submitting,
     ask,
+    cancel,
     load,
     loadMore,
   };

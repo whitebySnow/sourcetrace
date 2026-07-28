@@ -11,6 +11,7 @@ from sourcetrace.core.errors import install_exception_handlers
 from sourcetrace.core.logging import configure_logging, get_logger
 from sourcetrace.core.middleware import RequestContextMiddleware
 from sourcetrace.db.session import close_database, session_factory
+from sourcetrace.modules.answers.repository import AnswerRepository
 from sourcetrace.modules.documents.storage import LocalDocumentStorage
 from sourcetrace.modules.knowledge_bases.repository import KnowledgeBaseRepository
 
@@ -35,6 +36,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             )
     except Exception:
         logger.exception("staged_document_cleanup_reconciliation_deferred")
+    try:
+        async with session_factory() as session:
+            answers = AnswerRepository(session)
+            recovered_runs = await answers.fail_interrupted_runs()
+            await answers.commit()
+        if recovered_runs:
+            logger.warning(
+                "interrupted_answer_runs_recovered",
+                recovered_runs=recovered_runs,
+            )
+    except Exception:
+        logger.exception("interrupted_answer_run_recovery_deferred")
     logger.info("application_started", environment=settings.app_env)
     yield
     await close_database()

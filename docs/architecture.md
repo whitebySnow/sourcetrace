@@ -124,6 +124,20 @@ Citation 指向不可变文档版本和片段，并复制页码与短摘录，�
 可作为临时 SSE delta 展示，只有通过引用校验的最终结果才成为持久事实。后续若引入
 LangGraph，只能替换工作流编排，不得改变证据范围、拒答和引用不变量。
 
+Answer Run 使用 `pending -> running -> completed | failed` 的正常状态路径。用户取消时，活动
+状态先转为 `cancel_requested`，工作流在检索前后、生成前、模型分片之间和最终持久化前检查
+该状态，再转为 `cancelled`。生成期间以短间隔检查数据库取消状态；取消或 SSE 消费端断开时
+关闭供应商异步响应流。取消前已经发送给浏览器的 delta 只存在于内存和界面中，取消后立即
+丢弃，禁止写入 Answer Run 或进入后续问题上下文。
+
+PostgreSQL 部分唯一索引保证同一 Conversation 在 `pending`、`running` 或
+`cancel_requested` 中最多只有一个 Answer Run；不同 Conversation 不共享该锁。该数据库
+约束是跨 API 进程的最终并发保护，服务层将冲突转换为稳定的 `409` 错误。
+
+当前部署契约是单 API 进程。进程启动时会把上次进程遗留的活动 Answer Run 标记为
+`failed`，防止会话被活动运行唯一索引永久阻塞；未知的工作流异常也会回滚当前事务并将运行
+安全地终态化。未来若引入多个 API 副本，必须先用租约或实例所有权替代该启动恢复策略。
+
 ## 7. API 契约
 
 - 业务 API 位于 `/api/v1`，健康检查保持在 `/health` 与 `/ready`。
@@ -131,6 +145,8 @@ LangGraph，只能替换工作流编排，不得改变证据范围、拒答和�
 - 列表默认 cursor 分页，默认 20 条、最大 100 条。
 - 异步摄取返回 `202 Accepted` 和可查询的任务资源。
 - 生成回答使用 SSE；事件类型和最终引用结构必须有版本化 schema。
+- 回答取消同时使用浏览器 `AbortController` 和幂等取消端点；SSE 保持连接时以版本化
+  `cancelled` 事件结束。
 - 错误采用统一 Problem Details 风格，并在响应头和响应体携带请求 ID。
 - Web 类型从 OpenAPI 生成，后端 schema 是跨边界契约的唯一来源。
 - 显式声明的 `422` 响应必须同时声明稳定的 `description`，不得依赖 Python 运行时提供的

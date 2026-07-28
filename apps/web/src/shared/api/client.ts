@@ -50,6 +50,7 @@ export function toApiClientError(error: unknown): ApiClientError {
 export async function streamRequest(
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> {
   let response: Response;
   try {
@@ -60,8 +61,17 @@ export async function streamRequest(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal,
     });
-  } catch {
+  } catch (error) {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "name" in error &&
+      error.name === "AbortError"
+    ) {
+      throw error;
+    }
     throw new ApiClientError("NETWORK_ERROR", "无法连接 API 服务。");
   }
   if (!response.ok) {

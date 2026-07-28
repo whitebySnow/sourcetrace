@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   BookOpen,
+  CircleStop,
   ExternalLink,
   LoaderCircle,
   MessageSquare,
@@ -39,7 +40,9 @@ const {
   activeQuestion,
   activeRefusal,
   activeStatus,
+  activeRunId,
   answersByQuestion,
+  cancelling,
   errorMessage: answerErrorMessage,
   loading: answersLoading,
   loadingMore: answersLoadingMore,
@@ -47,6 +50,7 @@ const {
   recentAnswers,
   submitting,
   ask,
+  cancel,
   load: loadAnswers,
   loadMore: loadMoreAnswers,
 } = useAnswers(knowledgeBaseId, conversationId);
@@ -59,6 +63,10 @@ async function submit() {
   const value = content.value.trim();
   if (!value || submitting.value) return;
   if (await ask(value)) content.value = "";
+}
+
+async function cancelActive() {
+  await cancel();
 }
 
 function citationHref(path: string) {
@@ -100,7 +108,11 @@ onMounted(() => {
       <LoaderCircle :size="18" class="spinning" aria-hidden="true" />
       <span>正在加载会话...</span>
     </div>
-    <div v-else-if="errorMessage && !conversation" class="message error-message" role="alert">
+    <div
+      v-else-if="errorMessage && !conversation"
+      class="message error-message"
+      role="alert"
+    >
       <AlertTriangle :size="18" aria-hidden="true" />
       <span>{{ errorMessage }}</span>
     </div>
@@ -137,28 +149,34 @@ onMounted(() => {
           <strong>尚无问题</strong>
         </div>
         <div v-else class="question-list">
-          <article v-for="question in questions" :key="question.id" class="question-row">
+          <article
+            v-for="question in questions"
+            :key="question.id"
+            class="question-row"
+          >
             <div class="question-heading">
               <p>{{ question.content }}</p>
-              <time :datetime="question.created_at">{{ formatDate(question.created_at) }}</time>
+              <time :datetime="question.created_at">{{
+                formatDate(question.created_at)
+              }}</time>
             </div>
-            <div
-              v-if="answersByQuestion.get(question.id)"
-              class="answer-block"
-            >
+            <div v-if="answersByQuestion.get(question.id)" class="answer-block">
               <template
                 v-if="
                   answersByQuestion.get(question.id)?.status === 'completed' &&
                   answersByQuestion.get(question.id)?.outcome === 'answered'
                 "
               >
-                <p class="answer-text">{{ answersByQuestion.get(question.id)?.answer }}</p>
+                <p class="answer-text">
+                  {{ answersByQuestion.get(question.id)?.answer }}
+                </p>
                 <div
                   v-if="answersByQuestion.get(question.id)?.citations.length"
                   class="citation-list"
                 >
                   <a
-                    v-for="citation in answersByQuestion.get(question.id)?.citations"
+                    v-for="citation in answersByQuestion.get(question.id)
+                      ?.citations"
                     :key="citation.id"
                     class="citation"
                     :href="citationHref(citation.source_url)"
@@ -167,7 +185,8 @@ onMounted(() => {
                   >
                     <span class="citation-title">
                       <BookOpen :size="15" aria-hidden="true" />
-                      {{ citation.document_name }} · 第 {{ citation.page_number }} 页
+                      {{ citation.document_name }} · 第
+                      {{ citation.page_number }} 页
                       <ExternalLink :size="13" aria-hidden="true" />
                     </span>
                     <span>{{ citation.excerpt }}</span>
@@ -175,7 +194,9 @@ onMounted(() => {
                 </div>
               </template>
               <p
-                v-else-if="answersByQuestion.get(question.id)?.status === 'failed'"
+                v-else-if="
+                  answersByQuestion.get(question.id)?.status === 'failed'
+                "
                 class="failure-text"
               >
                 <AlertTriangle :size="17" aria-hidden="true" />
@@ -185,7 +206,18 @@ onMounted(() => {
                 }}
               </p>
               <p
-                v-else-if="answersByQuestion.get(question.id)?.outcome === 'refused'"
+                v-else-if="
+                  answersByQuestion.get(question.id)?.status === 'cancelled'
+                "
+                class="cancellation-text"
+              >
+                <CircleStop :size="17" aria-hidden="true" />
+                回答已取消
+              </p>
+              <p
+                v-else-if="
+                  answersByQuestion.get(question.id)?.outcome === 'refused'
+                "
                 class="refusal-text"
               >
                 <ShieldAlert :size="17" aria-hidden="true" />
@@ -210,7 +242,9 @@ onMounted(() => {
               class="spinning"
               aria-hidden="true"
             />
-            <span>{{ loadingMore || answersLoadingMore ? "加载中..." : "加载更多" }}</span>
+            <span>{{
+              loadingMore || answersLoadingMore ? "加载中..." : "加载更多"
+            }}</span>
           </button>
         </div>
       </section>
@@ -254,9 +288,22 @@ onMounted(() => {
       <section v-if="activeQuestion" class="active-answer" aria-live="polite">
         <div class="question-heading">
           <p>{{ activeQuestion }}</p>
-          <span v-if="activeStatus !== 'completed'" class="stream-status">
+          <span
+            v-if="
+              activeStatus === 'retrieving' ||
+              activeStatus === 'generating' ||
+              activeStatus === 'cancelling'
+            "
+            class="stream-status"
+          >
             <LoaderCircle :size="15" class="spinning" aria-hidden="true" />
-            {{ activeStatus === "retrieving" ? "检索证据" : "生成回答" }}
+            {{
+              activeStatus === "retrieving"
+                ? "检索证据"
+                : activeStatus === "cancelling"
+                  ? "正在取消"
+                  : "生成回答"
+            }}
           </span>
         </div>
         <p v-if="activeAnswer" class="answer-text">{{ activeAnswer }}</p>
@@ -267,6 +314,10 @@ onMounted(() => {
         <p v-if="activeFailure" class="failure-text">
           <AlertTriangle :size="17" aria-hidden="true" />
           {{ activeFailure }}
+        </p>
+        <p v-if="activeStatus === 'cancelled'" class="cancellation-text">
+          <CircleStop :size="17" aria-hidden="true" />
+          回答已取消
         </p>
         <div v-if="activeCitations.length" class="citation-list">
           <a
@@ -297,18 +348,30 @@ onMounted(() => {
           rows="3"
         />
         <button
+          v-if="submitting"
+          data-test="cancel-answer"
+          class="cancel-button"
+          type="button"
+          :disabled="!activeRunId || cancelling"
+          @click="cancelActive"
+        >
+          <CircleStop :size="16" aria-hidden="true" />
+          <span>{{
+            cancelling
+              ? "正在取消..."
+              : activeRunId
+                ? "取消回答"
+                : "正在启动..."
+          }}</span>
+        </button>
+        <button
+          v-else
           data-test="create-question"
           type="submit"
-          :disabled="!content.trim() || submitting"
+          :disabled="!content.trim()"
         >
-          <LoaderCircle
-            v-if="submitting"
-            :size="16"
-            class="spinning"
-            aria-hidden="true"
-          />
-          <Send v-else :size="16" aria-hidden="true" />
-          <span>{{ submitting ? "回答中..." : "发送问题" }}</span>
+          <Send :size="16" aria-hidden="true" />
+          <span>发送问题</span>
         </button>
       </form>
     </template>
@@ -446,6 +509,7 @@ h1 {
 }
 .refusal-text,
 .failure-text,
+.cancellation-text,
 .stream-status {
   display: flex;
   align-items: center;
@@ -458,6 +522,10 @@ h1 {
 .failure-text {
   margin-bottom: 0;
   color: #8d2929;
+}
+.cancellation-text {
+  margin-bottom: 0;
+  color: #59635d;
 }
 .citation-list {
   display: grid;
@@ -510,6 +578,11 @@ h1 {
   border-radius: 6px;
   font-weight: 700;
   cursor: pointer;
+}
+.question-form .cancel-button {
+  color: #7f2f2f;
+  background: #fff;
+  border-color: #cfaeae;
 }
 .load-more-button {
   margin: 16px auto 0;

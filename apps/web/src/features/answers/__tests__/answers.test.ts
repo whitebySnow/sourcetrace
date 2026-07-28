@@ -32,10 +32,17 @@ describe("answer stream API", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const events: AnswerEvent[] = [];
+    const controller = new AbortController();
 
-    await streamAnswer("kb-id", "conversation-id", "Question", (event) => {
-      events.push(event);
-    });
+    await streamAnswer(
+      "kb-id",
+      "conversation-id",
+      "Question",
+      (event) => {
+        events.push(event);
+      },
+      controller.signal,
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/v1/knowledge-bases/kb-id/conversations/" +
@@ -43,6 +50,7 @@ describe("answer stream API", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ content: "Question" }),
+        signal: controller.signal,
       }),
     );
     expect(events).toEqual([
@@ -88,5 +96,36 @@ describe("answer stream API", () => {
     await expect(
       streamAnswer("kb-id", "conversation-id", "Question", () => undefined),
     ).rejects.toMatchObject({ code: "INVALID_STREAM" });
+  });
+
+  it("accepts cancellation as a terminal stream event", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'data: {"version":"1","type":"cancelled","run_id":' +
+              '"397ac9a7-8c66-4703-9ef3-b5ae3b015b9c"}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(body, { status: 200 })),
+    );
+    const events: AnswerEvent[] = [];
+
+    await streamAnswer("kb-id", "conversation-id", "Question", (event) => {
+      events.push(event);
+    });
+
+    expect(events).toEqual([
+      {
+        version: "1",
+        type: "cancelled",
+        run_id: "397ac9a7-8c66-4703-9ef3-b5ae3b015b9c",
+      },
+    ]);
   });
 });

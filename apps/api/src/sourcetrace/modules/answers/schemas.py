@@ -65,21 +65,47 @@ class AnswerErrorEvent(BaseModel):
     message: str
 
 
+class AnswerCancelledEvent(BaseModel):
+    version: Literal["1"] = "1"
+    type: Literal["cancelled"] = "cancelled"
+    run_id: UUID
+
+
 type AnswerEvent = Annotated[
     AnswerStatusEvent
     | AnswerDeltaEvent
     | AnswerFinalEvent
     | AnswerRefusalEvent
-    | AnswerErrorEvent,
+    | AnswerErrorEvent
+    | AnswerCancelledEvent,
     Field(discriminator="type"),
 ]
+
+
+class AnswerCancellationResponse(BaseModel):
+    run_id: UUID
+    status: Literal[
+        "pending",
+        "running",
+        "cancel_requested",
+        "cancelled",
+        "completed",
+        "failed",
+    ]
 
 
 class AnswerHistoryItem(BaseModel):
     id: UUID
     question_id: UUID
     question_content: str
-    status: Literal["running", "completed", "failed"]
+    status: Literal[
+        "pending",
+        "running",
+        "cancel_requested",
+        "cancelled",
+        "completed",
+        "failed",
+    ]
     outcome: Literal["answered", "refused"] | None
     answer: str | None
     refusal_code: str | None

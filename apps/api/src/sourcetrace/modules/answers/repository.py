@@ -1,11 +1,16 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sourcetrace.modules.answers.models import AnswerRun, Citation
-from sourcetrace.modules.answers.service import AnswerHistoryRow, CitationDraft
+from sourcetrace.modules.answers.models import AnswerRun, AnswerRunStatus, Citation
+from sourcetrace.modules.answers.service import (
+    ActiveAnswerRunExistsError,
+    AnswerHistoryRow,
+    CitationDraft,
+)
 from sourcetrace.modules.conversations.models import Question
 
 
@@ -27,7 +32,7 @@ class AnswerRepository:
             question_id=question.id,
             conversation_id=question.conversation_id,
             knowledge_base_id=question.knowledge_base_id,
-            status="running",
+            status="pending",
             llm_provider=llm_provider,
             llm_model=llm_model,
             prompt_version=prompt_version,
@@ -35,9 +40,87 @@ class AnswerRepository:
             workflow_version=workflow_version,
         )
         self._session.add(run)
-        await self._session.flush()
+        try:
+            await self._session.flush()
+        except IntegrityError as error:
+            constraint_name = self._constraint_name(error)
+            await self._session.rollback()
+            if constraint_name == "uq_answer_runs_one_active_per_conversation":
+                raise ActiveAnswerRunExistsError from error
+            raise
         await self._session.refresh(run)
         return run
+
+    @staticmethod
+    def _constraint_name(error: BaseException) -> str | None:
+        current: BaseException | None = error
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            constraint_name = getattr(current, "constraint_name", None)
+            if isinstance(constraint_name, str):
+                return constraint_name
+            current = current.__cause__ or current.__context__
+        return None
+
+    async def mark_running(self, run_id: UUID) -> bool:
+        updated_id = await self._session.scalar(
+            update(AnswerRun)
+            .where(AnswerRun.id == run_id, AnswerRun.status == "pending")
+            .values(status="running")
+            .returning(AnswerRun.id)
+        )
+        return updated_id is not None
+
+    async def get_status(self, run_id: UUID) -> AnswerRunStatus | None:
+        return await self._session.scalar(select(AnswerRun.status).where(AnswerRun.id == run_id))
+
+    async def request_cancel(
+        self,
+        knowledge_base_id: UUID,
+        conversation_id: UUID,
+        run_id: UUID,
+    ) -> AnswerRunStatus | None:
+        run = await self._session.scalar(
+            select(AnswerRun)
+            .where(
+                AnswerRun.id == run_id,
+                AnswerRun.knowledge_base_id == knowledge_base_id,
+                AnswerRun.conversation_id == conversation_id,
+            )
+            .with_for_update()
+        )
+        if run is None:
+            return None
+        if run.status in {"pending", "running"}:
+            run.status = "cancel_requested"
+            await self._session.flush()
+        return run.status
+
+    async def cancel(self, run_id: UUID) -> bool:
+        updated_id = await self._session.scalar(
+            update(AnswerRun)
+            .where(
+                AnswerRun.id == run_id,
+                AnswerRun.status.in_(("pending", "running", "cancel_requested")),
+            )
+            .values(status="cancelled", completed_at=datetime.now(UTC))
+            .returning(AnswerRun.id)
+        )
+        return updated_id is not None
+
+    async def fail_interrupted_runs(self) -> int:
+        result = await self._session.execute(
+            update(AnswerRun)
+            .where(AnswerRun.status.in_(("pending", "running", "cancel_requested")))
+            .values(
+                status="failed",
+                failure_code="ANSWER_RUN_INTERRUPTED",
+                failure_message="Answer run was interrupted before completion",
+                completed_at=datetime.now(UTC),
+            )
+        )
+        return result.rowcount  # type: ignore[attr-defined, no-any-return]
 
     async def complete_refusal(
         self,
@@ -45,13 +128,20 @@ class AnswerRepository:
         *,
         code: str,
         message: str,
-    ) -> None:
-        run.status = "completed"
-        run.outcome = "refused"
-        run.refusal_code = code
-        run.refusal_message = message
-        run.completed_at = datetime.now(UTC)
-        await self._session.flush()
+    ) -> bool:
+        updated_id = await self._session.scalar(
+            update(AnswerRun)
+            .where(AnswerRun.id == run.id, AnswerRun.status == "running")
+            .values(
+                status="completed",
+                outcome="refused",
+                refusal_code=code,
+                refusal_message=message,
+                completed_at=datetime.now(UTC),
+            )
+            .returning(AnswerRun.id)
+        )
+        return updated_id is not None
 
     async def complete_answer(
         self,
@@ -59,11 +149,20 @@ class AnswerRepository:
         *,
         answer: str,
         citations: list[CitationDraft],
-    ) -> None:
-        run.status = "completed"
-        run.outcome = "answered"
-        run.answer_text = answer
-        run.completed_at = datetime.now(UTC)
+    ) -> bool:
+        updated_id = await self._session.scalar(
+            update(AnswerRun)
+            .where(AnswerRun.id == run.id, AnswerRun.status == "running")
+            .values(
+                status="completed",
+                outcome="answered",
+                answer_text=answer,
+                completed_at=datetime.now(UTC),
+            )
+            .returning(AnswerRun.id)
+        )
+        if updated_id is None:
+            return False
         self._session.add_all(
             [
                 Citation(
@@ -80,13 +179,21 @@ class AnswerRepository:
             ]
         )
         await self._session.flush()
+        return True
 
-    async def fail(self, run: AnswerRun, *, code: str, message: str) -> None:
-        run.status = "failed"
-        run.failure_code = code
-        run.failure_message = message
-        run.completed_at = datetime.now(UTC)
-        await self._session.flush()
+    async def fail(self, run_id: UUID, *, code: str, message: str) -> bool:
+        updated_id = await self._session.scalar(
+            update(AnswerRun)
+            .where(AnswerRun.id == run_id, AnswerRun.status == "running")
+            .values(
+                status="failed",
+                failure_code=code,
+                failure_message=message,
+                completed_at=datetime.now(UTC),
+            )
+            .returning(AnswerRun.id)
+        )
+        return updated_id is not None
 
     async def list_page(
         self,
@@ -138,3 +245,6 @@ class AnswerRepository:
 
     async def commit(self) -> None:
         await self._session.commit()
+
+    async def rollback(self) -> None:
+        await self._session.rollback()
