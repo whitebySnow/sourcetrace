@@ -25,7 +25,14 @@ def test_answer_stream_history_and_source_are_exposed_in_openapi() -> None:
 
     event = document["components"]["schemas"]["AnswerEvent"]
     assert event["discriminator"]["propertyName"] == "type"
-    assert len(event["oneOf"]) == 5
+    assert len(event["oneOf"]) == 6
+    cancellation = document["paths"][
+        "/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
+        "{conversation_id}/answers/{run_id}/cancel"
+    ]["post"]
+    assert cancellation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"] == "#/components/schemas/AnswerCancellationResponse"
     assert set(document["components"]["schemas"]["CitationResponse"]["required"]) >= {
         "id",
         "document_id",

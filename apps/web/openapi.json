@@ -1029,6 +1029,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "description": "Unprocessable Content",
             "content": {
@@ -1130,10 +1140,136 @@
           }
         }
       }
+    },
+    "/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers/{run_id}/cancel": {
+      "post": {
+        "tags": [
+          "answers"
+        ],
+        "summary": "Cancel Answer",
+        "operationId": "cancel_answer_api_v1_knowledge_bases__knowledge_base_id__conversations__conversation_id__answers__run_id__cancel_post",
+        "parameters": [
+          {
+            "name": "knowledge_base_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Knowledge Base Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerCancellationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AnswerCancellationResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "cancel_requested",
+              "cancelled",
+              "completed",
+              "failed"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "AnswerCancellationResponse"
+      },
+      "AnswerCancelledEvent": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "1",
+            "title": "Version",
+            "default": "1"
+          },
+          "type": {
+            "type": "string",
+            "const": "cancelled",
+            "title": "Type",
+            "default": "cancelled"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "AnswerCancelledEvent"
+      },
       "AnswerDeltaEvent": {
         "properties": {
           "version": {
@@ -1217,11 +1353,15 @@
           },
           {
             "$ref": "#/components/schemas/AnswerErrorEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AnswerCancelledEvent"
           }
         ],
         "discriminator": {
           "propertyName": "type",
           "mapping": {
+            "cancelled": "#/components/schemas/AnswerCancelledEvent",
             "delta": "#/components/schemas/AnswerDeltaEvent",
             "error": "#/components/schemas/AnswerErrorEvent",
             "final": "#/components/schemas/AnswerFinalEvent",
@@ -1288,7 +1428,10 @@
           "status": {
             "type": "string",
             "enum": [
+              "pending",
               "running",
+              "cancel_requested",
+              "cancelled",
               "completed",
               "failed"
             ],

@@ -57,8 +57,12 @@ An immutable user-authored prompt recorded inside one conversation; it is histor
 _Avoid_: Query result, message
 
 **Answer Run**:
-A replayable attempt to answer one question, recording its outcome and the model, prompt, retrieval, and workflow versions used.
+A replayable attempt to answer one question, recording its lifecycle state, outcome, and the model, prompt, retrieval, and workflow versions used. At most one run may be active per conversation.
 _Avoid_: Assistant message, response
+
+**Cancellation**:
+A durable request to stop an active answer run; any streamed draft is discarded and only the terminal cancelled state is retained.
+_Avoid_: Failed answer, partial answer
 
 **Citation**:
 A stable reference from a completed answer to an allowed chunk in an immutable document version, with page and excerpt metadata for inspection.

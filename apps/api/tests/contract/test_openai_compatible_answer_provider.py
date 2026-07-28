@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -10,6 +11,21 @@ from sourcetrace.rag.llm import (
     OpenAICompatibleConfig,
 )
 from sourcetrace.rag.ports import RetrievalCandidate
+
+
+class RecordingResponseStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b'data: {"choices":[{"delta":{"content":"Partial"}}]}\n\n'
+        await self.release.wait()
+        yield b"data: [DONE]\n\n"
+
+    async def aclose(self) -> None:
+        self.closed = True
+        self.release.set()
 
 
 def _evidence() -> list[RetrievalCandidate]:
@@ -140,3 +156,26 @@ async def test_provider_rejects_a_length_truncated_completion() -> None:
             )
 
     assert error.value.code == "LLM_INCOMPLETE_RESPONSE"
+
+
+async def test_consumer_cancellation_closes_the_upstream_response_stream() -> None:
+    upstream = RecordingResponseStream()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=upstream,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+        response_stream = provider.stream_answer(
+            question="Question",
+            evidence=_evidence(),
+        )
+
+        assert await anext(response_stream) == "Partial"
+        await response_stream.aclose()
+
+    assert upstream.closed is True

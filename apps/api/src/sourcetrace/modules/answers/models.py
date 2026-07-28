@@ -12,13 +12,21 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from sourcetrace.db.base import Base, UUIDPrimaryKeyMixin
 
-type AnswerRunStatus = Literal["running", "completed", "failed"]
+type AnswerRunStatus = Literal[
+    "pending",
+    "running",
+    "cancel_requested",
+    "cancelled",
+    "completed",
+    "failed",
+]
 type AnswerOutcome = Literal["answered", "refused"]
 
 
@@ -39,7 +47,7 @@ class AnswerRun(UUIDPrimaryKeyMixin, Base):
         nullable=False,
     )
     status: Mapped[AnswerRunStatus] = mapped_column(
-        String(24), nullable=False, server_default="running"
+        String(24), nullable=False, server_default="pending"
     )
     outcome: Mapped[AnswerOutcome | None] = mapped_column(String(24), nullable=True)
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -65,7 +73,8 @@ class AnswerRun(UUIDPrimaryKeyMixin, Base):
             name="fk_answer_runs_conversation_knowledge_base",
         ),
         CheckConstraint(
-            "status IN ('running', 'completed', 'failed')",
+            "status IN ('pending', 'running', 'cancel_requested', 'cancelled', "
+            "'completed', 'failed')",
             name="answer_run_status_valid",
         ),
         CheckConstraint(
@@ -76,7 +85,9 @@ class AnswerRun(UUIDPrimaryKeyMixin, Base):
             "(status = 'completed' AND outcome IS NOT NULL AND completed_at IS NOT NULL) "
             "OR (status = 'failed' AND outcome IS NULL AND failure_code IS NOT NULL "
             "AND completed_at IS NOT NULL) "
-            "OR (status = 'running' AND outcome IS NULL AND completed_at IS NULL)",
+            "OR (status = 'cancelled' AND outcome IS NULL AND completed_at IS NOT NULL) "
+            "OR (status IN ('pending', 'running', 'cancel_requested') "
+            "AND outcome IS NULL AND completed_at IS NULL)",
             name="answer_run_terminal_state_consistent",
         ),
         Index(
@@ -84,6 +95,14 @@ class AnswerRun(UUIDPrimaryKeyMixin, Base):
             "conversation_id",
             "created_at",
             "id",
+        ),
+        Index(
+            "uq_answer_runs_one_active_per_conversation",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running', 'cancel_requested')"
+            ),
         ),
     )
 

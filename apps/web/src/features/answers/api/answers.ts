@@ -9,6 +9,8 @@ import type { components } from "@/shared/api/schema";
 export type AnswerEvent = components["schemas"]["AnswerEvent"];
 export type AnswerHistory = components["schemas"]["AnswerHistoryItem"];
 export type AnswerHistoryPage = components["schemas"]["AnswerHistoryResponse"];
+export type AnswerCancellation =
+  components["schemas"]["AnswerCancellationResponse"];
 export type Citation = components["schemas"]["CitationResponse"];
 
 export async function listAnswers(
@@ -37,7 +39,7 @@ function isAnswerEvent(value: unknown): value is AnswerEvent {
   const event = value as { version?: unknown; type?: unknown };
   return (
     event.version === "1" &&
-    ["status", "delta", "final", "refusal", "error"].includes(
+    ["status", "delta", "final", "refusal", "error", "cancelled"].includes(
       String(event.type),
     )
   );
@@ -67,11 +69,13 @@ export async function streamAnswer(
   conversationId: string,
   content: string,
   onEvent: (event: AnswerEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await streamRequest(
     `/api/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/conversations/` +
       `${encodeURIComponent(conversationId)}/answers`,
     { content },
+    signal,
   );
   if (!response.body) {
     throw new ApiClientError("INVALID_STREAM", "浏览器未提供回答流。");
@@ -87,7 +91,9 @@ export async function streamAnswer(
       throw new ApiClientError("INVALID_STREAM", "回答流在终态后仍包含事件。");
     }
     onEvent(event);
-    terminalSeen = ["final", "refusal", "error"].includes(event.type);
+    terminalSeen = ["final", "refusal", "error", "cancelled"].includes(
+      event.type,
+    );
   };
   while (true) {
     const { done, value } = await reader.read();
@@ -101,4 +107,25 @@ export async function streamAnswer(
   if (!terminalSeen) {
     throw new ApiClientError("INVALID_STREAM", "回答流未包含终态事件。");
   }
+}
+
+export async function cancelAnswer(
+  knowledgeBaseId: string,
+  conversationId: string,
+  runId: string,
+): Promise<AnswerCancellation> {
+  const { data, error } = await apiClient.POST(
+    "/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers/{run_id}/cancel",
+    {
+      params: {
+        path: {
+          knowledge_base_id: knowledgeBaseId,
+          conversation_id: conversationId,
+          run_id: runId,
+        },
+      },
+    },
+  );
+  if (error) throw toApiClientError(error);
+  return data;
 }

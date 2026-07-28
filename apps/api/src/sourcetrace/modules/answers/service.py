@@ -1,14 +1,21 @@
+import asyncio
 import base64
 import binascii
 import re
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID, uuid5
 
-from sourcetrace.modules.answers.models import AnswerRun, Citation
+from anyio import CancelScope
+
+from sourcetrace.core.logging import get_logger
+from sourcetrace.modules.answers.models import AnswerRun, AnswerRunStatus, Citation
 from sourcetrace.modules.answers.schemas import (
+    AnswerCancellationResponse,
+    AnswerCancelledEvent,
     AnswerDeltaEvent,
     AnswerErrorEvent,
     AnswerEvent,
@@ -25,6 +32,8 @@ from sourcetrace.rag.embeddings import EmbeddingProviderError
 from sourcetrace.rag.llm import LlmProviderError
 from sourcetrace.rag.ports import AnswerGenerator, RetrievalCandidate
 
+logger = get_logger(__name__)
+
 _CITATION_LABEL = re.compile(
     r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
@@ -32,6 +41,14 @@ _CITATION_LABEL = re.compile(
 
 
 class InvalidAnswerCursorError(ValueError):
+    pass
+
+
+class ActiveAnswerRunExistsError(RuntimeError):
+    pass
+
+
+class AnswerRunNotFoundError(LookupError):
     pass
 
 
@@ -98,9 +115,7 @@ class AnswerRepositoryPort(Protocol):
         workflow_version: str,
     ) -> AnswerRun: ...
 
-    async def complete_refusal(
-        self, run: AnswerRun, *, code: str, message: str
-    ) -> None: ...
+    async def complete_refusal(self, run: AnswerRun, *, code: str, message: str) -> bool: ...
 
     async def complete_answer(
         self,
@@ -108,9 +123,24 @@ class AnswerRepositoryPort(Protocol):
         *,
         answer: str,
         citations: list[CitationDraft],
-    ) -> None: ...
+    ) -> bool: ...
 
-    async def fail(self, run: AnswerRun, *, code: str, message: str) -> None: ...
+    async def fail(self, run_id: UUID, *, code: str, message: str) -> bool: ...
+
+    async def mark_running(self, run_id: UUID) -> bool: ...
+
+    async def get_status(self, run_id: UUID) -> AnswerRunStatus | None: ...
+
+    async def request_cancel(
+        self,
+        knowledge_base_id: UUID,
+        conversation_id: UUID,
+        run_id: UUID,
+    ) -> AnswerRunStatus | None: ...
+
+    async def cancel(self, run_id: UUID) -> bool: ...
+
+    async def rollback(self) -> None: ...
 
     async def list_page(
         self,
@@ -171,6 +201,24 @@ class AnswerService:
         await self._repository.commit()
         return self._stream(run=run, knowledge_base_id=knowledge_base_id, content=content)
 
+    async def request_cancel(
+        self,
+        *,
+        knowledge_base_id: UUID,
+        conversation_id: UUID,
+        run_id: UUID,
+    ) -> AnswerCancellationResponse:
+        await self._conversations.get(knowledge_base_id, conversation_id)
+        run_status = await self._repository.request_cancel(
+            knowledge_base_id,
+            conversation_id,
+            run_id,
+        )
+        if run_status is None:
+            raise AnswerRunNotFoundError
+        await self._repository.commit()
+        return AnswerCancellationResponse(run_id=run_id, status=run_status)
+
     async def list_history(
         self,
         *,
@@ -190,9 +238,7 @@ class AnswerService:
         has_more = len(rows) > limit
         selected = rows[:limit]
         next_cursor = (
-            _encode_cursor(selected[-1].run.created_at, selected[-1].run.id)
-            if has_more
-            else None
+            _encode_cursor(selected[-1].run.created_at, selected[-1].run.id) if has_more else None
         )
         return AnswerHistoryPage(
             items=[self._history_item(row) for row in selected],
@@ -206,6 +252,49 @@ class AnswerService:
         knowledge_base_id: UUID,
         content: str,
     ) -> AsyncIterator[AnswerEvent]:
+        run_id = run.id
+        execution = self._execute_stream(
+            run=run,
+            knowledge_base_id=knowledge_base_id,
+            content=content,
+        )
+        try:
+            async for event in execution:
+                yield event
+        except (asyncio.CancelledError, GeneratorExit):
+            with CancelScope(shield=True):
+                await self._repository.rollback()
+                await self._cancel(run_id)
+            raise
+        except Exception:
+            logger.exception("answer_run_failed_unexpectedly", run_id=str(run_id))
+            await self._repository.rollback()
+            if await self._fail(
+                run_id,
+                "ANSWER_RUN_UNEXPECTED_ERROR",
+                "Answer generation failed unexpectedly",
+            ):
+                yield AnswerErrorEvent(
+                    run_id=run_id,
+                    code="ANSWER_RUN_UNEXPECTED_ERROR",
+                    message="Answer generation failed unexpectedly",
+                )
+            else:
+                yield await self._cancel(run_id)
+        finally:
+            await self._close_stream(execution)
+
+    async def _execute_stream(
+        self,
+        *,
+        run: AnswerRun,
+        knowledge_base_id: UUID,
+        content: str,
+    ) -> AsyncIterator[AnswerEvent]:
+        if not await self._repository.mark_running(run.id):
+            yield await self._cancel(run.id)
+            return
+        await self._repository.commit()
         yield AnswerStatusEvent(run_id=run.id, status="retrieving")
         try:
             retrieved = await self._retrieval.search(
@@ -213,16 +302,21 @@ class AnswerService:
                 query=content,
             )
         except EmbeddingProviderError as error:
-            await self._fail(run, error.code, error.safe_message)
-            yield AnswerErrorEvent(
-                run_id=run.id, code=error.code, message=error.safe_message
-            )
+            if not await self._fail(run.id, error.code, error.safe_message):
+                yield await self._cancel(run.id)
+                return
+            yield AnswerErrorEvent(run_id=run.id, code=error.code, message=error.safe_message)
+            return
+        if await self._is_cancel_requested(run.id):
+            yield await self._cancel(run.id)
             return
         evidence = [item for item in retrieved if item.score >= self._minimum_score]
         if len(evidence) < self._minimum_evidence:
             code = "INSUFFICIENT_EVIDENCE"
             message = "The knowledge base does not contain enough evidence to answer."
-            await self._repository.complete_refusal(run, code=code, message=message)
+            if not await self._repository.complete_refusal(run, code=code, message=message):
+                yield await self._cancel(run.id)
+                return
             await self._repository.commit()
             yield AnswerRefusalEvent(run_id=run.id, code=code, message=message)
             return
@@ -232,59 +326,123 @@ class AnswerService:
             self._candidate(item, citation.id)
             for item, citation in zip(evidence, drafts, strict=True)
         ]
+        if await self._is_cancel_requested(run.id):
+            yield await self._cancel(run.id)
+            return
         yield AnswerStatusEvent(run_id=run.id, status="generating")
         answer_parts: list[str] = []
+        model_stream = self._generator.stream_answer(
+            question=content,
+            evidence=candidates,
+        )
         try:
-            async for delta in self._generator.stream_answer(
-                question=content,
-                evidence=candidates,
-            ):
+            while True:
+                delta, cancelled = await self._next_delta_or_cancel(
+                    run.id,
+                    model_stream,
+                )
+                if cancelled:
+                    yield await self._cancel(run.id)
+                    return
+                if delta is None:
+                    break
                 answer_parts.append(delta)
                 yield AnswerDeltaEvent(run_id=run.id, delta=delta)
         except LlmProviderError as error:
-            await self._fail(run, error.code, error.safe_message)
-            yield AnswerErrorEvent(
-                run_id=run.id, code=error.code, message=error.safe_message
-            )
+            if not await self._fail(run.id, error.code, error.safe_message):
+                yield await self._cancel(run.id)
+                return
+            yield AnswerErrorEvent(run_id=run.id, code=error.code, message=error.safe_message)
+            return
+        finally:
+            await self._close_stream(model_stream)
+        if await self._is_cancel_requested(run.id):
+            yield await self._cancel(run.id)
             return
         answer = "".join(answer_parts).strip()
         if not answer:
             code = "LLM_EMPTY_RESPONSE"
             message = "Language model returned an empty response"
-            await self._fail(run, code, message)
+            if not await self._fail(run.id, code, message):
+                yield await self._cancel(run.id)
+                return
             yield AnswerErrorEvent(run_id=run.id, code=code, message=message)
             return
         allowed_citations = {str(draft.id): draft for draft in drafts}
         cited_labels = _CITATION_LABEL.findall(answer)
-        if not cited_labels or any(
-            label not in allowed_citations for label in cited_labels
-        ):
+        if not cited_labels or any(label not in allowed_citations for label in cited_labels):
             code = "CITATION_VALIDATION_FAILED"
             message = "The generated answer did not contain a valid evidence citation."
-            await self._repository.complete_refusal(run, code=code, message=message)
+            if not await self._repository.complete_refusal(run, code=code, message=message):
+                yield await self._cancel(run.id)
+                return
             await self._repository.commit()
             yield AnswerRefusalEvent(run_id=run.id, code=code, message=message)
             return
         cited_ids = set(cited_labels)
         cited_drafts = [draft for draft in drafts if str(draft.id) in cited_ids]
-        await self._repository.complete_answer(
+        completed = await self._repository.complete_answer(
             run,
             answer=answer,
             citations=cited_drafts,
         )
+        if not completed:
+            yield await self._cancel(run.id)
+            return
         await self._repository.commit()
         yield AnswerFinalEvent(
             run_id=run.id,
             answer=answer,
-            citations=[
-                self._citation_response(knowledge_base_id, item)
-                for item in cited_drafts
-            ],
+            citations=[self._citation_response(knowledge_base_id, item) for item in cited_drafts],
         )
 
-    async def _fail(self, run: AnswerRun, code: str, message: str) -> None:
-        await self._repository.fail(run, code=code, message=message)
+    async def _fail(self, run_id: UUID, code: str, message: str) -> bool:
+        failed = await self._repository.fail(run_id, code=code, message=message)
         await self._repository.commit()
+        return failed
+
+    async def _is_cancel_requested(self, run_id: UUID) -> bool:
+        return await self._repository.get_status(run_id) in {
+            "cancel_requested",
+            "cancelled",
+        }
+
+    async def _cancel(self, run_id: UUID) -> AnswerCancelledEvent:
+        await self._repository.cancel(run_id)
+        await self._repository.commit()
+        return AnswerCancelledEvent(run_id=run_id)
+
+    async def _next_delta_or_cancel(
+        self,
+        run_id: UUID,
+        stream: AsyncIterator[str],
+    ) -> tuple[str | None, bool]:
+        next_delta: asyncio.Future[str] = asyncio.ensure_future(anext(stream))
+        try:
+            while True:
+                done, _pending = await asyncio.wait({next_delta}, timeout=0.1)
+                if done:
+                    try:
+                        return next_delta.result(), False
+                    except StopAsyncIteration:
+                        return None, False
+                if await self._is_cancel_requested(run_id):
+                    next_delta.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await next_delta
+                    return None, True
+        except BaseException:
+            if not next_delta.done():
+                next_delta.cancel()
+                with suppress(asyncio.CancelledError):
+                    await next_delta
+            raise
+
+    @staticmethod
+    async def _close_stream(stream: AsyncIterator[object]) -> None:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
 
     @staticmethod
     def _candidate(evidence: RetrievedEvidence, citation_id: UUID) -> RetrievalCandidate:
