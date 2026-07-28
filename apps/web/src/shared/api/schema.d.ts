@@ -109,6 +109,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge-bases/{knowledge_base_id}/documents/{document_id}/versions/{version_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Document Source */
+        get: operations["get_document_source_api_v1_knowledge_bases__knowledge_base_id__documents__document_id__versions__version_id__source_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge-bases/{knowledge_base_id}/conversations": {
         parameters: {
             query?: never;
@@ -162,14 +179,227 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Answers */
+        get: operations["list_answers_api_v1_knowledge_bases__knowledge_base_id__conversations__conversation_id__answers_get"];
+        put?: never;
+        /** Stream Answer */
+        post: operations["stream_answer_api_v1_knowledge_bases__knowledge_base_id__conversations__conversation_id__answers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AnswerDeltaEvent */
+        AnswerDeltaEvent: {
+            /**
+             * Version
+             * @default 1
+             * @constant
+             */
+            version: "1";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "delta";
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Delta */
+            delta: string;
+        };
+        /** AnswerErrorEvent */
+        AnswerErrorEvent: {
+            /**
+             * Version
+             * @default 1
+             * @constant
+             */
+            version: "1";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "error";
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        AnswerEvent: components["schemas"]["AnswerStatusEvent"] | components["schemas"]["AnswerDeltaEvent"] | components["schemas"]["AnswerFinalEvent"] | components["schemas"]["AnswerRefusalEvent"] | components["schemas"]["AnswerErrorEvent"];
+        /** AnswerFinalEvent */
+        AnswerFinalEvent: {
+            /**
+             * Version
+             * @default 1
+             * @constant
+             */
+            version: "1";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "final";
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Answer */
+            answer: string;
+            /** Citations */
+            citations: components["schemas"]["CitationResponse"][];
+        };
+        /** AnswerHistoryItem */
+        AnswerHistoryItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Question Id
+             * Format: uuid
+             */
+            question_id: string;
+            /** Question Content */
+            question_content: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "completed" | "failed";
+            /** Outcome */
+            outcome: ("answered" | "refused") | null;
+            /** Answer */
+            answer: string | null;
+            /** Refusal Code */
+            refusal_code: string | null;
+            /** Refusal Message */
+            refusal_message: string | null;
+            /** Failure Code */
+            failure_code: string | null;
+            /** Failure Message */
+            failure_message: string | null;
+            /** Llm Provider */
+            llm_provider: string;
+            /** Llm Model */
+            llm_model: string;
+            /** Prompt Version */
+            prompt_version: string;
+            /** Retrieval Version */
+            retrieval_version: string;
+            /** Workflow Version */
+            workflow_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Citations */
+            citations: components["schemas"]["CitationResponse"][];
+        };
+        /** AnswerHistoryResponse */
+        AnswerHistoryResponse: {
+            /** Items */
+            items: components["schemas"]["AnswerHistoryItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** AnswerRefusalEvent */
+        AnswerRefusalEvent: {
+            /**
+             * Version
+             * @default 1
+             * @constant
+             */
+            version: "1";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "refusal";
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /** AnswerRequest */
+        AnswerRequest: {
+            /** Content */
+            content: string;
+        };
+        /** AnswerStatusEvent */
+        AnswerStatusEvent: {
+            /**
+             * Version
+             * @default 1
+             * @constant
+             */
+            version: "1";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "status";
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "retrieving" | "generating";
+        };
         /** Body_upload_document_api_v1_knowledge_bases__knowledge_base_id__documents_post */
         Body_upload_document_api_v1_knowledge_bases__knowledge_base_id__documents_post: {
             /** File */
             file: string;
+        };
+        /** CitationResponse */
+        CitationResponse: {
+            /** Id */
+            id: string;
+            /** Document Id */
+            document_id: string;
+            /** Document Version Id */
+            document_version_id: string;
+            /** Document Name */
+            document_name: string;
+            /** Page Number */
+            page_number: number;
+            /** Excerpt */
+            excerpt: string;
+            /** Source Url */
+            source_url: string;
         };
         /** ConversationCreate */
         ConversationCreate: {
@@ -833,6 +1063,48 @@ export interface operations {
             };
         };
     };
+    get_document_source_api_v1_knowledge_bases__knowledge_base_id__documents__document_id__versions__version_id__source_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                knowledge_base_id: string;
+                document_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Source PDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_conversations_api_v1_knowledge_bases__knowledge_base_id__conversations_get: {
         parameters: {
             query?: {
@@ -1028,6 +1300,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_answers_api_v1_knowledge_bases__knowledge_base_id__conversations__conversation_id__answers_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                knowledge_base_id: string;
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnswerHistoryResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stream_answer_api_v1_knowledge_bases__knowledge_base_id__conversations__conversation_id__answers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                knowledge_base_id: string;
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerRequest"];
+            };
+        };
+        responses: {
+            /** @description Versioned answer event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["AnswerEvent"];
                 };
             };
             /** @description Not Found */

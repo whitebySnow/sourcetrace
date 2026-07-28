@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
+from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from typing import Protocol
 from uuid import UUID
@@ -13,6 +14,10 @@ from sourcetrace.modules.documents.repository import DocumentWriteConflictError
 
 
 class DocumentVersionNotFoundError(Exception):
+    pass
+
+
+class DocumentSourceNotFoundError(Exception):
     pass
 
 
@@ -84,6 +89,56 @@ class DocumentVersionRecord:
 class DocumentVersionPage:
     items: list[DocumentVersionRecord]
     next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class DocumentSource:
+    name: str
+    path: Path
+
+
+class DocumentSourceRepositoryPort(Protocol):
+    async def get_source(
+        self,
+        knowledge_base_id: UUID,
+        document_id: UUID,
+        version_id: UUID,
+    ) -> tuple[Document, DocumentVersion] | None: ...
+
+
+class DocumentSourceStoragePort(Protocol):
+    def source_path(self, storage_key: str) -> Path: ...
+
+
+class DocumentSourceService:
+    def __init__(
+        self,
+        repository: DocumentSourceRepositoryPort,
+        storage: DocumentSourceStoragePort,
+    ) -> None:
+        self._repository = repository
+        self._storage = storage
+
+    async def get(
+        self,
+        knowledge_base_id: UUID,
+        document_id: UUID,
+        version_id: UUID,
+    ) -> DocumentSource:
+        record = await self._repository.get_source(
+            knowledge_base_id,
+            document_id,
+            version_id,
+        )
+        if record is None:
+            raise DocumentSourceNotFoundError
+        document, version = record
+        if version.storage_key is None:
+            raise DocumentSourceNotFoundError
+        path = self._storage.source_path(version.storage_key)
+        if not path.is_file():
+            raise DocumentSourceNotFoundError
+        return DocumentSource(name=document.name, path=path)
 
 
 class UploadedFilePort(Protocol):

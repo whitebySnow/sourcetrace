@@ -55,3 +55,15 @@ _Avoid_: Chat session, global conversation
 **Question**:
 An immutable user-authored prompt recorded inside one conversation; it is history, not evidence and not an answer run.
 _Avoid_: Query result, message
+
+**Answer Run**:
+A replayable attempt to answer one question, recording its outcome and the model, prompt, retrieval, and workflow versions used.
+_Avoid_: Assistant message, response
+
+**Citation**:
+A stable reference from a completed answer to an allowed chunk in an immutable document version, with page and excerpt metadata for inspection.
+_Avoid_: Link, source name
+
+**Refusal**:
+A persisted answer-run outcome stating that evidence was insufficient or the generated text failed citation validation.
+_Avoid_: Error, empty answer

@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,8 +35,17 @@ class Settings(BaseSettings):
     ingestion_chunk_overlap: int = Field(default=80, ge=0)
     ingestion_chunking_config_version: str = "token-window-v1"
 
-    llm_provider: str = "mock"
-    llm_model: str = "mock-chat"
+    llm_provider: str = "openai-compatible"
+    llm_base_url: str = "https://api.example.com/v1"
+    llm_api_key: SecretStr | None = None
+    llm_model: str = "gpt-5.6-luna"
+    llm_timeout_seconds: float = Field(default=60, gt=0)
+    llm_prompt_version: str = "grounded-answer-v1"
+    retrieval_top_k: int = Field(default=8, ge=1, le=100)
+    retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)
+    retrieval_minimum_evidence: int = Field(default=1, ge=1)
+    retrieval_config_version: str = "pgvector-cosine-v1"
+    answer_workflow_version: str = "linear-grounded-v1"
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "BAAI/bge-m3"
     embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"

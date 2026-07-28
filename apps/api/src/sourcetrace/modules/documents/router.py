@@ -2,8 +2,10 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sourcetrace.api.dependencies import get_document_source_service
 from sourcetrace.core.config import get_settings
 from sourcetrace.core.errors import AppError, ErrorResponse
 from sourcetrace.db.session import get_session
@@ -21,6 +23,8 @@ from sourcetrace.modules.documents.schemas import (
 )
 from sourcetrace.modules.documents.service import (
     DocumentService,
+    DocumentSourceNotFoundError,
+    DocumentSourceService,
     DocumentUpload,
     DocumentUploadService,
     DocumentVersionNotFoundError,
@@ -45,6 +49,11 @@ from sourcetrace.modules.knowledge_bases.service import (
 )
 
 router = APIRouter(prefix="/knowledge-bases/{knowledge_base_id}/documents", tags=["documents"])
+
+DocumentSourceServiceDependency = Annotated[
+    DocumentSourceService,
+    Depends(get_document_source_service),
+]
 
 
 def get_document_service(
@@ -305,3 +314,40 @@ async def retry_document_ingestion(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         ) from error
     return IngestionRetryResponse(version_id=version_id, **result.__dict__)
+
+
+@router.get(
+    "/{document_id}/versions/{version_id}/source",
+    response_class=FileResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Source PDF",
+            "content": {
+                "application/pdf": {
+                    "schema": {"type": "string", "format": "binary"}
+                }
+            },
+        },
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def get_document_source(
+    knowledge_base_id: UUID,
+    document_id: UUID,
+    version_id: UUID,
+    service: DocumentSourceServiceDependency,
+) -> FileResponse:
+    try:
+        source = await service.get(knowledge_base_id, document_id, version_id)
+    except DocumentSourceNotFoundError as error:
+        raise AppError(
+            code="DOCUMENT_SOURCE_NOT_FOUND",
+            message="Document source not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        ) from error
+    return FileResponse(
+        source.path,
+        media_type="application/pdf",
+        filename=source.name,
+        content_disposition_type="inline",
+    )

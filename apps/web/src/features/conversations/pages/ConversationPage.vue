@@ -2,12 +2,18 @@
 import {
   AlertTriangle,
   ArrowLeft,
+  BookOpen,
+  ExternalLink,
   LoaderCircle,
   MessageSquare,
-  Plus,
+  Send,
+  ShieldAlert,
 } from "@lucide/vue";
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+
+import { useAnswers } from "@/features/answers/composables/useAnswers";
+import { apiUrl } from "@/shared/api/client";
 
 import { useConversationHistory } from "../composables/useConversationHistory";
 
@@ -23,16 +29,40 @@ const {
   loadingMore,
   nextCursor,
   questions,
-  submitting,
-  addQuestion,
   load,
   loadMore,
 } = useConversationHistory(knowledgeBaseId, conversationId);
+const {
+  activeAnswer,
+  activeCitations,
+  activeFailure,
+  activeQuestion,
+  activeRefusal,
+  activeStatus,
+  answersByQuestion,
+  errorMessage: answerErrorMessage,
+  loading: answersLoading,
+  loadingMore: answersLoadingMore,
+  nextCursor: answerNextCursor,
+  recentAnswers,
+  submitting,
+  ask,
+  load: loadAnswers,
+  loadMore: loadMoreAnswers,
+} = useAnswers(knowledgeBaseId, conversationId);
+
+async function loadMoreHistory() {
+  await Promise.all([loadMore(), loadMoreAnswers()]);
+}
 
 async function submit() {
   const value = content.value.trim();
   if (!value || submitting.value) return;
-  if (await addQuestion(value)) content.value = "";
+  if (await ask(value)) content.value = "";
+}
+
+function citationHref(path: string) {
+  return apiUrl(path);
 }
 
 function formatDate(value: string) {
@@ -45,7 +75,9 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-onMounted(load);
+onMounted(() => {
+  void Promise.all([load(), loadAnswers()]);
+});
 </script>
 
 <template>
@@ -89,38 +121,174 @@ onMounted(load);
         <AlertTriangle :size="18" aria-hidden="true" />
         <span>{{ errorMessage }}</span>
       </div>
+      <div v-if="answerErrorMessage" class="message error-message" role="alert">
+        <AlertTriangle :size="18" aria-hidden="true" />
+        <span>{{ answerErrorMessage }}</span>
+      </div>
 
       <section class="history" aria-labelledby="history-title">
-        <h2 id="history-title">问题历史</h2>
-        <div v-if="questions.length === 0" class="empty-history">
+        <h2 id="history-title">问答历史</h2>
+        <div v-if="answersLoading" class="message" aria-live="polite">
+          <LoaderCircle :size="18" class="spinning" aria-hidden="true" />
+          <span>正在加载回答...</span>
+        </div>
+        <div v-else-if="questions.length === 0" class="empty-history">
           <MessageSquare :size="27" aria-hidden="true" />
           <strong>尚无问题</strong>
         </div>
         <div v-else class="question-list">
           <article v-for="question in questions" :key="question.id" class="question-row">
-            <p>{{ question.content }}</p>
-            <time :datetime="question.created_at">{{ formatDate(question.created_at) }}</time>
+            <div class="question-heading">
+              <p>{{ question.content }}</p>
+              <time :datetime="question.created_at">{{ formatDate(question.created_at) }}</time>
+            </div>
+            <div
+              v-if="answersByQuestion.get(question.id)"
+              class="answer-block"
+            >
+              <template
+                v-if="
+                  answersByQuestion.get(question.id)?.status === 'completed' &&
+                  answersByQuestion.get(question.id)?.outcome === 'answered'
+                "
+              >
+                <p class="answer-text">{{ answersByQuestion.get(question.id)?.answer }}</p>
+                <div
+                  v-if="answersByQuestion.get(question.id)?.citations.length"
+                  class="citation-list"
+                >
+                  <a
+                    v-for="citation in answersByQuestion.get(question.id)?.citations"
+                    :key="citation.id"
+                    class="citation"
+                    :href="citationHref(citation.source_url)"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span class="citation-title">
+                      <BookOpen :size="15" aria-hidden="true" />
+                      {{ citation.document_name }} · 第 {{ citation.page_number }} 页
+                      <ExternalLink :size="13" aria-hidden="true" />
+                    </span>
+                    <span>{{ citation.excerpt }}</span>
+                  </a>
+                </div>
+              </template>
+              <p
+                v-else-if="answersByQuestion.get(question.id)?.status === 'failed'"
+                class="failure-text"
+              >
+                <AlertTriangle :size="17" aria-hidden="true" />
+                {{
+                  answersByQuestion.get(question.id)?.failure_message ??
+                  "回答生成失败。"
+                }}
+              </p>
+              <p
+                v-else-if="answersByQuestion.get(question.id)?.outcome === 'refused'"
+                class="refusal-text"
+              >
+                <ShieldAlert :size="17" aria-hidden="true" />
+                {{ answersByQuestion.get(question.id)?.refusal_message }}
+              </p>
+              <p v-else class="stream-status">
+                <LoaderCircle :size="15" class="spinning" aria-hidden="true" />
+                回答仍在处理中
+              </p>
+            </div>
           </article>
           <button
-            v-if="nextCursor"
+            v-if="nextCursor || answerNextCursor"
             class="load-more-button"
             type="button"
-            :disabled="loadingMore"
-            @click="loadMore"
+            :disabled="loadingMore || answersLoadingMore"
+            @click="loadMoreHistory"
           >
             <LoaderCircle
-              v-if="loadingMore"
+              v-if="loadingMore || answersLoadingMore"
               :size="16"
               class="spinning"
               aria-hidden="true"
             />
-            <span>{{ loadingMore ? "加载中..." : "加载更多" }}</span>
+            <span>{{ loadingMore || answersLoadingMore ? "加载中..." : "加载更多" }}</span>
           </button>
         </div>
       </section>
 
+      <section
+        v-for="answer in recentAnswers"
+        :key="answer.id"
+        class="active-answer"
+      >
+        <div class="question-heading">
+          <p>{{ answer.question }}</p>
+        </div>
+        <p v-if="answer.answer" class="answer-text">{{ answer.answer }}</p>
+        <p v-if="answer.refusal" class="refusal-text">
+          <ShieldAlert :size="17" aria-hidden="true" />
+          {{ answer.refusal }}
+        </p>
+        <p v-if="answer.failure" class="failure-text">
+          <AlertTriangle :size="17" aria-hidden="true" />
+          {{ answer.failure }}
+        </p>
+        <div v-if="answer.citations.length" class="citation-list">
+          <a
+            v-for="citation in answer.citations"
+            :key="citation.id"
+            class="citation"
+            :href="citationHref(citation.source_url)"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span class="citation-title">
+              <BookOpen :size="15" aria-hidden="true" />
+              {{ citation.document_name }} · 第 {{ citation.page_number }} 页
+              <ExternalLink :size="13" aria-hidden="true" />
+            </span>
+            <span>{{ citation.excerpt }}</span>
+          </a>
+        </div>
+      </section>
+
+      <section v-if="activeQuestion" class="active-answer" aria-live="polite">
+        <div class="question-heading">
+          <p>{{ activeQuestion }}</p>
+          <span v-if="activeStatus !== 'completed'" class="stream-status">
+            <LoaderCircle :size="15" class="spinning" aria-hidden="true" />
+            {{ activeStatus === "retrieving" ? "检索证据" : "生成回答" }}
+          </span>
+        </div>
+        <p v-if="activeAnswer" class="answer-text">{{ activeAnswer }}</p>
+        <p v-if="activeRefusal" class="refusal-text">
+          <ShieldAlert :size="17" aria-hidden="true" />
+          {{ activeRefusal }}
+        </p>
+        <p v-if="activeFailure" class="failure-text">
+          <AlertTriangle :size="17" aria-hidden="true" />
+          {{ activeFailure }}
+        </p>
+        <div v-if="activeCitations.length" class="citation-list">
+          <a
+            v-for="citation in activeCitations"
+            :key="citation.id"
+            class="citation"
+            :href="citationHref(citation.source_url)"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span class="citation-title">
+              <BookOpen :size="15" aria-hidden="true" />
+              {{ citation.document_name }} · 第 {{ citation.page_number }} 页
+              <ExternalLink :size="13" aria-hidden="true" />
+            </span>
+            <span>{{ citation.excerpt }}</span>
+          </a>
+        </div>
+      </section>
+
       <form class="question-form" @submit.prevent="submit">
-        <label for="question-content">记录问题</label>
+        <label for="question-content">向知识库提问</label>
         <textarea
           id="question-content"
           v-model="content"
@@ -139,8 +307,8 @@ onMounted(load);
             class="spinning"
             aria-hidden="true"
           />
-          <Plus v-else :size="16" aria-hidden="true" />
-          <span>{{ submitting ? "保存中..." : "保存问题" }}</span>
+          <Send v-else :size="16" aria-hidden="true" />
+          <span>{{ submitting ? "回答中..." : "发送问题" }}</span>
         </button>
       </form>
     </template>
@@ -245,21 +413,91 @@ h1 {
   border-top: 1px solid #dfe5e0;
 }
 .question-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
   padding: 18px 4px;
   border-bottom: 1px solid #e5eae6;
 }
-.question-row p {
+.question-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+}
+.question-heading p {
   margin-bottom: 0;
   overflow-wrap: anywhere;
+  font-weight: 700;
   line-height: 1.6;
 }
-.question-row time {
+.question-heading time,
+.stream-status {
   color: #6b756e;
   font-size: 13px;
   white-space: nowrap;
+}
+.answer-block {
+  margin-top: 14px;
+  padding-left: 16px;
+  border-left: 2px solid #b8cfc1;
+}
+.answer-text {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+.refusal-text,
+.failure-text,
+.stream-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.refusal-text {
+  margin-bottom: 0;
+  color: #7c3b23;
+}
+.failure-text {
+  margin-bottom: 0;
+  color: #8d2929;
+}
+.citation-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.citation {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  overflow-wrap: anywhere;
+  color: #35433b;
+  text-decoration: none;
+  background: #f7faf8;
+  border: 1px solid #d8e2dc;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.citation:hover {
+  border-color: #8fac9a;
+}
+.citation-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #1f6f4a;
+  font-weight: 700;
+}
+.active-answer {
+  margin-top: 24px;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #cfdad3;
+  border-radius: 8px;
+}
+.active-answer .answer-text,
+.active-answer .refusal-text,
+.active-answer .failure-text {
+  margin-top: 14px;
 }
 .load-more-button,
 .question-form button {
@@ -324,8 +562,15 @@ button:disabled {
     padding: 32px 0 56px;
   }
   .question-row {
+    padding: 16px 0;
+  }
+  .question-heading {
     grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 7px;
+  }
+  .question-heading time,
+  .stream-status {
+    white-space: normal;
   }
 }
 @media (prefers-reduced-motion: reduce) {

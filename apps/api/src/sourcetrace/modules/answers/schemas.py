@@ -1,0 +1,101 @@
+from datetime import datetime
+from typing import Annotated, Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class AnswerRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("question content must not be blank")
+        return normalized
+
+
+class AnswerStatusEvent(BaseModel):
+    version: Literal["1"] = "1"
+    type: Literal["status"] = "status"
+    run_id: UUID
+    status: Literal["retrieving", "generating"]
+
+
+class AnswerDeltaEvent(BaseModel):
+    version: Literal["1"] = "1"
+    type: Literal["delta"] = "delta"
+    run_id: UUID
+    delta: str
+
+
+class CitationResponse(BaseModel):
+    id: str
+    document_id: str
+    document_version_id: str
+    document_name: str
+    page_number: int
+    excerpt: str
+    source_url: str
+
+
+class AnswerFinalEvent(BaseModel):
+    version: Literal["1"] = "1"
+    type: Literal["final"] = "final"
+    run_id: UUID
+    answer: str
+    citations: list[CitationResponse]
+
+
+class AnswerRefusalEvent(BaseModel):
+    version: Literal["1"] = "1"
+    type: Literal["refusal"] = "refusal"
+    run_id: UUID
+    code: str
+    message: str
+
+
+class AnswerErrorEvent(BaseModel):
+    version: Literal["1"] = "1"
+    type: Literal["error"] = "error"
+    run_id: UUID
+    code: str
+    message: str
+
+
+type AnswerEvent = Annotated[
+    AnswerStatusEvent
+    | AnswerDeltaEvent
+    | AnswerFinalEvent
+    | AnswerRefusalEvent
+    | AnswerErrorEvent,
+    Field(discriminator="type"),
+]
+
+
+class AnswerHistoryItem(BaseModel):
+    id: UUID
+    question_id: UUID
+    question_content: str
+    status: Literal["running", "completed", "failed"]
+    outcome: Literal["answered", "refused"] | None
+    answer: str | None
+    refusal_code: str | None
+    refusal_message: str | None
+    failure_code: str | None
+    failure_message: str | None
+    llm_provider: str
+    llm_model: str
+    prompt_version: str
+    retrieval_version: str
+    workflow_version: str
+    created_at: datetime
+    completed_at: datetime | None
+    citations: list[CitationResponse]
+
+
+class AnswerHistoryResponse(BaseModel):
+    items: list[AnswerHistoryItem]
+    next_cursor: str | None

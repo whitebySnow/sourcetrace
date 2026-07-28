@@ -4,6 +4,10 @@ import type { paths } from "./schema";
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+export function apiUrl(path: string): string {
+  return `${baseUrl.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+}
+
 export const apiClient = createClient<paths>({
   baseUrl,
   headers: {
@@ -41,4 +45,33 @@ export function toApiClientError(error: unknown): ApiClientError {
     );
   }
   return new ApiClientError("NETWORK_ERROR", "无法连接 API 服务。");
+}
+
+export async function streamRequest(
+  path: string,
+  body: unknown,
+): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(path), {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiClientError("NETWORK_ERROR", "无法连接 API 服务。");
+  }
+  if (!response.ok) {
+    let error: unknown;
+    try {
+      error = await response.json();
+    } catch {
+      error = undefined;
+    }
+    throw toApiClientError(error);
+  }
+  return response;
 }
