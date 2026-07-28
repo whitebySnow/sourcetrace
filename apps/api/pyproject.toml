@@ -16,6 +16,7 @@ dependencies = [
   "pypdf>=6.0,<7",
   "python-multipart>=0.0.20,<1",
   "redis>=6.2,<7",
+  "sentence-transformers>=5.1,<6",
   "sqlalchemy[asyncio]>=2.0.41,<3",
   "structlog>=25.4,<26",
   "tiktoken>=0.9,<1",

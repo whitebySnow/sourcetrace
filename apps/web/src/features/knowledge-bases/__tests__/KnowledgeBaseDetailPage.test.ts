@@ -76,6 +76,10 @@ describe("KnowledgeBaseDetailPage", () => {
       .mockResolvedValueOnce({
         items: [{ ...pending, status: "chunked", stage: "chunked" }],
         next_cursor: null,
+      })
+      .mockResolvedValueOnce({
+        items: [{ ...pending, status: "completed", stage: "completed" }],
+        next_cursor: null,
       });
     mount(KnowledgeBaseDetailPage);
     await flushPromises();
@@ -85,8 +89,11 @@ describe("KnowledgeBaseDetailPage", () => {
     await vi.advanceTimersByTimeAsync(1);
     await flushPromises();
     expect(listDocumentVersions).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(listDocumentVersions).toHaveBeenCalledTimes(3);
     await vi.advanceTimersByTimeAsync(4_000);
-    expect(listDocumentVersions).toHaveBeenCalledTimes(2);
+    expect(listDocumentVersions).toHaveBeenCalledTimes(3);
   });
 
   it("offers manual retry only for recoverable failures", async () => {
@@ -152,8 +159,8 @@ describe("KnowledgeBaseDetailPage", () => {
       ...base,
       version_id: "106871ac-1c11-4854-ae6e-084a67cac73a",
       name: "recent.pdf",
-      status: "chunked",
-      stage: "chunked",
+      status: "completed",
+      stage: "completed",
     };
     const active = { ...base, status: "processing", stage: "parsing" };
     listDocumentVersions
@@ -161,7 +168,7 @@ describe("KnowledgeBaseDetailPage", () => {
       .mockResolvedValueOnce({ items: [active], next_cursor: null })
       .mockResolvedValueOnce({ items: [recent], next_cursor: "cursor-2" })
       .mockResolvedValueOnce({
-        items: [{ ...active, status: "chunked", stage: "chunked" }],
+        items: [{ ...active, status: "completed", stage: "completed" }],
         next_cursor: null,
       });
     const wrapper = mount(KnowledgeBaseDetailPage);

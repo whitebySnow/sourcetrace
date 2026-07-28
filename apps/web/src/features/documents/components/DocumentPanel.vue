@@ -62,6 +62,8 @@ function stageLabel(stage: string) {
     parsing: "解析 PDF",
     chunking: "切分文本",
     chunked: "等待向量化",
+    embedding: "生成向量",
+    indexing: "写入索引",
     completed: "处理完成",
     failed: "处理失败",
   };

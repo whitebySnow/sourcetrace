@@ -37,8 +37,15 @@ class Settings(BaseSettings):
 
     llm_provider: str = "mock"
     llm_model: str = "mock-chat"
-    embedding_provider: str = "mock"
-    embedding_model: str = "mock-embedding"
+    embedding_provider: str = "sentence-transformers"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"
+    embedding_cache_dir: Path = Path(r"D:\DevelopEnvironment\huggingface")
+    embedding_hf_endpoint: str | None = "https://hf-mirror.com"
+    embedding_device: str = "cpu"
+    embedding_batch_size: int = Field(default=8, ge=1)
+    embedding_dimension: int = Field(default=1024, ge=1)
+    embedding_config_version: str = "bge-m3-dense-v1"
 
 
 @lru_cache
