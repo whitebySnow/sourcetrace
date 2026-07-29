@@ -3,6 +3,7 @@
   "model_provider": "fake",
   "model_name": "deterministic-fixture-v1",
   "workflow_version": "langgraph-bounded-v1",
+  "parser_version": "fake-parser-v1",
   "tokenizer": "cl100k_base",
   "chunk_size": 500,
   "chunk_overlap": 80,
@@ -12,5 +13,12 @@
   "embedding_revision": "1",
   "embedding_dimension": 4,
   "embedding_version": "bge-m3-dense-v1",
-  "retrieval_version": "pgvector-cosine-v1"
+  "retrieval_version": "pgvector-cosine-v1",
+  "retrieval_top_k": 8,
+  "retrieval_minimum_score": 0.5,
+  "retrieval_minimum_evidence": 1,
+  "generation_prompt_version": "grounded-answer-v1",
+  "question_rewrite_prompt_version": "follow-up-query-v1",
+  "evidence_assessment_prompt_version": "evidence-assessment-v1",
+  "citation_repair_prompt_version": "citation-repair-v1"
 }

@@ -17,8 +17,10 @@ class DatasetReview(StrictModel):
     @field_validator("reviewed_at")
     @classmethod
     def normalize_review_time(cls, value: datetime | None) -> datetime | None:
-        if value is None or value.utcoffset() is None:
+        if value is None:
             return value
+        if value.utcoffset() is None:
+            raise ValueError("review times must be timezone-aware UTC")
         return value.astimezone(UTC)
 
     @model_validator(mode="after")
@@ -30,6 +32,10 @@ class DatasetReview(StrictModel):
             or self.reviewed_at.utcoffset() is None
         ):
             raise ValueError("reviewed datasets require reviewer identity and timezone-aware time")
+        if self.status == "fixture" and (
+            self.reviewed_by is not None or self.reviewed_at is not None
+        ):
+            raise ValueError("evaluation fixtures cannot include review metadata")
         return self
 
 
@@ -115,6 +121,7 @@ class EvaluationRunMetadata(StrictModel):
     model_provider: str = Field(min_length=1)
     model_name: str = Field(min_length=1)
     workflow_version: str = Field(min_length=1)
+    parser_version: str = Field(min_length=1)
     tokenizer: str = Field(min_length=1)
     chunk_size: int = Field(gt=0)
     chunk_overlap: int = Field(ge=0)
@@ -125,6 +132,13 @@ class EvaluationRunMetadata(StrictModel):
     embedding_dimension: int = Field(gt=0)
     embedding_version: str = Field(min_length=1)
     retrieval_version: str = Field(min_length=1)
+    retrieval_top_k: int = Field(gt=0)
+    retrieval_minimum_score: float = Field(ge=-1, le=1)
+    retrieval_minimum_evidence: int = Field(gt=0)
+    generation_prompt_version: str = Field(min_length=1)
+    question_rewrite_prompt_version: str = Field(min_length=1)
+    evidence_assessment_prompt_version: str = Field(min_length=1)
+    citation_repair_prompt_version: str = Field(min_length=1)
 
 
 type EvaluationStatus = Literal["passed", "failed", "pending_review", "not_applicable"]
@@ -140,6 +154,7 @@ class EvaluationJudgmentSet(StrictModel):
     schema_version: Literal["1"]
     dataset_id: str = Field(min_length=1)
     dataset_version: str = Field(min_length=1)
+    report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     review: DatasetReview
     judgments: list[CaseJudgment] = Field(min_length=1)
 

@@ -160,9 +160,10 @@ PostgreSQL 部分唯一索引保证同一 Conversation 在 `pending`、`running`
 Dataset 保存完整不可变文档版本快照，以及预期回答或拒答、页码和证据摘录；Harness 分别计算检索召回、
 引用正确性、拒答和端到端结果。离线模式消费确定性 fixture，真实模式用记录型检索适配器包装
 生产 RetrievalService，把 pgvector 限定在该快照，并消费 AnswerWorkflow 的最终事件。真实
-运行从快照 chunk 对应的 completed Ingestion Run 读取实际切分和 embedding provenance；不完整
-或混用配置的快照不能运行。Report 绑定 Dataset、代码提交、模型、工作流、切分、embedding
-和检索版本，另可绑定带审核人和 UTC 时间的端到端 Judgment。真实模式只接受人工审核数据集
+运行从快照 chunk 对应的 completed Ingestion Run 读取实际 parser、切分和 embedding
+provenance；不完整或混用配置的快照不能运行。Report 绑定 Dataset、代码提交、模型、四个
+prompt、工作流、切分、embedding 和检索参数/版本。端到端 Judgment 只能在运行后离线应用，
+并以 SHA-256 绑定待审 Report，同时保存审核人和 UTC 时间。真实模式只接受人工审核数据集
 并要求 CLI 显式确认，避免常规测试误用数据库、本地模型或付费供应商。
 
 ## 7. API 契约

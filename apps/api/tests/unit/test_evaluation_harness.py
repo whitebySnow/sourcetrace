@@ -9,6 +9,7 @@ from sourcetrace.evaluation import (
     ObservedEvidence,
 )
 from sourcetrace.evaluation.models import EvaluationCase, EvaluationJudgmentSet
+from sourcetrace.evaluation.review import apply_judgments
 
 
 class DeterministicSubject:
@@ -70,6 +71,7 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
         model_provider="fake",
         model_name="deterministic-fixture-v1",
         workflow_version="langgraph-bounded-v1",
+        parser_version="fake-parser-v1",
         tokenizer="cl100k_base",
         chunk_size=500,
         chunk_overlap=80,
@@ -80,6 +82,13 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
         embedding_dimension=4,
         embedding_version="bge-m3-dense-v1",
         retrieval_version="pgvector-cosine-v1",
+        retrieval_top_k=8,
+        retrieval_minimum_score=0.5,
+        retrieval_minimum_evidence=1,
+        generation_prompt_version="grounded-answer-v1",
+        question_rewrite_prompt_version="follow-up-query-v1",
+        evidence_assessment_prompt_version="evidence-assessment-v1",
+        citation_repair_prompt_version="citation-repair-v1",
     )
 
     report = await EvaluationHarness().run(dataset, subject, metadata=metadata)
@@ -94,15 +103,14 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
     assert report.cases[0].refusal == "not_applicable"
     assert report.cases[0].end_to_end == "pending_review"
 
-    reviewed_report = await EvaluationHarness().run(
-        dataset,
-        subject,
-        metadata=metadata,
-        judgments=EvaluationJudgmentSet.model_validate(
+    reviewed_report = apply_judgments(
+        report,
+        EvaluationJudgmentSet.model_validate(
             {
                 "schema_version": "1",
                 "dataset_id": "fixture-rag",
                 "dataset_version": "1.0.0",
+                "report_sha256": "a" * 64,
                 "review": {
                     "status": "reviewed",
                     "reviewed_by": "project-owner",
@@ -111,6 +119,7 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
                 "judgments": [{"case_id": "direct-001", "status": "passed"}],
             }
         ),
+        report_sha256="a" * 64,
     )
 
     assert reviewed_report.cases[0].end_to_end == "passed"
@@ -159,6 +168,7 @@ async def test_refusal_results_are_reported_without_scoring_irrelevant_axes() ->
         model_provider="fake",
         model_name="deterministic-fixture-v1",
         workflow_version="langgraph-bounded-v1",
+        parser_version="fake-parser-v1",
         tokenizer="cl100k_base",
         chunk_size=500,
         chunk_overlap=80,
@@ -169,6 +179,13 @@ async def test_refusal_results_are_reported_without_scoring_irrelevant_axes() ->
         embedding_dimension=4,
         embedding_version="bge-m3-dense-v1",
         retrieval_version="pgvector-cosine-v1",
+        retrieval_top_k=8,
+        retrieval_minimum_score=0.5,
+        retrieval_minimum_evidence=1,
+        generation_prompt_version="grounded-answer-v1",
+        question_rewrite_prompt_version="follow-up-query-v1",
+        evidence_assessment_prompt_version="evidence-assessment-v1",
+        citation_repair_prompt_version="citation-repair-v1",
     )
 
     report = await EvaluationHarness().run(dataset, subject, metadata=metadata)
@@ -239,6 +256,7 @@ async def test_citation_fails_when_answer_cites_evidence_outside_ground_truth() 
         model_provider="fake",
         model_name="deterministic-fixture-v1",
         workflow_version="langgraph-bounded-v1",
+        parser_version="fake-parser-v1",
         tokenizer="cl100k_base",
         chunk_size=500,
         chunk_overlap=80,
@@ -249,6 +267,13 @@ async def test_citation_fails_when_answer_cites_evidence_outside_ground_truth() 
         embedding_dimension=4,
         embedding_version="bge-m3-dense-v1",
         retrieval_version="pgvector-cosine-v1",
+        retrieval_top_k=8,
+        retrieval_minimum_score=0.5,
+        retrieval_minimum_evidence=1,
+        generation_prompt_version="grounded-answer-v1",
+        question_rewrite_prompt_version="follow-up-query-v1",
+        evidence_assessment_prompt_version="evidence-assessment-v1",
+        citation_repair_prompt_version="citation-repair-v1",
     )
 
     report = await EvaluationHarness().run(dataset, subject, metadata=metadata)

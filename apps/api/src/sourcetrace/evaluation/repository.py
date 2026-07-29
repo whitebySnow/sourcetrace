@@ -10,6 +10,7 @@ from sourcetrace.modules.documents.models import Chunk, DocumentVersion, Ingesti
 
 @dataclass(frozen=True, slots=True)
 class CorpusProvenance:
+    parser_version: str
     tokenizer: str
     chunk_size: int
     chunk_overlap: int
@@ -37,6 +38,7 @@ class EvaluationCorpusRepository:
             await self._session.execute(
                 select(
                     DocumentVersion.id,
+                    IngestionRun.parser_version,
                     IngestionRun.tokenizer,
                     IngestionRun.chunk_size,
                     IngestionRun.chunk_overlap,
@@ -62,33 +64,30 @@ class EvaluationCorpusRepository:
         if {row.id for row in rows} != requested_ids:
             raise ValueError("every evaluation document version must be searchable")
 
-        configurations = {
-            (
-                row.tokenizer,
-                row.chunk_size,
-                row.chunk_overlap,
-                row.chunking_config_version,
-                row.embedding_provider,
-                row.embedding_model,
-                row.embedding_model_revision,
-                row.embedding_dimension,
-                row.embedding_config_version,
+        configurations: set[CorpusProvenance] = set()
+        for row in rows:
+            if (
+                row.embedding_provider is None
+                or row.embedding_model is None
+                or row.embedding_model_revision is None
+                or row.embedding_dimension is None
+                or row.embedding_config_version is None
+            ):
+                raise ValueError("evaluation snapshot has incomplete embedding provenance")
+            configurations.add(
+                CorpusProvenance(
+                    parser_version=row.parser_version,
+                    tokenizer=row.tokenizer,
+                    chunk_size=row.chunk_size,
+                    chunk_overlap=row.chunk_overlap,
+                    chunking_version=row.chunking_config_version,
+                    embedding_provider=row.embedding_provider,
+                    embedding_model=row.embedding_model,
+                    embedding_revision=row.embedding_model_revision,
+                    embedding_dimension=row.embedding_dimension,
+                    embedding_version=row.embedding_config_version,
+                )
             )
-            for row in rows
-        }
         if len(configurations) != 1:
             raise ValueError("evaluation snapshot must use the same ingestion configuration")
-        configuration = next(iter(configurations))
-        if any(value is None for value in configuration):
-            raise ValueError("evaluation snapshot has incomplete embedding provenance")
-        return CorpusProvenance(
-            tokenizer=configuration[0],
-            chunk_size=configuration[1],
-            chunk_overlap=configuration[2],
-            chunking_version=configuration[3],
-            embedding_provider=configuration[4],
-            embedding_model=configuration[5],
-            embedding_revision=configuration[6],
-            embedding_dimension=configuration[7],
-            embedding_version=configuration[8],
-        )
+        return next(iter(configurations))

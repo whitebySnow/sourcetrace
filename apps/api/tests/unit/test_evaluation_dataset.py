@@ -195,6 +195,46 @@ def test_review_time_is_normalized_to_utc() -> None:
     assert dataset.review.reviewed_at == datetime(2026, 7, 29, 2, 0, tzinfo=UTC)
 
 
+@pytest.mark.parametrize(
+    "review",
+    [
+        {
+            "status": "fixture",
+            "reviewed_at": "2026-07-29T03:00:00",
+        },
+        {
+            "status": "fixture",
+            "reviewed_by": "not-a-real-review",
+            "reviewed_at": "2026-07-29T03:00:00Z",
+        },
+    ],
+)
+def test_fixture_rejects_review_metadata(review: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        EvaluationDataset.model_validate(
+            {
+                "schema_version": "1",
+                "dataset_id": "fixture-review-boundary",
+                "dataset_version": "1.0.0",
+                "knowledge_base_id": uuid4(),
+                "document_version_ids": [uuid4()],
+                "review": review,
+                "cases": [
+                    {
+                        "id": "unanswerable-001",
+                        "category": "unanswerable",
+                        "question": "What is outside the source?",
+                        "expected": {
+                            "outcome": "refused",
+                            "reference_answer": None,
+                            "evidence": [],
+                        },
+                    }
+                ],
+            }
+        )
+
+
 def test_dataset_rejects_evidence_outside_document_snapshot() -> None:
     with pytest.raises(ValidationError):
         EvaluationDataset.model_validate(

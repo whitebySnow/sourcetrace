@@ -87,6 +87,11 @@
       "title": "Dataset Version",
       "type": "string"
     },
+    "report_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Report Sha256",
+      "type": "string"
+    },
     "review": {
       "$ref": "#/$defs/DatasetReview"
     },
@@ -103,6 +108,7 @@
     "schema_version",
     "dataset_id",
     "dataset_version",
+    "report_sha256",
     "review",
     "judgments"
   ],

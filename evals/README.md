@@ -23,9 +23,9 @@ pnpm eval:fake
 重放 fixture，并输出四组分离结果：检索召回、引用正确性、拒答行为和端到端结果。回答样本的
 端到端结果在没有人工 judgment 时保持 `pending_review`。
 
-回答 case 的人工判定使用 `judgments-v1.schema.json`，必须绑定相同 dataset ID/version、记录
-审核人与 UTC 时间，并完整覆盖所有 expected answered case。传入 `--judgments <path>` 后，
-报告会保存审核元数据并把对应端到端结果更新为 `passed` 或 `failed`。
+回答 case 的人工判定使用 `judgments-v1.schema.json`，必须绑定相同 dataset ID/version、待审
+报告文件的 SHA-256、审核人与 UTC 时间，并完整覆盖所有 `pending_review` case。审核只通过
+独立的 `review` 命令应用到既有报告，不能在新一轮模型调用前复用旧 judgment。
 
 ## 真实受控评测
 
@@ -36,13 +36,23 @@ pnpm eval:fake
 uv run --project apps/api python -m sourcetrace.evaluation.cli real `
   --dataset evals/datasets/<dataset>.json `
   --code-commit (git rev-parse HEAD) `
-  --judgments evals/judgments/<judgments>.json `
   --output output/evals/<report>.json `
   --confirm-real-provider
+```
+
+对该报告的回答逐条人工核对后，把原始报告文件 SHA-256 写入 judgment 文件，再离线应用：
+
+```powershell
+$reportHash = (Get-FileHash output/evals/<report>.json -Algorithm SHA256).Hash.ToLowerInvariant()
+pnpm eval:review -- `
+  --report output/evals/<report>.json `
+  --judgments evals/judgments/<judgments>.json `
+  --output output/evals/<reviewed-report>.json
 ```
 
 真实命令拒绝 `fixture` 数据集，并把 pgvector 查询严格限制在数据集的文档版本快照。它从
 这些版本实际产生 chunk 的 completed ingestion run 读取切分参数及 embedding 模型、revision
 和配置版本；快照缺失、不可检索、provenance 不完整或混用配置时直接失败。常规 `pnpm test`
-不执行该命令，不访问数据库、embedding 模型或 LLM API。报告绑定数据集、代码、模型、工作流、切分、embedding 和检索配置版本；未实际运行
+不执行该命令，不访问数据库、embedding 模型或 LLM API。报告绑定数据集、代码、模型、
+parser、切分、embedding、四个 prompt、工作流和检索参数/版本；未实际运行
 并完成必要人工审核时，不得把报告数字写入 README、简历或项目说明。

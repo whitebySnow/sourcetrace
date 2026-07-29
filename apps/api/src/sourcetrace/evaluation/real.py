@@ -7,7 +7,6 @@ from sourcetrace.db.session import session_factory
 from sourcetrace.evaluation.harness import EvaluationHarness
 from sourcetrace.evaluation.models import (
     EvaluationDataset,
-    EvaluationJudgmentSet,
     EvaluationReport,
     EvaluationRunMetadata,
 )
@@ -56,7 +55,6 @@ async def run_real_evaluation(
     *,
     code_commit: str,
     settings: Settings,
-    judgments: EvaluationJudgmentSet | None = None,
 ) -> EvaluationReport:
     if dataset.review.status != "reviewed":
         raise ValueError("real evaluations require a human-reviewed dataset")
@@ -132,6 +130,7 @@ async def run_real_evaluation(
                 model_provider=settings.llm_provider,
                 model_name=settings.llm_model,
                 workflow_version=settings.answer_workflow_version,
+                parser_version=provenance.parser_version,
                 tokenizer=provenance.tokenizer,
                 chunk_size=provenance.chunk_size,
                 chunk_overlap=provenance.chunk_overlap,
@@ -142,6 +141,14 @@ async def run_real_evaluation(
                 embedding_dimension=provenance.embedding_dimension,
                 embedding_version=provenance.embedding_version,
                 retrieval_version=settings.retrieval_config_version,
+                retrieval_top_k=settings.retrieval_top_k,
+                retrieval_minimum_score=settings.retrieval_minimum_score,
+                retrieval_minimum_evidence=settings.retrieval_minimum_evidence,
+                generation_prompt_version=settings.llm_prompt_version,
+                question_rewrite_prompt_version=(settings.llm_question_rewrite_prompt_version),
+                evidence_assessment_prompt_version=(
+                    settings.llm_evidence_assessment_prompt_version
+                ),
+                citation_repair_prompt_version=(settings.llm_citation_repair_prompt_version),
             ),
-            judgments=judgments,
         )

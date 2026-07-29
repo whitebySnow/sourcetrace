@@ -147,6 +147,11 @@
           "title": "Workflow Version",
           "type": "string"
         },
+        "parser_version": {
+          "minLength": 1,
+          "title": "Parser Version",
+          "type": "string"
+        },
         "tokenizer": {
           "minLength": 1,
           "title": "Tokenizer",
@@ -196,6 +201,42 @@
           "minLength": 1,
           "title": "Retrieval Version",
           "type": "string"
+        },
+        "retrieval_top_k": {
+          "exclusiveMinimum": 0,
+          "title": "Retrieval Top K",
+          "type": "integer"
+        },
+        "retrieval_minimum_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Retrieval Minimum Score",
+          "type": "number"
+        },
+        "retrieval_minimum_evidence": {
+          "exclusiveMinimum": 0,
+          "title": "Retrieval Minimum Evidence",
+          "type": "integer"
+        },
+        "generation_prompt_version": {
+          "minLength": 1,
+          "title": "Generation Prompt Version",
+          "type": "string"
+        },
+        "question_rewrite_prompt_version": {
+          "minLength": 1,
+          "title": "Question Rewrite Prompt Version",
+          "type": "string"
+        },
+        "evidence_assessment_prompt_version": {
+          "minLength": 1,
+          "title": "Evidence Assessment Prompt Version",
+          "type": "string"
+        },
+        "citation_repair_prompt_version": {
+          "minLength": 1,
+          "title": "Citation Repair Prompt Version",
+          "type": "string"
         }
       },
       "required": [
@@ -203,6 +244,7 @@
         "model_provider",
         "model_name",
         "workflow_version",
+        "parser_version",
         "tokenizer",
         "chunk_size",
         "chunk_overlap",
@@ -212,7 +254,14 @@
         "embedding_revision",
         "embedding_dimension",
         "embedding_version",
-        "retrieval_version"
+        "retrieval_version",
+        "retrieval_top_k",
+        "retrieval_minimum_score",
+        "retrieval_minimum_evidence",
+        "generation_prompt_version",
+        "question_rewrite_prompt_version",
+        "evidence_assessment_prompt_version",
+        "citation_repair_prompt_version"
       ],
       "title": "EvaluationRunMetadata",
       "type": "object"

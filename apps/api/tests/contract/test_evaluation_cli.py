@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -15,6 +16,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     metadata_path = tmp_path / "metadata.json"
     judgments_path = tmp_path / "judgments.json"
     output_path = tmp_path / "reports" / "report.json"
+    reviewed_output_path = tmp_path / "reports" / "reviewed-report.json"
     dataset_path.write_text(
         json.dumps(
             {
@@ -84,6 +86,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
                 "model_provider": "fake",
                 "model_name": "deterministic-fixture-v1",
                 "workflow_version": "langgraph-bounded-v1",
+                "parser_version": "fake-parser-v1",
                 "tokenizer": "cl100k_base",
                 "chunk_size": 500,
                 "chunk_overlap": 80,
@@ -94,16 +97,38 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
                 "embedding_dimension": 4,
                 "embedding_version": "bge-m3-dense-v1",
                 "retrieval_version": "pgvector-cosine-v1",
+                "retrieval_top_k": 8,
+                "retrieval_minimum_score": 0.5,
+                "retrieval_minimum_evidence": 1,
+                "generation_prompt_version": "grounded-answer-v1",
+                "question_rewrite_prompt_version": "follow-up-query-v1",
+                "evidence_assessment_prompt_version": "evidence-assessment-v1",
+                "citation_repair_prompt_version": "citation-repair-v1",
             }
         ),
         encoding="utf-8",
     )
+    exit_code = main(
+        [
+            "fake",
+            "--dataset",
+            str(dataset_path),
+            "--observations",
+            str(observations_path),
+            "--metadata",
+            str(metadata_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+    report_sha256 = hashlib.sha256(output_path.read_bytes()).hexdigest()
     judgments_path.write_text(
         json.dumps(
             {
                 "schema_version": "1",
                 "dataset_id": "cli-fixture",
                 "dataset_version": "1.0.0",
+                "report_sha256": report_sha256,
                 "review": {
                     "status": "reviewed",
                     "reviewed_by": "project-owner",
@@ -115,24 +140,21 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
         encoding="utf-8",
     )
 
-    exit_code = main(
+    review_exit_code = main(
         [
-            "fake",
-            "--dataset",
-            str(dataset_path),
-            "--observations",
-            str(observations_path),
-            "--metadata",
-            str(metadata_path),
+            "review",
+            "--report",
+            str(output_path),
             "--judgments",
             str(judgments_path),
             "--output",
-            str(output_path),
+            str(reviewed_output_path),
         ]
     )
 
-    report = json.loads(output_path.read_text(encoding="utf-8"))
+    report = json.loads(reviewed_output_path.read_text(encoding="utf-8"))
     assert exit_code == 0
+    assert review_exit_code == 0
     assert report["dataset_id"] == "cli-fixture"
     assert report["metadata"]["code_commit"] == "test-commit"
     assert report["retrieval_summary"]["passed"] == 1
