@@ -361,8 +361,13 @@ export interface components {
             retrieval_query: string;
             /** Query Rewrite Version */
             query_rewrite_version: string;
+            /** Evidence Assessment Prompt Version */
+            evidence_assessment_prompt_version: string;
+            /** Citation Repair Prompt Version */
+            citation_repair_prompt_version: string;
             /** Workflow Version */
             workflow_version: string;
+            workflow_trace: components["schemas"]["AnswerWorkflowTrace"];
             /**
              * Created At
              * Format: date-time
@@ -431,6 +436,17 @@ export interface components {
              * @enum {string}
              */
             status: "retrieving" | "generating";
+        };
+        /** AnswerWorkflowTrace */
+        AnswerWorkflowTrace: {
+            /** Retrieval Queries */
+            retrieval_queries: string[];
+            /** Assessments */
+            assessments: components["schemas"]["WorkflowEvidenceAssessmentTrace"][];
+            /** Supplemental Retrieval Attempts */
+            supplemental_retrieval_attempts: number;
+            /** Citation Repair Attempts */
+            citation_repair_attempts: number;
         };
         /** Body_upload_document_api_v1_knowledge_bases__knowledge_base_id__documents_post */
         Body_upload_document_api_v1_knowledge_bases__knowledge_base_id__documents_post: {
@@ -730,6 +746,15 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WorkflowEvidenceAssessmentTrace */
+        WorkflowEvidenceAssessmentTrace: {
+            /** Sufficient */
+            sufficient: boolean;
+            /** Selected Chunk Ids */
+            selected_chunk_ids: string[];
+            /** Supplemental Query */
+            supplemental_query: string | null;
         };
     };
     responses: never;

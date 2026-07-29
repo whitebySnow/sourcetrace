@@ -8,7 +8,9 @@ import pytest
 from sourcetrace.rag.llm import (
     LlmProviderError,
     OpenAICompatibleAnswerGenerator,
+    OpenAICompatibleCitationRepairer,
     OpenAICompatibleConfig,
+    OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionRewriter,
 )
 from sourcetrace.rag.ports import RetrievalCandidate
@@ -245,3 +247,135 @@ async def test_question_rewriter_rejects_an_invalid_response_shape() -> None:
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_query": "BGE-M3 normalization indexing",
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="How are vectors indexed?",
+            query="vector indexing",
+            evidence=_evidence(),
+            supplemental_allowed=True,
+        )
+
+    assert decision.sufficient is False
+    assert decision.selected_chunk_ids == ()
+    assert decision.supplemental_query == "BGE-M3 normalization indexing"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["stream"] is False
+    serialized = json.dumps(payload["messages"])
+    assert "chunk-1" in serialized
+    assert "BGE-M3 dense vectors" in serialized
+    assert "supplemental_allowed" in serialized
+
+
+async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"answer": "Vectors are normalized [citation-1]"}
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+
+        answer = await repairer.repair(
+            question="How are vectors stored?",
+            answer="Vectors are normalized.",
+            evidence=_evidence(),
+        )
+
+    assert answer == "Vectors are normalized [citation-1]"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["stream"] is False
+    serialized = json.dumps(payload["messages"])
+    assert "Vectors are normalized." in serialized
+    assert "citation-1" in serialized
+
+
+async def test_evidence_assessor_rejects_unstructured_output() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps({"sufficient": True})},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                query="query",
+                evidence=_evidence(),
+                supplemental_allowed=True,
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+async def test_citation_repairer_maps_timeout_without_leaking_details() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("private repair timeout", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await repairer.repair(
+                question="Question",
+                answer="Draft",
+                evidence=_evidence(),
+            )
+
+    assert error.value.code == "LLM_TIMEOUT"
+    assert "private" not in str(error.value)

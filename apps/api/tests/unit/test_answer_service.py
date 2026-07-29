@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
 import pytest
@@ -6,7 +6,7 @@ import pytest
 from sourcetrace.modules.answers.models import AnswerRun
 from sourcetrace.modules.answers.service import AnswerExecutionMetadata, AnswerService
 from sourcetrace.modules.conversations.models import Question
-from sourcetrace.rag.ports import RetrievalCandidate
+from sourcetrace.rag.workflow import WorkflowRequest, WorkflowStatus
 
 
 class StagingConversationService:
@@ -53,30 +53,21 @@ class FailingAnswerRepository:
         self.committed = True
 
 
-class UnusedRetrievalService:
-    async def resolve_query(self, *, question: str, **kwargs: object) -> str:
-        return question
-
-    async def search(self, **kwargs: object) -> list[object]:
-        raise AssertionError("retrieval must not start")
+class UnusedWorkflow:
+    async def run(self, request: WorkflowRequest) -> AsyncIterator[WorkflowStatus]:
+        raise AssertionError("workflow must not start")
+        yield WorkflowStatus(stage="retrieving")
 
 
-class ExplodingRetrievalService:
-    async def resolve_query(self, *, question: str, **kwargs: object) -> str:
-        return question
-
-    async def search(self, **kwargs: object) -> list[object]:
-        raise RuntimeError("unexpected retrieval failure")
+class RetrievingWorkflow:
+    async def run(self, request: WorkflowRequest) -> AsyncIterator[WorkflowStatus]:
+        yield WorkflowStatus(stage="retrieving")
 
 
-class UnusedAnswerGenerator:
-    async def stream_answer(
-        self,
-        *,
-        question: str,
-        evidence: Sequence[RetrievalCandidate],
-    ) -> None:
-        raise AssertionError("generation must not start")
+class ExplodingWorkflow:
+    async def run(self, request: WorkflowRequest) -> AsyncIterator[WorkflowStatus]:
+        yield WorkflowStatus(stage="retrieving")
+        raise RuntimeError("unexpected workflow failure")
 
 
 class DisconnectRepository:
@@ -99,6 +90,13 @@ class DisconnectRepository:
         return True
 
     async def set_retrieval_query(self, run_id: UUID, query: str) -> bool:
+        return True
+
+    async def set_workflow_trace(
+        self,
+        run_id: UUID,
+        trace: dict[str, object],
+    ) -> bool:
         return True
 
     async def cancel(self, run_id: UUID) -> bool:
@@ -124,18 +122,17 @@ async def test_question_is_not_committed_when_answer_run_creation_fails() -> Non
     service = AnswerService(
         repository=repository,  # type: ignore[arg-type]
         conversations=conversations,  # type: ignore[arg-type]
-        retrieval=UnusedRetrievalService(),  # type: ignore[arg-type]
-        generator=UnusedAnswerGenerator(),  # type: ignore[arg-type]
+        workflow=UnusedWorkflow(),  # type: ignore[arg-type]
         metadata=AnswerExecutionMetadata(
             llm_provider="openai-compatible",
             llm_model="gpt-5.6-luna",
             prompt_version="grounded-answer-v1",
             retrieval_version="pgvector-cosine-v1",
             query_rewrite_version="follow-up-query-v1",
+            evidence_assessment_prompt_version="evidence-assessment-v1",
+            citation_repair_prompt_version="citation-repair-v1",
             workflow_version="linear-grounded-v1",
         ),
-        minimum_score=0.5,
-        minimum_evidence=1,
         context_question_limit=4,
     )
 
@@ -155,18 +152,17 @@ async def test_disconnecting_during_retrieval_cancels_the_run() -> None:
     service = AnswerService(
         repository=repository,  # type: ignore[arg-type]
         conversations=conversations,  # type: ignore[arg-type]
-        retrieval=UnusedRetrievalService(),  # type: ignore[arg-type]
-        generator=UnusedAnswerGenerator(),  # type: ignore[arg-type]
+        workflow=RetrievingWorkflow(),  # type: ignore[arg-type]
         metadata=AnswerExecutionMetadata(
             llm_provider="openai-compatible",
             llm_model="gpt-5.6-luna",
             prompt_version="grounded-answer-v1",
             retrieval_version="pgvector-cosine-v1",
             query_rewrite_version="follow-up-query-v1",
+            evidence_assessment_prompt_version="evidence-assessment-v1",
+            citation_repair_prompt_version="citation-repair-v1",
             workflow_version="linear-grounded-v1",
         ),
-        minimum_score=0.5,
-        minimum_evidence=1,
         context_question_limit=4,
     )
     events = await service.start(
@@ -189,18 +185,17 @@ async def test_unexpected_workflow_error_marks_the_run_failed() -> None:
     service = AnswerService(
         repository=repository,  # type: ignore[arg-type]
         conversations=conversations,  # type: ignore[arg-type]
-        retrieval=ExplodingRetrievalService(),  # type: ignore[arg-type]
-        generator=UnusedAnswerGenerator(),  # type: ignore[arg-type]
+        workflow=ExplodingWorkflow(),  # type: ignore[arg-type]
         metadata=AnswerExecutionMetadata(
             llm_provider="openai-compatible",
             llm_model="gpt-5.6-luna",
             prompt_version="grounded-answer-v1",
             retrieval_version="pgvector-cosine-v1",
             query_rewrite_version="follow-up-query-v1",
+            evidence_assessment_prompt_version="evidence-assessment-v1",
+            citation_repair_prompt_version="citation-repair-v1",
             workflow_version="linear-grounded-v1",
         ),
-        minimum_score=0.5,
-        minimum_evidence=1,
         context_question_limit=4,
     )
     events = await service.start(

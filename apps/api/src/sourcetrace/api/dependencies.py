@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sourcetrace.core.config import get_settings
 from sourcetrace.db.session import get_session
 from sourcetrace.modules.answers.repository import AnswerRepository
-from sourcetrace.modules.answers.service import AnswerExecutionMetadata, AnswerService
+from sourcetrace.modules.answers.service import (
+    AnswerExecutionMetadata,
+    AnswerService,
+    AnswerWorkflowRunControl,
+)
 from sourcetrace.modules.conversations.repository import ConversationRepository
 from sourcetrace.modules.conversations.service import ConversationService
 from sourcetrace.modules.documents.repository import DocumentRepository
@@ -21,10 +25,19 @@ from sourcetrace.modules.retrieval.service import RetrievalService
 from sourcetrace.rag.embeddings import BgeM3EmbeddingProvider, EmbeddingConfig
 from sourcetrace.rag.llm import (
     OpenAICompatibleAnswerGenerator,
+    OpenAICompatibleCitationRepairer,
     OpenAICompatibleConfig,
+    OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionRewriter,
 )
-from sourcetrace.rag.ports import AnswerGenerator, EmbeddingProvider, QuestionRewriter
+from sourcetrace.rag.ports import (
+    AnswerGenerator,
+    CitationRepairer,
+    EmbeddingProvider,
+    EvidenceAssessor,
+    QuestionRewriter,
+)
+from sourcetrace.rag.workflow import AnswerWorkflow
 
 
 def _openai_compatible_config(*, prompt_version: str) -> OpenAICompatibleConfig:
@@ -117,6 +130,28 @@ async def get_question_rewriter() -> AsyncIterator[QuestionRewriter]:
         )
 
 
+async def get_evidence_assessor() -> AsyncIterator[EvidenceAssessor]:
+    settings = get_settings()
+    async with httpx.AsyncClient() as client:
+        yield OpenAICompatibleEvidenceAssessor(
+            _openai_compatible_config(
+                prompt_version=settings.llm_evidence_assessment_prompt_version
+            ),
+            client=client,
+        )
+
+
+async def get_citation_repairer() -> AsyncIterator[CitationRepairer]:
+    settings = get_settings()
+    async with httpx.AsyncClient() as client:
+        yield OpenAICompatibleCitationRepairer(
+            _openai_compatible_config(
+                prompt_version=settings.llm_citation_repair_prompt_version
+            ),
+            client=client,
+        )
+
+
 def get_answer_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     conversations: Annotated[
@@ -129,27 +164,42 @@ def get_answer_service(
     ],
     generator: Annotated[AnswerGenerator, Depends(get_answer_generator)],
     question_rewriter: Annotated[QuestionRewriter, Depends(get_question_rewriter)],
+    evidence_assessor: Annotated[EvidenceAssessor, Depends(get_evidence_assessor)],
+    citation_repairer: Annotated[CitationRepairer, Depends(get_citation_repairer)],
 ) -> AnswerService:
     settings = get_settings()
+    repository = AnswerRepository(session)
+    retrieval = RetrievalService(
+        repository=PgVectorRetrievalRepository(session),
+        embedding_provider=embedding_provider,
+        question_rewriter=question_rewriter,
+        top_k=settings.retrieval_top_k,
+    )
     return AnswerService(
-        repository=AnswerRepository(session),
+        repository=repository,
         conversations=conversations,
-        retrieval=RetrievalService(
-            repository=PgVectorRetrievalRepository(session),
-            embedding_provider=embedding_provider,
-            question_rewriter=question_rewriter,
-            top_k=settings.retrieval_top_k,
+        workflow=AnswerWorkflow(
+            retrieval=retrieval,
+            assessor=evidence_assessor,
+            generator=generator,
+            citation_repairer=citation_repairer,
+            run_control=AnswerWorkflowRunControl(repository),
+            minimum_score=settings.retrieval_minimum_score,
+            minimum_evidence=settings.retrieval_minimum_evidence,
         ),
-        generator=generator,
         metadata=AnswerExecutionMetadata(
             llm_provider=settings.llm_provider,
             llm_model=settings.llm_model,
             prompt_version=settings.llm_prompt_version,
             retrieval_version=settings.retrieval_config_version,
             query_rewrite_version=settings.llm_question_rewrite_prompt_version,
+            evidence_assessment_prompt_version=(
+                settings.llm_evidence_assessment_prompt_version
+            ),
+            citation_repair_prompt_version=(
+                settings.llm_citation_repair_prompt_version
+            ),
             workflow_version=settings.answer_workflow_version,
         ),
-        minimum_score=settings.retrieval_minimum_score,
-        minimum_evidence=settings.retrieval_minimum_evidence,
         context_question_limit=settings.answer_context_question_limit,
     )

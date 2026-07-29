@@ -84,6 +84,11 @@ uv run --project apps/api alembic -c apps/api/alembic.ini downgrade -1
 `ANSWER_CONTEXT_QUESTION_LIMIT` 限制可用于指代消解的近期用户问题数量；历史模型回答不会
 发送给改写器，也不会成为后续回答证据。
 
+证据判断和引用修复同样使用 OpenAI 兼容供应商，但通过独立端口和严格 JSON 契约接入。
+`LLM_EVIDENCE_ASSESSMENT_PROMPT_VERSION` 与 `LLM_CITATION_REPAIR_PROMPT_VERSION` 分别记录
+两个决策提示词版本。每个 Answer Run 会同时保存这些版本以及
+`ANSWER_WORKFLOW_VERSION=langgraph-bounded-v1`，用于重放时识别完整决策配置。
+
 可使用以下命令做最小连通性检查：
 
 ```powershell

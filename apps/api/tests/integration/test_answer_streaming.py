@@ -11,7 +11,9 @@ from starlette.types import Message, Scope
 
 from sourcetrace.api.dependencies import (
     get_answer_generator,
+    get_citation_repairer,
     get_document_source_storage,
+    get_evidence_assessor,
     get_query_embedding_provider,
     get_question_rewriter,
 )
@@ -24,7 +26,7 @@ from sourcetrace.modules.documents.models import Chunk
 from sourcetrace.modules.documents.repository import DocumentRepository
 from sourcetrace.modules.documents.service import DocumentService
 from sourcetrace.modules.documents.storage import LocalDocumentStorage
-from sourcetrace.rag.ports import RetrievalCandidate
+from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 
 
 class QueryEmbeddingProvider:
@@ -109,9 +111,9 @@ class BlockingAnswerGenerator:
     async def _stream(self, citation_id: str) -> AsyncIterator[str]:
         try:
             self.started.set()
-            yield "This partial answer must be discarded. "
+            yield "This partial answer "
             await self.release.wait()
-            yield f"The completed answer [{citation_id}]."
+            yield f"is grounded [{citation_id}]."
         finally:
             self.closed = True
 
@@ -121,9 +123,30 @@ class NeverQuestionRewriter:
         raise AssertionError("question rewriting must not start without history")
 
 
+class SelectingAllEvidenceAssessor:
+    async def assess(
+        self,
+        *,
+        evidence: Sequence[RetrievalCandidate],
+        **kwargs: object,
+    ) -> EvidenceDecision:
+        return EvidenceDecision(
+            sufficient=bool(evidence),
+            selected_chunk_ids=tuple(item.chunk_id for item in evidence),
+            supplemental_query=None,
+        )
+
+
+class NoOpCitationRepairer:
+    async def repair(self, *, answer: str, **kwargs: object) -> str:
+        return answer
+
+
 def _answer_app():
     app = create_app()
     app.dependency_overrides[get_question_rewriter] = NeverQuestionRewriter
+    app.dependency_overrides[get_evidence_assessor] = SelectingAllEvidenceAssessor
+    app.dependency_overrides[get_citation_repairer] = NoOpCitationRepairer
     return app
 
 
@@ -351,7 +374,19 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["llm_model"] == "gpt-5.6-luna"
         assert persisted["prompt_version"] == "grounded-answer-v1"
         assert persisted["retrieval_version"] == "pgvector-cosine-v1"
-        assert persisted["workflow_version"] == "linear-grounded-v1"
+        assert persisted["evidence_assessment_prompt_version"] == (
+            "evidence-assessment-v1"
+        )
+        assert persisted["citation_repair_prompt_version"] == "citation-repair-v1"
+        assert persisted["workflow_version"] == "langgraph-bounded-v1"
+        trace = persisted["workflow_trace"]
+        assert trace["retrieval_queries"] == ["How are vectors stored?"]
+        assert trace["supplemental_retrieval_attempts"] == 0
+        assert trace["citation_repair_attempts"] == 0
+        assert len(trace["assessments"]) == 1
+        assert trace["assessments"][0]["sufficient"] is True
+        assert trace["assessments"][0]["supplemental_query"] is None
+        assert len(trace["assessments"][0]["selected_chunk_ids"]) == 1
         assert persisted["citations"] == citations
 
 
@@ -483,7 +518,17 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
                 retrieval_version="pgvector-cosine-v1",
                 retrieval_query="What is the Moon made of?",
                 query_rewrite_version="legacy-direct-query-v1",
+                evidence_assessment_prompt_version=(
+                    "legacy-no-evidence-assessment"
+                ),
+                citation_repair_prompt_version="legacy-no-citation-repair",
                 workflow_version="linear-grounded-v1",
+                workflow_trace={
+                    "retrieval_queries": ["What is the Moon made of?"],
+                    "assessments": [],
+                    "supplemental_retrieval_attempts": 0,
+                    "citation_repair_attempts": 0,
+                },
                 completed_at=datetime(2026, 7, 28, 8, 1, tzinfo=UTC),
             )
         )
@@ -987,6 +1032,8 @@ async def test_startup_recovery_fails_interrupted_answer_runs(
         prompt_version="grounded-answer-v1",
         retrieval_version="pgvector-cosine-v1",
         query_rewrite_version="follow-up-query-v1",
+        evidence_assessment_prompt_version="evidence-assessment-v1",
+        citation_repair_prompt_version="citation-repair-v1",
         workflow_version="linear-grounded-v1",
     )
     await repository.commit()

@@ -94,6 +94,19 @@ class AnswerCancellationResponse(BaseModel):
     ]
 
 
+class WorkflowEvidenceAssessmentTrace(BaseModel):
+    sufficient: bool
+    selected_chunk_ids: list[str]
+    supplemental_query: str | None
+
+
+class AnswerWorkflowTrace(BaseModel):
+    retrieval_queries: list[str]
+    assessments: list[WorkflowEvidenceAssessmentTrace]
+    supplemental_retrieval_attempts: int
+    citation_repair_attempts: int
+
+
 class AnswerHistoryItem(BaseModel):
     id: UUID
     question_id: UUID
@@ -118,7 +131,10 @@ class AnswerHistoryItem(BaseModel):
     retrieval_version: str
     retrieval_query: str
     query_rewrite_version: str
+    evidence_assessment_prompt_version: str
+    citation_repair_prompt_version: str
     workflow_version: str
+    workflow_trace: AnswerWorkflowTrace
     created_at: datetime
     completed_at: datetime | None
     citations: list[CitationResponse]

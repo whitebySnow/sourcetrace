@@ -1531,9 +1531,20 @@
             "type": "string",
             "title": "Query Rewrite Version"
           },
+          "evidence_assessment_prompt_version": {
+            "type": "string",
+            "title": "Evidence Assessment Prompt Version"
+          },
+          "citation_repair_prompt_version": {
+            "type": "string",
+            "title": "Citation Repair Prompt Version"
+          },
           "workflow_version": {
             "type": "string",
             "title": "Workflow Version"
+          },
+          "workflow_trace": {
+            "$ref": "#/components/schemas/AnswerWorkflowTrace"
           },
           "created_at": {
             "type": "string",
@@ -1578,7 +1589,10 @@
           "retrieval_version",
           "retrieval_query",
           "query_rewrite_version",
+          "evidence_assessment_prompt_version",
+          "citation_repair_prompt_version",
           "workflow_version",
+          "workflow_trace",
           "created_at",
           "completed_at",
           "citations"
@@ -1698,6 +1712,40 @@
           "status"
         ],
         "title": "AnswerStatusEvent"
+      },
+      "AnswerWorkflowTrace": {
+        "properties": {
+          "retrieval_queries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Retrieval Queries"
+          },
+          "assessments": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowEvidenceAssessmentTrace"
+            },
+            "type": "array",
+            "title": "Assessments"
+          },
+          "supplemental_retrieval_attempts": {
+            "type": "integer",
+            "title": "Supplemental Retrieval Attempts"
+          },
+          "citation_repair_attempts": {
+            "type": "integer",
+            "title": "Citation Repair Attempts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "retrieval_queries",
+          "assessments",
+          "supplemental_retrieval_attempts",
+          "citation_repair_attempts"
+        ],
+        "title": "AnswerWorkflowTrace"
       },
       "Body_upload_document_api_v1_knowledge_bases__knowledge_base_id__documents_post": {
         "properties": {
@@ -2437,6 +2485,39 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkflowEvidenceAssessmentTrace": {
+        "properties": {
+          "sufficient": {
+            "type": "boolean",
+            "title": "Sufficient"
+          },
+          "selected_chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selected Chunk Ids"
+          },
+          "supplemental_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplemental Query"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sufficient",
+          "selected_chunk_ids",
+          "supplemental_query"
+        ],
+        "title": "WorkflowEvidenceAssessmentTrace"
       }
     }
   }

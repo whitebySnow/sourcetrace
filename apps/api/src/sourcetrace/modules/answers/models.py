@@ -3,6 +3,7 @@ from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -61,7 +62,12 @@ class AnswerRun(UUIDPrimaryKeyMixin, Base):
     retrieval_version: Mapped[str] = mapped_column(String(64), nullable=False)
     retrieval_query: Mapped[str] = mapped_column(Text, nullable=False)
     query_rewrite_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_assessment_prompt_version: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    citation_repair_prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     workflow_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    workflow_trace: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

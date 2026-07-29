@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from sourcetrace.rag.ports import RetrievalCandidate
+from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 
 
 class LlmProviderError(Exception):
@@ -46,9 +46,10 @@ def _grounded_prompt(
             "role": "system",
             "content": (
                 "Answer only from the evidence below. Cite the evidence labels in the "
-                "answer and do not create any other citation labels. Use the same language "
-                "as the question. Do not use outside knowledge. If the evidence cannot "
-                f"answer the question, say so.\n\n{evidence_text}"
+                "answer and do not create any other citation labels. Put an allowed label in "
+                "or immediately after every sentence or list item that makes a factual claim. "
+                "Use the same language as the question. Do not use outside knowledge. If the "
+                f"evidence cannot answer the question, say so.\n\n{evidence_text}"
             ),
         },
         {"role": "user", "content": question},
@@ -75,6 +76,82 @@ def _question_rewrite_prompt(
                 {
                     "recent_user_questions": list(recent_questions),
                     "current_question": question,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def _evidence_assessment_prompt(
+    question: str,
+    query: str,
+    evidence: Sequence[RetrievalCandidate],
+    *,
+    supplemental_allowed: bool,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Judge whether the candidate evidence is sufficient to answer the question. "
+                "Use only the candidates, select only candidate chunk IDs, and do not answer "
+                "the question or use outside knowledge. If evidence is insufficient and a "
+                "supplemental retrieval is allowed, provide one standalone supplemental query. "
+                "Return JSON with exactly: sufficient (boolean), selected_chunk_ids (array of "
+                "strings), and supplemental_query (string or null)."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": question,
+                    "retrieval_query": query,
+                    "supplemental_allowed": supplemental_allowed,
+                    "candidates": [
+                        {
+                            "chunk_id": item.chunk_id,
+                            "content": item.content,
+                            "score": item.score,
+                        }
+                        for item in evidence
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def _citation_repair_prompt(
+    question: str,
+    answer: str,
+    evidence: Sequence[RetrievalCandidate],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Repair the draft so every factual claim is supported by the supplied evidence "
+                "and cites only its allowed citation labels. Do not add claims or use outside "
+                "knowledge. Keep the question's language. Return JSON with exactly one string "
+                "field named answer."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": question,
+                    "draft_answer": answer,
+                    "evidence": [
+                        {
+                            "citation_id": item.citation_id,
+                            "content": item.content,
+                        }
+                        for item in evidence
+                    ],
                 },
                 ensure_ascii=False,
             ),
@@ -202,53 +279,178 @@ class OpenAICompatibleQuestionRewriter:
         question: str,
         recent_questions: Sequence[str],
     ) -> str:
-        url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         try:
-            response = await self._client.post(
-                url,
-                headers={"Authorization": f"Bearer {self.config.api_key}"},
-                json={
-                    "model": self.config.model,
-                    "messages": _question_rewrite_prompt(question, recent_questions),
-                    "stream": False,
-                },
-                timeout=self.config.timeout_seconds,
+            parsed = await _structured_completion(
+                self.config,
+                self._client,
+                _question_rewrite_prompt(question, recent_questions),
             )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise ValueError
-            choices = payload.get("choices")
-            if not isinstance(choices, list) or len(choices) != 1:
-                raise ValueError
-            choice = choices[0]
-            if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
-                raise ValueError
-            message = choice.get("message")
-            if not isinstance(message, dict):
-                raise ValueError
-            content = message.get("content")
-            if not isinstance(content, str):
-                raise ValueError
-            parsed = json.loads(content)
-            if not isinstance(parsed, dict) or set(parsed) != {"retrieval_query"}:
+            if set(parsed) != {"retrieval_query"}:
                 raise ValueError
             query = parsed["retrieval_query"]
             if not isinstance(query, str) or not query.strip():
                 raise ValueError
             return query.strip()
-        except (json.JSONDecodeError, TypeError, ValueError) as error:
+        except (TypeError, ValueError) as error:
             raise LlmProviderError(
                 "LLM_INVALID_RESPONSE",
                 "Language model returned an invalid response",
             ) from error
-        except httpx.TimeoutException as error:
+
+
+async def _structured_completion(
+    config: OpenAICompatibleConfig,
+    client: httpx.AsyncClient,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    url = f"{config.base_url.rstrip('/')}/chat/completions"
+    try:
+        response = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {config.api_key}"},
+            json={
+                "model": config.model,
+                "messages": messages,
+                "stream": False,
+            },
+            timeout=config.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or len(choices) != 1:
+            raise ValueError
+        choice = choices[0]
+        if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+            raise ValueError
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise ValueError
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise ValueError
+        parsed = json.loads(content)
+        if not isinstance(parsed, dict):
+            raise ValueError
+        return parsed
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise LlmProviderError(
+            "LLM_INVALID_RESPONSE",
+            "Language model returned an invalid response",
+        ) from error
+    except httpx.TimeoutException as error:
+        raise LlmProviderError(
+            "LLM_TIMEOUT",
+            "Language model request timed out",
+        ) from error
+    except httpx.HTTPError as error:
+        raise LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+        ) from error
+
+
+class OpenAICompatibleEvidenceAssessor:
+    def __init__(
+        self,
+        config: OpenAICompatibleConfig,
+        *,
+        client: httpx.AsyncClient,
+    ) -> None:
+        self.config = config
+        self._client = client
+
+    async def assess(
+        self,
+        *,
+        question: str,
+        query: str,
+        evidence: Sequence[RetrievalCandidate],
+        supplemental_allowed: bool,
+    ) -> EvidenceDecision:
+        parsed = await _structured_completion(
+            self.config,
+            self._client,
+            _evidence_assessment_prompt(
+                question,
+                query,
+                evidence,
+                supplemental_allowed=supplemental_allowed,
+            ),
+        )
+        try:
+            if set(parsed) != {
+                "sufficient",
+                "selected_chunk_ids",
+                "supplemental_query",
+            }:
+                raise ValueError
+            sufficient = parsed["sufficient"]
+            selected = parsed["selected_chunk_ids"]
+            supplemental_query = parsed["supplemental_query"]
+            if not isinstance(sufficient, bool):
+                raise ValueError
+            if not isinstance(selected, list) or any(
+                not isinstance(item, str) or not item for item in selected
+            ):
+                raise ValueError
+            if len(set(selected)) != len(selected):
+                raise ValueError
+            if supplemental_query is not None and (
+                not isinstance(supplemental_query, str) or not supplemental_query.strip()
+            ):
+                raise ValueError
+            if not supplemental_allowed and supplemental_query is not None:
+                raise ValueError
+            return EvidenceDecision(
+                sufficient=sufficient,
+                selected_chunk_ids=tuple(selected),
+                supplemental_query=(
+                    supplemental_query.strip()
+                    if isinstance(supplemental_query, str)
+                    else None
+                ),
+            )
+        except (TypeError, ValueError) as error:
             raise LlmProviderError(
-                "LLM_TIMEOUT",
-                "Language model request timed out",
+                "LLM_INVALID_RESPONSE",
+                "Language model returned an invalid response",
             ) from error
-        except httpx.HTTPError as error:
+
+
+class OpenAICompatibleCitationRepairer:
+    def __init__(
+        self,
+        config: OpenAICompatibleConfig,
+        *,
+        client: httpx.AsyncClient,
+    ) -> None:
+        self.config = config
+        self._client = client
+
+    async def repair(
+        self,
+        *,
+        question: str,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> str:
+        parsed = await _structured_completion(
+            self.config,
+            self._client,
+            _citation_repair_prompt(question, answer, evidence),
+        )
+        try:
+            if set(parsed) != {"answer"}:
+                raise ValueError
+            repaired = parsed["answer"]
+            if not isinstance(repaired, str) or not repaired.strip():
+                raise ValueError
+            return repaired.strip()
+        except (TypeError, ValueError) as error:
             raise LlmProviderError(
-                "LLM_PROVIDER_UNAVAILABLE",
-                "Language model is temporarily unavailable",
+                "LLM_INVALID_RESPONSE",
+                "Language model returned an invalid response",
             ) from error
