@@ -60,8 +60,20 @@ _Avoid_: Query result, message
 The standalone query actually embedded for one answer run, derived from the current question and a bounded list of recent user questions. It is replay metadata, not evidence.
 _Avoid_: Previous answer, conversation transcript
 
+**Evidence Decision**:
+A structured Agent decision declaring whether retrieved chunks are sufficient and identifying the exact chunk IDs allowed to reach answer generation.
+_Avoid_: Model reasoning, relevance score
+
+**Supplemental Retrieval**:
+The single optional second retrieval allowed after an insufficient Evidence Decision, using one standalone rewritten query against the same knowledge base.
+_Avoid_: Retry loop, web search
+
+**Citation Repair**:
+The single allowed attempt to revise an invalid draft using only the selected evidence and its existing citation labels before deterministic validation runs again.
+_Avoid_: Answer regeneration, citation fabrication
+
 **Answer Run**:
-A replayable attempt to answer one question, recording its lifecycle state, outcome, retrieval query, and the model, prompt, query-rewrite, retrieval, and workflow versions used. At most one run may be active per conversation.
+A replayable attempt to answer one question, recording its lifecycle state, outcome, retrieval query, and the model, generation prompt, query-rewrite prompt, evidence-assessment prompt, citation-repair prompt, retrieval, and workflow versions used. At most one run may be active per conversation.
 _Avoid_: Assistant message, response
 
 **Cancellation**:

@@ -36,7 +36,13 @@ def test_answer_stream_history_and_source_are_exposed_in_openapi() -> None:
     history_required = set(
         document["components"]["schemas"]["AnswerHistoryItem"]["required"]
     )
-    assert {"retrieval_query", "query_rewrite_version"} <= history_required
+    assert {
+        "retrieval_query",
+        "query_rewrite_version",
+        "evidence_assessment_prompt_version",
+        "citation_repair_prompt_version",
+        "workflow_trace",
+    } <= history_required
     assert set(document["components"]["schemas"]["CitationResponse"]["required"]) >= {
         "id",
         "document_id",

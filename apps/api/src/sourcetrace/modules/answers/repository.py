@@ -27,6 +27,8 @@ class AnswerRepository:
         prompt_version: str,
         retrieval_version: str,
         query_rewrite_version: str,
+        evidence_assessment_prompt_version: str,
+        citation_repair_prompt_version: str,
         workflow_version: str,
     ) -> AnswerRun:
         run = AnswerRun(
@@ -40,7 +42,15 @@ class AnswerRepository:
             retrieval_version=retrieval_version,
             retrieval_query=question.content,
             query_rewrite_version=query_rewrite_version,
+            evidence_assessment_prompt_version=evidence_assessment_prompt_version,
+            citation_repair_prompt_version=citation_repair_prompt_version,
             workflow_version=workflow_version,
+            workflow_trace={
+                "retrieval_queries": [],
+                "assessments": [],
+                "supplemental_retrieval_attempts": 0,
+                "citation_repair_attempts": 0,
+            },
         )
         self._session.add(run)
         try:
@@ -80,6 +90,19 @@ class AnswerRepository:
             update(AnswerRun)
             .where(AnswerRun.id == run_id, AnswerRun.status == "running")
             .values(retrieval_query=query)
+            .returning(AnswerRun.id)
+        )
+        return updated_id is not None
+
+    async def set_workflow_trace(
+        self,
+        run_id: UUID,
+        trace: dict[str, object],
+    ) -> bool:
+        updated_id = await self._session.scalar(
+            update(AnswerRun)
+            .where(AnswerRun.id == run_id, AnswerRun.status == "running")
+            .values(workflow_trace=trace)
             .returning(AnswerRun.id)
         )
         return updated_id is not None

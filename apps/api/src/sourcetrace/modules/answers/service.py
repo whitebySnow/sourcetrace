@@ -1,9 +1,7 @@
 import asyncio
 import base64
 import binascii
-import re
 from collections.abc import AsyncIterator
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -23,21 +21,26 @@ from sourcetrace.modules.answers.schemas import (
     AnswerHistoryItem,
     AnswerRefusalEvent,
     AnswerStatusEvent,
+    AnswerWorkflowTrace,
     CitationResponse,
 )
 from sourcetrace.modules.conversations.models import Question
 from sourcetrace.modules.conversations.service import ConversationService
-from sourcetrace.modules.retrieval.service import RetrievalService, RetrievedEvidence
+from sourcetrace.modules.retrieval.service import RetrievedEvidence
 from sourcetrace.rag.embeddings import EmbeddingProviderError
 from sourcetrace.rag.llm import LlmProviderError
-from sourcetrace.rag.ports import AnswerGenerator, RetrievalCandidate
+from sourcetrace.rag.workflow import (
+    AnswerWorkflow,
+    WorkflowAnswered,
+    WorkflowCancelled,
+    WorkflowDelta,
+    WorkflowRefused,
+    WorkflowRequest,
+    WorkflowStatus,
+    WorkflowTrace,
+)
 
 logger = get_logger(__name__)
-
-_CITATION_LABEL = re.compile(
-    r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
-)
 
 
 class InvalidAnswerCursorError(ValueError):
@@ -77,6 +80,8 @@ class AnswerExecutionMetadata:
     prompt_version: str
     retrieval_version: str
     query_rewrite_version: str
+    evidence_assessment_prompt_version: str
+    citation_repair_prompt_version: str
     workflow_version: str
 
 
@@ -114,6 +119,8 @@ class AnswerRepositoryPort(Protocol):
         prompt_version: str,
         retrieval_version: str,
         query_rewrite_version: str,
+        evidence_assessment_prompt_version: str,
+        citation_repair_prompt_version: str,
         workflow_version: str,
     ) -> AnswerRun: ...
 
@@ -132,6 +139,12 @@ class AnswerRepositoryPort(Protocol):
     async def mark_running(self, run_id: UUID) -> bool: ...
 
     async def set_retrieval_query(self, run_id: UUID, query: str) -> bool: ...
+
+    async def set_workflow_trace(
+        self,
+        run_id: UUID,
+        trace: dict[str, object],
+    ) -> bool: ...
 
     async def get_status(self, run_id: UUID) -> AnswerRunStatus | None: ...
 
@@ -158,32 +171,43 @@ class AnswerRepositoryPort(Protocol):
     async def commit(self) -> None: ...
 
 
+class AnswerWorkflowRunControl:
+    def __init__(self, repository: AnswerRepositoryPort) -> None:
+        self._repository = repository
+
+    async def record_retrieval_query(self, run_id: UUID, query: str) -> bool:
+        updated = await self._repository.set_retrieval_query(run_id, query)
+        await self._repository.commit()
+        return updated
+
+    async def record_workflow_trace(self, run_id: UUID, trace: WorkflowTrace) -> bool:
+        updated = await self._repository.set_workflow_trace(run_id, trace.to_payload())
+        await self._repository.commit()
+        return updated
+
+    async def is_cancel_requested(self, run_id: UUID) -> bool:
+        return await self._repository.get_status(run_id) in {
+            "cancel_requested",
+            "cancelled",
+        }
+
+
 class AnswerService:
     def __init__(
         self,
         *,
         repository: AnswerRepositoryPort,
         conversations: ConversationService,
-        retrieval: RetrievalService,
-        generator: AnswerGenerator,
+        workflow: AnswerWorkflow,
         metadata: AnswerExecutionMetadata,
-        minimum_score: float,
-        minimum_evidence: int,
         context_question_limit: int,
     ) -> None:
-        if not -1.0 <= minimum_score <= 1.0:
-            raise ValueError("minimum retrieval score must be between -1 and 1")
-        if minimum_evidence <= 0:
-            raise ValueError("minimum evidence count must be positive")
         if context_question_limit <= 0:
             raise ValueError("context question limit must be positive")
         self._repository = repository
         self._conversations = conversations
-        self._retrieval = retrieval
-        self._generator = generator
+        self._workflow = workflow
         self._metadata = metadata
-        self._minimum_score = minimum_score
-        self._minimum_evidence = minimum_evidence
         self._context_question_limit = context_question_limit
 
     async def start(
@@ -210,6 +234,10 @@ class AnswerService:
             prompt_version=self._metadata.prompt_version,
             retrieval_version=self._metadata.retrieval_version,
             query_rewrite_version=self._metadata.query_rewrite_version,
+            evidence_assessment_prompt_version=(
+                self._metadata.evidence_assessment_prompt_version
+            ),
+            citation_repair_prompt_version=self._metadata.citation_repair_prompt_version,
             workflow_version=self._metadata.workflow_version,
         )
         await self._repository.commit()
@@ -317,185 +345,91 @@ class AnswerService:
             yield await self._cancel(run.id)
             return
         await self._repository.commit()
-        yield AnswerStatusEvent(run_id=run.id, status="retrieving")
-        try:
-            retrieval_query = await self._retrieval.resolve_query(
+        emitted_retrieving = False
+        emitted_generating = False
+        execution = self._workflow.run(
+            WorkflowRequest(
+                run_id=run.id,
+                knowledge_base_id=knowledge_base_id,
                 question=content,
                 recent_questions=recent_questions,
             )
-        except LlmProviderError as error:
-            if not await self._fail(run.id, error.code, error.safe_message):
-                yield await self._cancel(run.id)
-                return
-            yield AnswerErrorEvent(
-                run_id=run.id,
-                code=error.code,
-                message=error.safe_message,
-            )
-            return
-        if await self._is_cancel_requested(run.id):
-            yield await self._cancel(run.id)
-            return
-        if not await self._repository.set_retrieval_query(run.id, retrieval_query):
-            yield await self._cancel(run.id)
-            return
-        await self._repository.commit()
-        try:
-            retrieved = await self._retrieval.search(
-                knowledge_base_id=knowledge_base_id,
-                query=retrieval_query,
-            )
-        except EmbeddingProviderError as error:
-            if not await self._fail(run.id, error.code, error.safe_message):
-                yield await self._cancel(run.id)
-                return
-            yield AnswerErrorEvent(run_id=run.id, code=error.code, message=error.safe_message)
-            return
-        if await self._is_cancel_requested(run.id):
-            yield await self._cancel(run.id)
-            return
-        evidence = [item for item in retrieved if item.score >= self._minimum_score]
-        if len(evidence) < self._minimum_evidence:
-            code = "INSUFFICIENT_EVIDENCE"
-            message = "The knowledge base does not contain enough evidence to answer."
-            if not await self._repository.complete_refusal(run, code=code, message=message):
-                yield await self._cancel(run.id)
-                return
-            await self._repository.commit()
-            yield AnswerRefusalEvent(run_id=run.id, code=code, message=message)
-            return
-
-        drafts = [self._citation_draft(run.id, item) for item in evidence]
-        candidates = [
-            self._candidate(item, citation.id)
-            for item, citation in zip(evidence, drafts, strict=True)
-        ]
-        if await self._is_cancel_requested(run.id):
-            yield await self._cancel(run.id)
-            return
-        yield AnswerStatusEvent(run_id=run.id, status="generating")
-        answer_parts: list[str] = []
-        model_stream = self._generator.stream_answer(
-            question=content,
-            evidence=candidates,
         )
         try:
-            while True:
-                delta, cancelled = await self._next_delta_or_cancel(
-                    run.id,
-                    model_stream,
-                )
-                if cancelled:
+            async for event in execution:
+                if isinstance(event, WorkflowStatus):
+                    if event.stage in {"analyzing", "retrieving", "assessing"}:
+                        if not emitted_retrieving:
+                            emitted_retrieving = True
+                            yield AnswerStatusEvent(run_id=run.id, status="retrieving")
+                    elif not emitted_generating:
+                        emitted_generating = True
+                        yield AnswerStatusEvent(run_id=run.id, status="generating")
+                elif isinstance(event, WorkflowDelta):
+                    yield AnswerDeltaEvent(run_id=run.id, delta=event.delta)
+                elif isinstance(event, WorkflowCancelled):
                     yield await self._cancel(run.id)
                     return
-                if delta is None:
-                    break
-                answer_parts.append(delta)
-                yield AnswerDeltaEvent(run_id=run.id, delta=delta)
-        except LlmProviderError as error:
+                elif isinstance(event, WorkflowRefused):
+                    if not await self._repository.complete_refusal(
+                        run,
+                        code=event.code,
+                        message=event.message,
+                    ):
+                        yield await self._cancel(run.id)
+                        return
+                    await self._repository.commit()
+                    yield AnswerRefusalEvent(
+                        run_id=run.id,
+                        code=event.code,
+                        message=event.message,
+                    )
+                    return
+                elif isinstance(event, WorkflowAnswered):
+                    drafts = [
+                        self._citation_draft(run.id, item) for item in event.evidence
+                    ]
+                    if not await self._repository.complete_answer(
+                        run,
+                        answer=event.answer,
+                        citations=drafts,
+                    ):
+                        yield await self._cancel(run.id)
+                        return
+                    await self._repository.commit()
+                    yield AnswerFinalEvent(
+                        run_id=run.id,
+                        answer=event.answer,
+                        citations=[
+                            self._citation_response(knowledge_base_id, item)
+                            for item in drafts
+                        ],
+                    )
+                    return
+            raise RuntimeError("answer workflow completed without a terminal event")
+        except (EmbeddingProviderError, LlmProviderError) as error:
             if not await self._fail(run.id, error.code, error.safe_message):
                 yield await self._cancel(run.id)
                 return
             yield AnswerErrorEvent(run_id=run.id, code=error.code, message=error.safe_message)
-            return
         finally:
-            await self._close_stream(model_stream)
-        if await self._is_cancel_requested(run.id):
-            yield await self._cancel(run.id)
-            return
-        answer = "".join(answer_parts).strip()
-        if not answer:
-            code = "LLM_EMPTY_RESPONSE"
-            message = "Language model returned an empty response"
-            if not await self._fail(run.id, code, message):
-                yield await self._cancel(run.id)
-                return
-            yield AnswerErrorEvent(run_id=run.id, code=code, message=message)
-            return
-        allowed_citations = {str(draft.id): draft for draft in drafts}
-        cited_labels = _CITATION_LABEL.findall(answer)
-        if not cited_labels or any(label not in allowed_citations for label in cited_labels):
-            code = "CITATION_VALIDATION_FAILED"
-            message = "The generated answer did not contain a valid evidence citation."
-            if not await self._repository.complete_refusal(run, code=code, message=message):
-                yield await self._cancel(run.id)
-                return
-            await self._repository.commit()
-            yield AnswerRefusalEvent(run_id=run.id, code=code, message=message)
-            return
-        cited_ids = set(cited_labels)
-        cited_drafts = [draft for draft in drafts if str(draft.id) in cited_ids]
-        completed = await self._repository.complete_answer(
-            run,
-            answer=answer,
-            citations=cited_drafts,
-        )
-        if not completed:
-            yield await self._cancel(run.id)
-            return
-        await self._repository.commit()
-        yield AnswerFinalEvent(
-            run_id=run.id,
-            answer=answer,
-            citations=[self._citation_response(knowledge_base_id, item) for item in cited_drafts],
-        )
+            await self._close_stream(execution)
 
     async def _fail(self, run_id: UUID, code: str, message: str) -> bool:
         failed = await self._repository.fail(run_id, code=code, message=message)
         await self._repository.commit()
         return failed
 
-    async def _is_cancel_requested(self, run_id: UUID) -> bool:
-        return await self._repository.get_status(run_id) in {
-            "cancel_requested",
-            "cancelled",
-        }
-
     async def _cancel(self, run_id: UUID) -> AnswerCancelledEvent:
         await self._repository.cancel(run_id)
         await self._repository.commit()
         return AnswerCancelledEvent(run_id=run_id)
-
-    async def _next_delta_or_cancel(
-        self,
-        run_id: UUID,
-        stream: AsyncIterator[str],
-    ) -> tuple[str | None, bool]:
-        next_delta: asyncio.Future[str] = asyncio.ensure_future(anext(stream))
-        try:
-            while True:
-                done, _pending = await asyncio.wait({next_delta}, timeout=0.1)
-                if done:
-                    try:
-                        return next_delta.result(), False
-                    except StopAsyncIteration:
-                        return None, False
-                if await self._is_cancel_requested(run_id):
-                    next_delta.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await next_delta
-                    return None, True
-        except BaseException:
-            if not next_delta.done():
-                next_delta.cancel()
-                with suppress(asyncio.CancelledError):
-                    await next_delta
-            raise
 
     @staticmethod
     async def _close_stream(stream: AsyncIterator[object]) -> None:
         close = getattr(stream, "aclose", None)
         if close is not None:
             await close()
-
-    @staticmethod
-    def _candidate(evidence: RetrievedEvidence, citation_id: UUID) -> RetrievalCandidate:
-        return RetrievalCandidate(
-            chunk_id=str(evidence.chunk_id),
-            content=evidence.text,
-            score=evidence.score,
-            citation_id=str(citation_id),
-        )
 
     @staticmethod
     def _citation_draft(run_id: UUID, evidence: RetrievedEvidence) -> CitationDraft:
@@ -547,7 +481,12 @@ class AnswerService:
             retrieval_version=run.retrieval_version,
             retrieval_query=run.retrieval_query,
             query_rewrite_version=run.query_rewrite_version,
+            evidence_assessment_prompt_version=(
+                run.evidence_assessment_prompt_version
+            ),
+            citation_repair_prompt_version=run.citation_repair_prompt_version,
             workflow_version=run.workflow_version,
+            workflow_trace=AnswerWorkflowTrace.model_validate(run.workflow_trace),
             created_at=run.created_at,
             completed_at=run.completed_at,
             citations=[
