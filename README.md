@@ -2,6 +2,9 @@
 
 SourceTrace 是一个强调证据可定位、回答可追溯和证据不足时拒答的 RAG 知识库应用。
 
+SourceTrace is a strictly grounded Agentic RAG application: every completed answer must cite
+inspectable PDF evidence, while insufficient evidence produces an explicit refusal.
+
 当前仓库采用模块化单体架构：FastAPI API 与异步 Worker 共享 Python 领域代码，Vue 3 前端通过 OpenAPI 契约访问后端，PostgreSQL/pgvector 保存业务数据与向量，Redis 承担任务队列和短期缓存。
 
 ## 快速开始
@@ -55,6 +58,22 @@ pnpm generate:eval # 重新生成评测 JSON Schema
 pnpm eval:fake    # 离线重放四类确定性评测 fixture
 pnpm eval:review  # 将绑定报告摘要的人工 judgment 应用到既有报告
 ```
+
+## 完整 MVP 验收
+
+完整 Compose 启动后，可通过公开 HTTP/SSE 接口运行一次可清理的真实旅程。该命令会调用已
+配置的 embedding 和回答模型，覆盖上传、摄取、引用回答、拒答、取消与历史记录，但不会
+输出密钥或回答正文：
+
+```powershell
+uv run --project apps/api python apps/api/scripts/verify_mvp.py `
+  --output output/verification/mvp.json
+```
+
+2026-07-29 的实际验收结果、环境版本、质量门禁和评测限制见
+[MVP 验收记录](docs/verification.md)。项目代码调用链、技术原理和常见面试追问见
+[代码与面试 Walkthrough](docs/walkthrough.md)，开发中真实遇到的问题见
+[问题日志](docs/problem-log.md)。
 
 ## 目录
 
