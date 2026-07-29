@@ -1,0 +1,9 @@
+{
+  "code_commit": "fixture-not-a-product-run",
+  "model_provider": "fake",
+  "model_name": "deterministic-fixture-v1",
+  "workflow_version": "langgraph-bounded-v1",
+  "chunking_version": "token-window-v1",
+  "embedding_version": "bge-m3-dense-v1",
+  "retrieval_version": "pgvector-cosine-v1"
+}

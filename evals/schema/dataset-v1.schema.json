@@ -1,0 +1,192 @@
+{
+  "$defs": {
+    "DatasetReview": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "reviewed",
+            "fixture"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reviewed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "DatasetReview",
+      "type": "object"
+    },
+    "EvaluationCase": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "direct",
+            "multi_chunk",
+            "unanswerable",
+            "confusing"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "expected": {
+          "$ref": "#/$defs/ExpectedResult"
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "question",
+        "expected"
+      ],
+      "title": "EvaluationCase",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number",
+        "text"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "ExpectedResult": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "answered",
+            "refused"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reference_answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Answer"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcome",
+        "evidence"
+      ],
+      "title": "ExpectedResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "knowledge_base_id": {
+      "format": "uuid",
+      "title": "Knowledge Base Id",
+      "type": "string"
+    },
+    "review": {
+      "$ref": "#/$defs/DatasetReview"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/EvaluationCase"
+      },
+      "minItems": 1,
+      "title": "Cases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_version",
+    "knowledge_base_id",
+    "review",
+    "cases"
+  ],
+  "title": "EvaluationDataset",
+  "type": "object"
+}

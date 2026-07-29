@@ -37,3 +37,4 @@ logs/
 # Local browser verification
 .playwright-cli/
 output/playwright/
+output/evals/

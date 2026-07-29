@@ -1,0 +1,116 @@
+{
+  "$defs": {
+    "FixtureObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "answered",
+            "refused",
+            "error"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Answer"
+        },
+        "retrieved_evidence": {
+          "items": {
+            "$ref": "#/$defs/ObservedEvidence"
+          },
+          "title": "Retrieved Evidence",
+          "type": "array"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/ObservedEvidence"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "answer",
+        "retrieved_evidence",
+        "citations",
+        "case_id"
+      ],
+      "title": "FixtureObservation",
+      "type": "object"
+    },
+    "ObservedEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number",
+        "text"
+      ],
+      "title": "ObservedEvidence",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/FixtureObservation"
+      },
+      "minItems": 1,
+      "title": "Observations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_version",
+    "observations"
+  ],
+  "title": "FixtureObservationSet",
+  "type": "object"
+}

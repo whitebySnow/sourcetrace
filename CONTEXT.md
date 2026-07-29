@@ -87,3 +87,15 @@ _Avoid_: Link, source name
 **Refusal**:
 A persisted answer-run outcome stating that evidence was insufficient or the generated text failed citation validation.
 _Avoid_: Error, empty answer
+
+**Evaluation Dataset**:
+A versioned set of questions with reviewed answer or refusal expectations and immutable evidence references used to assess one knowledge base configuration.
+_Avoid_: Demo prompts, test log
+
+**Evaluation Observation**:
+The answer outcome, retrieved evidence, and final citations produced for one evaluation case before comparison with its expected result.
+_Avoid_: Ground truth, score
+
+**Evaluation Report**:
+A replayable artifact that keeps retrieval, citation, refusal, and end-to-end results separate and binds them to dataset, code, model, workflow, chunking, embedding, and retrieval versions.
+_Avoid_: Accuracy claim, benchmark without provenance

@@ -1,0 +1,256 @@
+{
+  "$defs": {
+    "CaseEvaluationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "retrieval": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "citation": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "refusal": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "end_to_end": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "observation": {
+          "$ref": "#/$defs/EvaluationObservation"
+        }
+      },
+      "required": [
+        "case_id",
+        "retrieval",
+        "citation",
+        "refusal",
+        "end_to_end",
+        "observation"
+      ],
+      "title": "CaseEvaluationResult",
+      "type": "object"
+    },
+    "EvaluationObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "answered",
+            "refused",
+            "error"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Answer"
+        },
+        "retrieved_evidence": {
+          "items": {
+            "$ref": "#/$defs/ObservedEvidence"
+          },
+          "title": "Retrieved Evidence",
+          "type": "array"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/ObservedEvidence"
+          },
+          "title": "Citations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcome",
+        "answer",
+        "retrieved_evidence",
+        "citations"
+      ],
+      "title": "EvaluationObservation",
+      "type": "object"
+    },
+    "EvaluationRunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "code_commit": {
+          "minLength": 1,
+          "title": "Code Commit",
+          "type": "string"
+        },
+        "model_provider": {
+          "minLength": 1,
+          "title": "Model Provider",
+          "type": "string"
+        },
+        "model_name": {
+          "minLength": 1,
+          "title": "Model Name",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minLength": 1,
+          "title": "Workflow Version",
+          "type": "string"
+        },
+        "chunking_version": {
+          "minLength": 1,
+          "title": "Chunking Version",
+          "type": "string"
+        },
+        "embedding_version": {
+          "minLength": 1,
+          "title": "Embedding Version",
+          "type": "string"
+        },
+        "retrieval_version": {
+          "minLength": 1,
+          "title": "Retrieval Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code_commit",
+        "model_provider",
+        "model_name",
+        "workflow_version",
+        "chunking_version",
+        "embedding_version",
+        "retrieval_version"
+      ],
+      "title": "EvaluationRunMetadata",
+      "type": "object"
+    },
+    "EvaluationStatus": {
+      "enum": [
+        "passed",
+        "failed",
+        "pending_review",
+        "not_applicable"
+      ],
+      "type": "string"
+    },
+    "EvaluationSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "passed": {
+          "minimum": 0,
+          "title": "Passed",
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "pending_review": {
+          "minimum": 0,
+          "title": "Pending Review",
+          "type": "integer"
+        },
+        "not_applicable": {
+          "minimum": 0,
+          "title": "Not Applicable",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "passed",
+        "failed",
+        "pending_review",
+        "not_applicable"
+      ],
+      "title": "EvaluationSummary",
+      "type": "object"
+    },
+    "ObservedEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number",
+        "text"
+      ],
+      "title": "ObservedEvidence",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/EvaluationRunMetadata"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/CaseEvaluationResult"
+      },
+      "title": "Cases",
+      "type": "array"
+    },
+    "retrieval_summary": {
+      "$ref": "#/$defs/EvaluationSummary"
+    },
+    "citation_summary": {
+      "$ref": "#/$defs/EvaluationSummary"
+    },
+    "refusal_summary": {
+      "$ref": "#/$defs/EvaluationSummary"
+    },
+    "end_to_end_summary": {
+      "$ref": "#/$defs/EvaluationSummary"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "metadata",
+    "cases",
+    "retrieval_summary",
+    "citation_summary",
+    "refusal_summary",
+    "end_to_end_summary"
+  ],
+  "title": "EvaluationReport",
+  "type": "object"
+}
