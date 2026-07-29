@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sourcetrace.modules.documents.indexing import DocumentIndexingService
 from sourcetrace.modules.documents.ingestion import (
+    ChunkingConfig,
     DocumentIngestionCoordinator,
     TransientIngestionError,
 )
@@ -245,6 +246,8 @@ async def test_manual_retry_resumes_embedding_without_recreating_chunks(
     retry = await DocumentIngestionCoordinator(
         repository=repository,
         queue=queue,
+        parser_version="unused-parser-v2",
+        config=ChunkingConfig("cl100k_base", 600, 100, "token-window-v2"),
     ).retry(knowledge_base.id, version_id)
     resumed = await DocumentIndexingService(
         repository=repository,

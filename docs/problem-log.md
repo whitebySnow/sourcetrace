@@ -73,7 +73,51 @@ ModelScope 完整目录时使用 `/models/huggingface/modelscope/BAAI/bge-m3`。
 
 **验证**：本地重复生成相对暂存内容无差异；GitHub Actions `quality` 在新提交上通过。
 
-## 6. CPU 镜像仍包含 CUDA 运行依赖
+## 6. Nginx 默认 1 MiB 拒绝合法 PDF
+
+**症状**：后端配置允许 20 MiB PDF，但通过 Web 同源入口上传 1.4 MiB Self-RAG 论文时返回
+HTTP 413；较小文件可以上传。
+
+**根因**：Nginx 未声明 `client_max_body_size`，使用默认 1 MiB 上限，和 API 的
+`MAX_UPLOAD_BYTES=20971520` 契约不一致。
+
+**修复**：在 server 级显式配置 `client_max_body_size 20m`，并增加配置契约测试锁定代理与
+API 上限。
+
+**验证**：测试修复前失败、修复后通过；重建 Web 后运行时 `nginx -T` 显示 20m，946 KiB
+和 1.4 MiB PDF 均通过 `localhost:5173` 上传成功。
+
+## 7. PDF 抽取的 NUL 字符无法写入 PostgreSQL
+
+**症状**：RAG 论文完成解析和切分后，chunk 批量写入连续三次失败，公开状态只显示可重试的
+临时摄取失败。
+
+**根因**：pypdf 从论文公式中提取出 NUL 字符；PostgreSQL UTF-8 text/varchar 禁止存储
+`0x00`。相同输入重试不会自行恢复。
+
+**修复**：在 PDF parser 边界删除抽取文本中的 NUL，并将 parser provenance 升为
+`pypdf-v2`。需要重新解析的人工 retry 使用当前 parser/chunk 配置；已存在 chunks 的 embedding
+retry 仍复用原配置。
+
+**验证**：最小 PDF 契约测试在修复前保留 NUL、修复后输出其余原文；真实 RAG 论文使用
+`pypdf-v2` 首次摄取完成，生成 44 个 chunks。
+
+## 8. Worker 重建后模型缓存没有持久复用
+
+**症状**：旧 Worker 已能 embedding，但容器重建后再次访问 hf-mirror，并因网络元数据请求
+失败而把文档标记为 embedding provider unavailable。挂载缓存目录只有 harness 元数据。
+
+**根因**：加载器只在运行时设置 `HF_HOME`，相关库可能已缓存默认目录；同时 `.env` 缺少
+Compose 的宿主缓存挂载和容器模型路径，容器退回远程模型 ID。
+
+**修复**：把 `cache_folder` 显式传给 `SentenceTransformer`；本地 `.env` 将
+`D:\DevelopEnvironment\huggingface` 挂载到 `/models/huggingface`，并使用已下载的
+ModelScope BGE-M3 目录。模型权重不复制进镜像。
+
+**验证**：容器内确认 2.2 GiB 权重和配置可见；日志从本地路径加载模型，无下载请求；三篇
+论文共 207 个 chunks 均在 run 1、attempt 1 完成 embedding。
+
+## 9. CPU 镜像仍包含 CUDA 运行依赖
 
 **现状**：基础 Compose 明确以 CPU 运行且不要求 NVIDIA 硬件，但当前 Linux 锁文件解析的
 PyTorch 包同时带入 CUDA 运行依赖，使 API/Worker 公共镜像构建和导出较重。

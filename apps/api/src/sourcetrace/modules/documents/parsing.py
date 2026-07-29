@@ -17,7 +17,7 @@ class SourceFileLocatorPort(Protocol):
 
 
 class PypdfDocumentParser:
-    version = "pypdf-v1"
+    version = "pypdf-v2"
 
     def __init__(self, storage: SourceFileLocatorPort) -> None:
         self._storage = storage
@@ -36,7 +36,10 @@ class PypdfDocumentParser:
                     "Encrypted or password-protected PDFs are not supported",
                 )
             pages = [
-                ParsedPage(page_number=index, text=(page.extract_text() or "").strip())
+                ParsedPage(
+                    page_number=index,
+                    text=(page.extract_text() or "").replace("\x00", "").strip(),
+                )
                 for index, page in enumerate(reader.pages, start=1)
             ]
         except PermanentIngestionError:

@@ -62,7 +62,7 @@ uv run --project apps/api python apps/api/scripts/verify_mvp.py `
 | `pnpm generate:api` + 生成文件差异检查 | 通过，生成契约稳定 |
 | `pnpm generate:eval` + Schema 差异检查 | 通过，生成契约稳定 |
 | `pnpm check` | 通过：Ruff、mypy strict、Vue TypeScript |
-| `pnpm test` | 通过：后端 146 项、Web 27 项 |
+| `pnpm test` | 通过：后端 148 项、Web 27 项 |
 | `pnpm build` | 通过：Web 生产构建完成 |
 | `docker compose config --quiet` | 通过：CPU 配置有效 |
 | GPU override 配置检查 | 通过；本次没有声称在 NVIDIA 硬件上实际运行 |
@@ -84,16 +84,26 @@ serializer 默认值未来变化提示。它们没有被隐藏或计为失败，
 fixture 中故意放入一条指向干扰文档的越界引用，因此引用与端到端各出现一次失败。该结果
 证明评测器能识别错误，不代表 SourceTrace 的产品准确率、召回率或通过率。
 
-真实供应商正式评测尚未运行。原因是仓库目前没有约 30 条由用户人工审核、绑定真实不可变
-文档版本的 reviewed 数据集。模型不能替用户填写 reviewer、审核时间或期望证据。完成该人工
-门禁前，只能在简历和面试中陈述“已实现版本化评测框架与真实评测入口”，不能声明未经运行
-的效果数字。
+### 候选真实语料
+
+已在本地创建 `Agentic RAG Foundations` 知识库，并固定三篇作者公开论文版本：原始 RAG、
+ReAct 和 Self-RAG。三个版本分别为 16、33 和 30 页，产生 44、90 和 73 个 chunks；均使用
+`pypdf-v2`、`token-window-v1` 和同一本地 BGE-M3 配置首次摄取完成。PDF、向量和运行数据不
+提交到 Git。
+
+仓库中的 `evals/candidates/agentic-rag-foundations-v1.md` 提供 30 条中文候选问题，覆盖
+direct、multi_chunk、confusing 和 unanswerable。它只是模型起草的人工审核工作表，不是
+`EvaluationDataset`，也没有 `reviewed` 状态。
+
+真实供应商正式评测仍未运行。原因是候选题的参考答案、页码和逐字证据尚未由用户逐条审核。
+模型不能替用户填写 reviewer、审核时间或期望证据。完成该人工门禁前，只能在简历和面试中
+陈述“已实现版本化评测框架、真实评测入口和候选评测集”，不能声明未经运行的效果数字。
 
 ## 6. 剩余人工门禁
 
-1. 选择最终演示知识库及固定 PDF 版本。
-2. 用户逐条审核问题、预期回答或拒答、页码和证据摘录。
-3. 将数据集状态改为 reviewed，并记录真实审核人和 UTC 时间。
+1. 用户确认三篇候选论文是否作为最终演示语料。
+2. 用户逐条审核 30 个问题、预期回答或拒答、页码和证据摘录。
+3. 将审核结果转换为正式 Dataset，状态设为 reviewed，并记录真实审核人和 UTC 时间。
 4. 使用当前 Git 提交运行 `real` 评测。
 5. 用户逐条审阅待审回答并应用绑定报告 SHA-256 的 judgments。
 6. 只有最终 reviewed report 中的结果可以进入简历。

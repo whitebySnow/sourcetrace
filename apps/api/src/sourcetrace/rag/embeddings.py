@@ -85,6 +85,7 @@ def load_sentence_transformer(config: EmbeddingConfig) -> SentenceEmbeddingModel
     return SentenceTransformer(
         config.model,
         revision=config.revision,
+        cache_folder=str(config.cache_dir),
         device=config.device,
     )
 

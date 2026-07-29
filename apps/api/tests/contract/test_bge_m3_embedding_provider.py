@@ -128,5 +128,6 @@ def test_bge_m3_loader_uses_configured_mirror_cache_and_revision(
     assert captured == {
         "model_name": "BAAI/bge-m3",
         "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+        "cache_folder": str(tmp_path),
         "device": "cpu",
     }
