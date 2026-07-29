@@ -2,7 +2,11 @@ import json
 from pathlib import Path
 
 from sourcetrace.evaluation.fixtures import FixtureObservationSet
-from sourcetrace.evaluation.models import EvaluationDataset, EvaluationReport
+from sourcetrace.evaluation.models import (
+    EvaluationDataset,
+    EvaluationJudgmentSet,
+    EvaluationReport,
+)
 
 
 def main() -> None:
@@ -11,6 +15,7 @@ def main() -> None:
     schemas = {
         "dataset-v1.schema.json": EvaluationDataset.model_json_schema(),
         "fixture-observations-v1.schema.json": FixtureObservationSet.model_json_schema(),
+        "judgments-v1.schema.json": EvaluationJudgmentSet.model_json_schema(),
         "report-v1.schema.json": EvaluationReport.model_json_schema(),
     }
     for filename, schema in schemas.items():

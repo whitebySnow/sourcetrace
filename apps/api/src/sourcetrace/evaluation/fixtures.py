@@ -15,9 +15,7 @@ class FixtureObservation(EvaluationObservation):
     case_id: str = Field(min_length=1)
 
     def as_observation(self) -> EvaluationObservation:
-        return EvaluationObservation.model_validate(
-            self.model_dump(exclude={"case_id"})
-        )
+        return EvaluationObservation.model_validate(self.model_dump(exclude={"case_id"}))
 
 
 class FixtureObservationSet(StrictModel):

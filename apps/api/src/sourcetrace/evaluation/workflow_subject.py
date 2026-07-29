@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Protocol
 from uuid import UUID, uuid4
 
@@ -78,12 +78,12 @@ class WorkflowEvaluationSubject:
     def __init__(
         self,
         *,
-        workflow: WorkflowRunner,
-        retrieval: RecordingWorkflowRetrieval,
+        retrieval: WorkflowRetrieval,
+        workflow_factory: Callable[[RecordingWorkflowRetrieval], WorkflowRunner],
         knowledge_base_id: UUID,
     ) -> None:
-        self._workflow = workflow
-        self._retrieval = retrieval
+        self._retrieval = RecordingWorkflowRetrieval(retrieval)
+        self._workflow = workflow_factory(self._retrieval)
         self._knowledge_base_id = knowledge_base_id
 
     async def evaluate(self, case: EvaluationCase) -> EvaluationObservation:

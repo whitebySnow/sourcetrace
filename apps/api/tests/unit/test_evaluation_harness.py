@@ -8,7 +8,7 @@ from sourcetrace.evaluation import (
     EvaluationRunMetadata,
     ObservedEvidence,
 )
-from sourcetrace.evaluation.models import EvaluationCase
+from sourcetrace.evaluation.models import EvaluationCase, EvaluationJudgmentSet
 
 
 class DeterministicSubject:
@@ -28,6 +28,7 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
             "dataset_id": "fixture-rag",
             "dataset_version": "1.0.0",
             "knowledge_base_id": knowledge_base_id,
+            "document_version_ids": [document_version_id],
             "review": {"status": "fixture"},
             "cases": [
                 {
@@ -69,7 +70,14 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
         model_provider="fake",
         model_name="deterministic-fixture-v1",
         workflow_version="langgraph-bounded-v1",
+        tokenizer="cl100k_base",
+        chunk_size=500,
+        chunk_overlap=80,
         chunking_version="token-window-v1",
+        embedding_provider="fake",
+        embedding_model="deterministic-fixture",
+        embedding_revision="1",
+        embedding_dimension=4,
         embedding_version="bge-m3-dense-v1",
         retrieval_version="pgvector-cosine-v1",
     )
@@ -78,6 +86,8 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
 
     assert report.dataset_id == "fixture-rag"
     assert report.dataset_version == "1.0.0"
+    assert report.knowledge_base_id == knowledge_base_id
+    assert report.document_version_ids == [document_version_id]
     assert report.metadata == metadata
     assert report.cases[0].retrieval == "passed"
     assert report.cases[0].citation == "passed"
@@ -88,21 +98,37 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
         dataset,
         subject,
         metadata=metadata,
-        judgments={"direct-001": "passed"},
+        judgments=EvaluationJudgmentSet.model_validate(
+            {
+                "schema_version": "1",
+                "dataset_id": "fixture-rag",
+                "dataset_version": "1.0.0",
+                "review": {
+                    "status": "reviewed",
+                    "reviewed_by": "project-owner",
+                    "reviewed_at": "2026-07-29T03:00:00Z",
+                },
+                "judgments": [{"case_id": "direct-001", "status": "passed"}],
+            }
+        ),
     )
 
     assert reviewed_report.cases[0].end_to_end == "passed"
     assert reviewed_report.end_to_end_summary.passed == 1
     assert reviewed_report.end_to_end_summary.pending_review == 0
+    assert reviewed_report.judgment_review is not None
+    assert reviewed_report.judgment_review.reviewed_by == "project-owner"
 
 
 async def test_refusal_results_are_reported_without_scoring_irrelevant_axes() -> None:
+    document_version_id = uuid4()
     dataset = EvaluationDataset.model_validate(
         {
             "schema_version": "1",
             "dataset_id": "fixture-rag",
             "dataset_version": "1.0.0",
             "knowledge_base_id": uuid4(),
+            "document_version_ids": [document_version_id],
             "review": {"status": "fixture"},
             "cases": [
                 {
@@ -133,7 +159,14 @@ async def test_refusal_results_are_reported_without_scoring_irrelevant_axes() ->
         model_provider="fake",
         model_name="deterministic-fixture-v1",
         workflow_version="langgraph-bounded-v1",
+        tokenizer="cl100k_base",
+        chunk_size=500,
+        chunk_overlap=80,
         chunking_version="token-window-v1",
+        embedding_provider="fake",
+        embedding_model="deterministic-fixture",
+        embedding_revision="1",
+        embedding_dimension=4,
         embedding_version="bge-m3-dense-v1",
         retrieval_version="pgvector-cosine-v1",
     )
@@ -159,6 +192,7 @@ async def test_citation_fails_when_answer_cites_evidence_outside_ground_truth() 
             "dataset_id": "fixture-rag",
             "dataset_version": "1.0.0",
             "knowledge_base_id": uuid4(),
+            "document_version_ids": [expected_version_id, unexpected_version_id],
             "review": {"status": "fixture"},
             "cases": [
                 {
@@ -205,7 +239,14 @@ async def test_citation_fails_when_answer_cites_evidence_outside_ground_truth() 
         model_provider="fake",
         model_name="deterministic-fixture-v1",
         workflow_version="langgraph-bounded-v1",
+        tokenizer="cl100k_base",
+        chunk_size=500,
+        chunk_overlap=80,
         chunking_version="token-window-v1",
+        embedding_provider="fake",
+        embedding_model="deterministic-fixture",
+        embedding_revision="1",
+        embedding_dimension=4,
         embedding_version="bge-m3-dense-v1",
         retrieval_version="pgvector-cosine-v1",
     )

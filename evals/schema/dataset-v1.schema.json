@@ -167,6 +167,15 @@
       "title": "Knowledge Base Id",
       "type": "string"
     },
+    "document_version_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Document Version Ids",
+      "type": "array"
+    },
     "review": {
       "$ref": "#/$defs/DatasetReview"
     },
@@ -184,6 +193,7 @@
     "dataset_id",
     "dataset_version",
     "knowledge_base_id",
+    "document_version_ids",
     "review",
     "cases"
   ],

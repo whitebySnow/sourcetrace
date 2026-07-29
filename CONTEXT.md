@@ -89,8 +89,16 @@ A persisted answer-run outcome stating that evidence was insufficient or the gen
 _Avoid_: Error, empty answer
 
 **Evaluation Dataset**:
-A versioned set of questions with reviewed answer or refusal expectations and immutable evidence references used to assess one knowledge base configuration.
+A versioned set of questions, answer or refusal expectations, and an immutable document-version snapshot used to exercise the evaluation contract. Its review status distinguishes tooling fixtures from reviewed evidence.
 _Avoid_: Demo prompts, test log
+
+**Reviewed Evaluation Dataset**:
+An Evaluation Dataset whose expectations and evidence references were checked by an identified human reviewer at a recorded UTC time and may be used in a real-provider evaluation.
+_Avoid_: Tooling fixture, generated benchmark
+
+**Evaluation Fixture**:
+A deterministic synthetic Evaluation Dataset and independent observations used only to test the harness; it is never a reviewed dataset or a source of product metrics.
+_Avoid_: Benchmark result, reviewed sample
 
 **Evaluation Observation**:
 The answer outcome, retrieved evidence, and final citations produced for one evaluation case before comparison with its expected result.

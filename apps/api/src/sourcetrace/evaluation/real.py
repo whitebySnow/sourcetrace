@@ -7,13 +7,12 @@ from sourcetrace.db.session import session_factory
 from sourcetrace.evaluation.harness import EvaluationHarness
 from sourcetrace.evaluation.models import (
     EvaluationDataset,
+    EvaluationJudgmentSet,
     EvaluationReport,
     EvaluationRunMetadata,
 )
-from sourcetrace.evaluation.workflow_subject import (
-    RecordingWorkflowRetrieval,
-    WorkflowEvaluationSubject,
-)
+from sourcetrace.evaluation.repository import EvaluationCorpusRepository
+from sourcetrace.evaluation.workflow_subject import WorkflowEvaluationSubject
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
 from sourcetrace.modules.retrieval.service import RetrievalService
 from sourcetrace.rag.embeddings import BgeM3EmbeddingProvider, EmbeddingConfig
@@ -57,26 +56,30 @@ async def run_real_evaluation(
     *,
     code_commit: str,
     settings: Settings,
+    judgments: EvaluationJudgmentSet | None = None,
 ) -> EvaluationReport:
     if dataset.review.status != "reviewed":
         raise ValueError("real evaluations require a human-reviewed dataset")
-    if settings.embedding_provider != "sentence-transformers":
-        raise RuntimeError(f"unsupported embedding provider: {settings.embedding_provider}")
-
-    embedding = BgeM3EmbeddingProvider(
-        EmbeddingConfig(
-            provider=settings.embedding_provider,
-            model=settings.embedding_model,
-            revision=settings.embedding_model_revision,
-            cache_dir=settings.embedding_cache_dir,
-            endpoint=settings.embedding_hf_endpoint,
-            device=settings.embedding_device,
-            batch_size=settings.embedding_batch_size,
-            dimension=settings.embedding_dimension,
-            version=settings.embedding_config_version,
-        )
-    )
     async with session_factory() as session, httpx.AsyncClient() as client:
+        provenance = await EvaluationCorpusRepository(session).get_provenance(
+            dataset.knowledge_base_id,
+            dataset.document_version_ids,
+        )
+        if provenance.embedding_provider != "sentence-transformers":
+            raise RuntimeError(f"unsupported embedding provider: {provenance.embedding_provider}")
+        embedding = BgeM3EmbeddingProvider(
+            EmbeddingConfig(
+                provider=provenance.embedding_provider,
+                model=provenance.embedding_model,
+                revision=provenance.embedding_revision,
+                cache_dir=settings.embedding_cache_dir,
+                endpoint=settings.embedding_hf_endpoint,
+                device=settings.embedding_device,
+                batch_size=settings.embedding_batch_size,
+                dimension=provenance.embedding_dimension,
+                version=provenance.embedding_version,
+            )
+        )
         rewriter = OpenAICompatibleQuestionRewriter(
             _llm_config(
                 settings,
@@ -84,41 +87,41 @@ async def run_real_evaluation(
             ),
             client=client,
         )
-        retrieval = RecordingWorkflowRetrieval(
-            RetrievalService(
-                repository=PgVectorRetrievalRepository(session),
-                embedding_provider=embedding,
-                question_rewriter=rewriter,
-                top_k=settings.retrieval_top_k,
-            )
-        )
-        workflow = AnswerWorkflow(
-            retrieval=retrieval,
-            assessor=OpenAICompatibleEvidenceAssessor(
-                _llm_config(
-                    settings,
-                    prompt_version=settings.llm_evidence_assessment_prompt_version,
-                ),
-                client=client,
+        retrieval = RetrievalService(
+            repository=PgVectorRetrievalRepository(
+                session,
+                document_version_ids=dataset.document_version_ids,
             ),
-            generator=OpenAICompatibleAnswerGenerator(
-                _llm_config(settings, prompt_version=settings.llm_prompt_version),
-                client=client,
-            ),
-            citation_repairer=OpenAICompatibleCitationRepairer(
-                _llm_config(
-                    settings,
-                    prompt_version=settings.llm_citation_repair_prompt_version,
-                ),
-                client=client,
-            ),
-            run_control=EvaluationRunControl(),
-            minimum_score=settings.retrieval_minimum_score,
-            minimum_evidence=settings.retrieval_minimum_evidence,
+            embedding_provider=embedding,
+            question_rewriter=rewriter,
+            top_k=settings.retrieval_top_k,
         )
         subject = WorkflowEvaluationSubject(
-            workflow=workflow,
             retrieval=retrieval,
+            workflow_factory=lambda recording_retrieval: AnswerWorkflow(
+                retrieval=recording_retrieval,
+                assessor=OpenAICompatibleEvidenceAssessor(
+                    _llm_config(
+                        settings,
+                        prompt_version=settings.llm_evidence_assessment_prompt_version,
+                    ),
+                    client=client,
+                ),
+                generator=OpenAICompatibleAnswerGenerator(
+                    _llm_config(settings, prompt_version=settings.llm_prompt_version),
+                    client=client,
+                ),
+                citation_repairer=OpenAICompatibleCitationRepairer(
+                    _llm_config(
+                        settings,
+                        prompt_version=settings.llm_citation_repair_prompt_version,
+                    ),
+                    client=client,
+                ),
+                run_control=EvaluationRunControl(),
+                minimum_score=settings.retrieval_minimum_score,
+                minimum_evidence=settings.retrieval_minimum_evidence,
+            ),
             knowledge_base_id=dataset.knowledge_base_id,
         )
         return await EvaluationHarness().run(
@@ -129,8 +132,16 @@ async def run_real_evaluation(
                 model_provider=settings.llm_provider,
                 model_name=settings.llm_model,
                 workflow_version=settings.answer_workflow_version,
-                chunking_version=settings.ingestion_chunking_config_version,
-                embedding_version=settings.embedding_config_version,
+                tokenizer=provenance.tokenizer,
+                chunk_size=provenance.chunk_size,
+                chunk_overlap=provenance.chunk_overlap,
+                chunking_version=provenance.chunking_version,
+                embedding_provider=provenance.embedding_provider,
+                embedding_model=provenance.embedding_model,
+                embedding_revision=provenance.embedding_revision,
+                embedding_dimension=provenance.embedding_dimension,
+                embedding_version=provenance.embedding_version,
                 retrieval_version=settings.retrieval_config_version,
             ),
+            judgments=judgments,
         )

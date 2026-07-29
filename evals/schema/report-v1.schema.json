@@ -34,6 +34,49 @@
       "title": "CaseEvaluationResult",
       "type": "object"
     },
+    "DatasetReview": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "reviewed",
+            "fixture"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reviewed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "DatasetReview",
+      "type": "object"
+    },
     "EvaluationObservation": {
       "additionalProperties": false,
       "properties": {
@@ -104,10 +147,45 @@
           "title": "Workflow Version",
           "type": "string"
         },
+        "tokenizer": {
+          "minLength": 1,
+          "title": "Tokenizer",
+          "type": "string"
+        },
+        "chunk_size": {
+          "exclusiveMinimum": 0,
+          "title": "Chunk Size",
+          "type": "integer"
+        },
+        "chunk_overlap": {
+          "minimum": 0,
+          "title": "Chunk Overlap",
+          "type": "integer"
+        },
         "chunking_version": {
           "minLength": 1,
           "title": "Chunking Version",
           "type": "string"
+        },
+        "embedding_provider": {
+          "minLength": 1,
+          "title": "Embedding Provider",
+          "type": "string"
+        },
+        "embedding_model": {
+          "minLength": 1,
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "embedding_revision": {
+          "minLength": 1,
+          "title": "Embedding Revision",
+          "type": "string"
+        },
+        "embedding_dimension": {
+          "exclusiveMinimum": 0,
+          "title": "Embedding Dimension",
+          "type": "integer"
         },
         "embedding_version": {
           "minLength": 1,
@@ -125,7 +203,14 @@
         "model_provider",
         "model_name",
         "workflow_version",
+        "tokenizer",
+        "chunk_size",
+        "chunk_overlap",
         "chunking_version",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_revision",
+        "embedding_dimension",
         "embedding_version",
         "retrieval_version"
       ],
@@ -218,8 +303,32 @@
       "title": "Dataset Version",
       "type": "string"
     },
+    "knowledge_base_id": {
+      "format": "uuid",
+      "title": "Knowledge Base Id",
+      "type": "string"
+    },
+    "document_version_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Document Version Ids",
+      "type": "array"
+    },
     "metadata": {
       "$ref": "#/$defs/EvaluationRunMetadata"
+    },
+    "judgment_review": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DatasetReview"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "cases": {
       "items": {
@@ -244,6 +353,8 @@
   "required": [
     "dataset_id",
     "dataset_version",
+    "knowledge_base_id",
+    "document_version_ids",
     "metadata",
     "cases",
     "retrieval_summary",

@@ -117,7 +117,10 @@ Pydantic 评测契约后运行 `pnpm generate:eval` 并提交同步生成的 sch
 
 真实评测通过 `python -m sourcetrace.evaluation.cli real` 单独运行，必须传入 reviewed 数据集、
 当前 Git commit、输出路径和 `--confirm-real-provider`。该命令复用生产 `RetrievalService`、
-BGE-M3、pgvector 和 `AnswerWorkflow`，每个 case 使用独立 run 且不携带会话历史。基础设施
+BGE-M3、pgvector 和 `AnswerWorkflow`，但检索只允许数据集声明的不可变文档版本快照，并从
+对应 completed ingestion run 读取实际切分和 embedding provenance。每个 case 使用独立 run
+且不携带会话历史。可选的版本化 `--judgments` 文件记录 answered case 的人工端到端结论。
+基础设施
 错误会终止评测，不能被统计为回答失败。完整参数和数据审核规则见 `evals/README.md`。
 
 ## API 与错误

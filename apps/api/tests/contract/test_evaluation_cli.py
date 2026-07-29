@@ -13,6 +13,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     dataset_path = tmp_path / "dataset.json"
     observations_path = tmp_path / "observations.json"
     metadata_path = tmp_path / "metadata.json"
+    judgments_path = tmp_path / "judgments.json"
     output_path = tmp_path / "reports" / "report.json"
     dataset_path.write_text(
         json.dumps(
@@ -21,6 +22,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
                 "dataset_id": "cli-fixture",
                 "dataset_version": "1.0.0",
                 "knowledge_base_id": str(knowledge_base_id),
+                "document_version_ids": [str(document_version_id)],
                 "review": {"status": "fixture"},
                 "cases": [
                     {
@@ -82,9 +84,32 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
                 "model_provider": "fake",
                 "model_name": "deterministic-fixture-v1",
                 "workflow_version": "langgraph-bounded-v1",
+                "tokenizer": "cl100k_base",
+                "chunk_size": 500,
+                "chunk_overlap": 80,
                 "chunking_version": "token-window-v1",
+                "embedding_provider": "fake",
+                "embedding_model": "deterministic-fixture",
+                "embedding_revision": "1",
+                "embedding_dimension": 4,
                 "embedding_version": "bge-m3-dense-v1",
                 "retrieval_version": "pgvector-cosine-v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+    judgments_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "dataset_id": "cli-fixture",
+                "dataset_version": "1.0.0",
+                "review": {
+                    "status": "reviewed",
+                    "reviewed_by": "project-owner",
+                    "reviewed_at": "2026-07-29T03:00:00Z",
+                },
+                "judgments": [{"case_id": "direct-001", "status": "passed"}],
             }
         ),
         encoding="utf-8",
@@ -99,6 +124,8 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
             str(observations_path),
             "--metadata",
             str(metadata_path),
+            "--judgments",
+            str(judgments_path),
             "--output",
             str(output_path),
         ]
@@ -109,7 +136,8 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     assert report["dataset_id"] == "cli-fixture"
     assert report["metadata"]["code_commit"] == "test-commit"
     assert report["retrieval_summary"]["passed"] == 1
-    assert report["end_to_end_summary"]["pending_review"] == 1
+    assert report["end_to_end_summary"]["passed"] == 1
+    assert report["judgment_review"]["reviewed_by"] == "project-owner"
 
 
 def test_real_cli_requires_explicit_provider_confirmation() -> None:

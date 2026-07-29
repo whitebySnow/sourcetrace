@@ -3,7 +3,14 @@
   "model_provider": "fake",
   "model_name": "deterministic-fixture-v1",
   "workflow_version": "langgraph-bounded-v1",
+  "tokenizer": "cl100k_base",
+  "chunk_size": 500,
+  "chunk_overlap": 80,
   "chunking_version": "token-window-v1",
+  "embedding_provider": "fake",
+  "embedding_model": "deterministic-fixture",
+  "embedding_revision": "1",
+  "embedding_dimension": 4,
   "embedding_version": "bge-m3-dense-v1",
   "retrieval_version": "pgvector-cosine-v1"
 }

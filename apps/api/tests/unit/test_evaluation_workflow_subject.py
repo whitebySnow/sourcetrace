@@ -2,10 +2,7 @@ from collections.abc import AsyncIterator, Sequence
 from uuid import UUID, uuid4
 
 from sourcetrace.evaluation.models import EvaluationCase
-from sourcetrace.evaluation.workflow_subject import (
-    RecordingWorkflowRetrieval,
-    WorkflowEvaluationSubject,
-)
+from sourcetrace.evaluation.workflow_subject import WorkflowEvaluationSubject
 from sourcetrace.modules.retrieval.service import RetrievedEvidence
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowTrace
@@ -82,19 +79,17 @@ async def test_workflow_subject_captures_retrieval_and_final_citations() -> None
         text="Bounded workflows stop after one retry.",
         score=0.9,
     )
-    retrieval = RecordingWorkflowRetrieval(StaticRetrieval(evidence))
-    workflow = AnswerWorkflow(
-        retrieval=retrieval,
-        assessor=SelectingAssessor(evidence.chunk_id),
-        generator=CitingGenerator(),
-        citation_repairer=UnusedRepairer(),
-        run_control=ActiveRunControl(),
-        minimum_score=0.5,
-        minimum_evidence=1,
-    )
     subject = WorkflowEvaluationSubject(
-        workflow=workflow,
-        retrieval=retrieval,
+        retrieval=StaticRetrieval(evidence),
+        workflow_factory=lambda retrieval: AnswerWorkflow(
+            retrieval=retrieval,
+            assessor=SelectingAssessor(evidence.chunk_id),
+            generator=CitingGenerator(),
+            citation_repairer=UnusedRepairer(),
+            run_control=ActiveRunControl(),
+            minimum_score=0.5,
+            minimum_evidence=1,
+        ),
         knowledge_base_id=knowledge_base_id,
     )
     case = EvaluationCase.model_validate(

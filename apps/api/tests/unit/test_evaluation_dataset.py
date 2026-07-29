@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from sourcetrace.evaluation import EvaluationDataset, load_dataset
+from sourcetrace.evaluation import EvaluationDataset, EvaluationObservation, load_dataset
 
 
 def test_reviewed_dataset_loads_with_versioned_ground_truth(tmp_path) -> None:
@@ -19,6 +19,7 @@ def test_reviewed_dataset_loads_with_versioned_ground_truth(tmp_path) -> None:
                 "dataset_id": "sourcetrace-mvp",
                 "dataset_version": "1.0.0",
                 "knowledge_base_id": str(knowledge_base_id),
+                "document_version_ids": [str(document_version_id)],
                 "review": {
                     "status": "reviewed",
                     "reviewed_by": "project-owner",
@@ -52,6 +53,7 @@ def test_reviewed_dataset_loads_with_versioned_ground_truth(tmp_path) -> None:
     assert dataset.dataset_id == "sourcetrace-mvp"
     assert dataset.dataset_version == "1.0.0"
     assert dataset.knowledge_base_id == knowledge_base_id
+    assert dataset.document_version_ids == [document_version_id]
     assert dataset.review.reviewed_at == datetime(2026, 7, 29, 2, 0, tzinfo=UTC)
     assert dataset.cases[0].expected.evidence[0].document_version_id == document_version_id
 
@@ -65,6 +67,7 @@ def test_reviewed_dataset_requires_reviewer_identity_and_time(tmp_path) -> None:
                 "dataset_id": "sourcetrace-mvp",
                 "dataset_version": "1.0.0",
                 "knowledge_base_id": str(uuid4()),
+                "document_version_ids": [str(uuid4())],
                 "review": {"status": "reviewed"},
                 "cases": [
                     {
@@ -112,6 +115,7 @@ def test_expected_outcome_requires_consistent_ground_truth(
                 "dataset_id": "sourcetrace-mvp",
                 "dataset_version": "1.0.0",
                 "knowledge_base_id": str(uuid4()),
+                "document_version_ids": [str(uuid4())],
                 "review": {"status": "fixture"},
                 "cases": [
                     {
@@ -153,7 +157,107 @@ def test_dataset_rejects_duplicate_case_ids() -> None:
                 "dataset_id": "duplicate-fixture",
                 "dataset_version": "1.0.0",
                 "knowledge_base_id": uuid4(),
+                "document_version_ids": [uuid4()],
                 "review": {"status": "fixture"},
                 "cases": [case, case],
             }
         )
+
+
+def test_review_time_is_normalized_to_utc() -> None:
+    dataset = EvaluationDataset.model_validate(
+        {
+            "schema_version": "1",
+            "dataset_id": "review-time",
+            "dataset_version": "1.0.0",
+            "knowledge_base_id": uuid4(),
+            "document_version_ids": [uuid4()],
+            "review": {
+                "status": "reviewed",
+                "reviewed_by": "project-owner",
+                "reviewed_at": "2026-07-29T10:00:00+08:00",
+            },
+            "cases": [
+                {
+                    "id": "unanswerable-001",
+                    "category": "unanswerable",
+                    "question": "What is outside the source?",
+                    "expected": {
+                        "outcome": "refused",
+                        "reference_answer": None,
+                        "evidence": [],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert dataset.review.reviewed_at == datetime(2026, 7, 29, 2, 0, tzinfo=UTC)
+
+
+def test_dataset_rejects_evidence_outside_document_snapshot() -> None:
+    with pytest.raises(ValidationError):
+        EvaluationDataset.model_validate(
+            {
+                "schema_version": "1",
+                "dataset_id": "invalid-snapshot",
+                "dataset_version": "1.0.0",
+                "knowledge_base_id": uuid4(),
+                "document_version_ids": [uuid4()],
+                "review": {"status": "fixture"},
+                "cases": [
+                    {
+                        "id": "direct-001",
+                        "category": "direct",
+                        "question": "What does the source say?",
+                        "expected": {
+                            "outcome": "answered",
+                            "reference_answer": "A fact.",
+                            "evidence": [
+                                {
+                                    "document_version_id": uuid4(),
+                                    "page_number": 1,
+                                    "text": "A fact.",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "observation",
+    [
+        {
+            "outcome": "answered",
+            "answer": None,
+            "retrieved_evidence": [],
+            "citations": [],
+        },
+        {
+            "outcome": "refused",
+            "answer": "Contradictory answer",
+            "retrieved_evidence": [],
+            "citations": [],
+        },
+        {
+            "outcome": "refused",
+            "answer": None,
+            "retrieved_evidence": [],
+            "citations": [
+                {
+                    "document_version_id": uuid4(),
+                    "page_number": 1,
+                    "text": "Contradictory citation",
+                }
+            ],
+        },
+    ],
+)
+def test_observation_rejects_contradictory_outcomes(
+    observation: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        EvaluationObservation.model_validate(observation)

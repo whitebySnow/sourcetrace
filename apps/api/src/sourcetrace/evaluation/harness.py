@@ -1,10 +1,10 @@
-from collections.abc import Mapping
 from typing import Protocol
 
 from sourcetrace.evaluation.models import (
     CaseEvaluationResult,
     EvaluationCase,
     EvaluationDataset,
+    EvaluationJudgmentSet,
     EvaluationObservation,
     EvaluationReport,
     EvaluationRunMetadata,
@@ -27,8 +27,9 @@ class EvaluationHarness:
         subject: EvaluationSubject,
         *,
         metadata: EvaluationRunMetadata,
-        judgments: Mapping[str, HumanJudgment] | None = None,
+        judgments: EvaluationJudgmentSet | None = None,
     ) -> EvaluationReport:
+        judgment_map = self._validate_judgments(dataset, judgments)
         results: list[CaseEvaluationResult] = []
         for case in dataset.cases:
             observation = await subject.evaluate(case)
@@ -55,7 +56,7 @@ class EvaluationHarness:
                         retrieval=retrieval,
                         citation=citation,
                         refusal=refusal,
-                        judgment=(judgments or {}).get(case.id),
+                        judgment=judgment_map.get(case.id),
                     ),
                     observation=observation,
                 )
@@ -63,13 +64,34 @@ class EvaluationHarness:
         return EvaluationReport(
             dataset_id=dataset.dataset_id,
             dataset_version=dataset.dataset_version,
+            knowledge_base_id=dataset.knowledge_base_id,
+            document_version_ids=dataset.document_version_ids,
             metadata=metadata,
+            judgment_review=judgments.review if judgments is not None else None,
             cases=results,
             retrieval_summary=self._summarize([item.retrieval for item in results]),
             citation_summary=self._summarize([item.citation for item in results]),
             refusal_summary=self._summarize([item.refusal for item in results]),
             end_to_end_summary=self._summarize([item.end_to_end for item in results]),
         )
+
+    @staticmethod
+    def _validate_judgments(
+        dataset: EvaluationDataset,
+        judgments: EvaluationJudgmentSet | None,
+    ) -> dict[str, HumanJudgment]:
+        if judgments is None:
+            return {}
+        if (
+            judgments.dataset_id != dataset.dataset_id
+            or judgments.dataset_version != dataset.dataset_version
+        ):
+            raise ValueError("end-to-end judgments must match the dataset version")
+        expected_ids = {case.id for case in dataset.cases if case.expected.outcome == "answered"}
+        actual_ids = {judgment.case_id for judgment in judgments.judgments}
+        if actual_ids != expected_ids:
+            raise ValueError("judgments must cover every answered case exactly once")
+        return judgments.as_mapping()
 
     @staticmethod
     def _summarize(statuses: list[EvaluationStatus]) -> EvaluationSummary:
