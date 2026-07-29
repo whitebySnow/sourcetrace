@@ -1,7 +1,10 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
+
+from sourcetrace.modules.health.dependencies import get_readiness_service
+from sourcetrace.modules.health.service import ReadinessService
 
 router = APIRouter(tags=["system"])
 
@@ -12,7 +15,7 @@ class HealthResponse(BaseModel):
 
 class ReadinessResponse(BaseModel):
     status: Literal["ok", "degraded"]
-    checks: dict[str, Literal["ok", "not_configured"]]
+    checks: dict[str, Literal["ok", "unavailable"]]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -21,9 +24,17 @@ async def health() -> HealthResponse:
 
 
 @router.get("/ready", response_model=ReadinessResponse)
-async def ready() -> ReadinessResponse:
-    # Database and Redis probes are added with the persistence adapters.
+async def ready(
+    response: Response,
+    service: Annotated[ReadinessService, Depends(get_readiness_service)],
+) -> ReadinessResponse:
+    result = await service.check()
+    if not result.ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadinessResponse(
-        status="degraded",
-        checks={"database": "not_configured", "redis": "not_configured"},
+        status="ok" if result.ready else "degraded",
+        checks={
+            "database": "ok" if result.database else "unavailable",
+            "redis": "ok" if result.redis else "unavailable",
+        },
     )

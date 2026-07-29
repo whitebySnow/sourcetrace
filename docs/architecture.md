@@ -188,7 +188,22 @@ prompt、工作流、切分、embedding 和检索参数/版本。端到端 Judgm
 - 生产环境显式配置 CORS、可信代理、上传限制、速率限制和 HTTPS。
 - 数据库迁移只通过 Alembic，破坏性变化拆为“新增、迁移、移除”多个发布步骤。
 
-## 9. 何时拆分服务
+## 9. 部署拓扑
+
+完整本地交付由 `compose.yaml` 编排 Web、API、Worker、PostgreSQL、Redis 和一次性 Alembic
+迁移容器。Web 使用 Nginx 提供静态资源并将 `/api/`、`/health` 和 `/ready` 反向代理到 API，
+因此浏览器侧使用同源请求，SSE 代理关闭缓冲。
+
+迁移容器必须成功退出，API 和 Worker 才能启动；Web 继续等待 API 就绪。`/health` 只检查
+API 进程存活，`/ready` 实际探测 PostgreSQL 与 Redis，任一依赖不可用时返回非就绪状态。
+PostgreSQL、Redis 和上传文件使用独立持久卷，普通停止或重建容器不会删除数据。
+
+基础 Compose 将 Worker 配置为 CPU，不假设宿主机存在 GPU。`compose.gpu.yaml` 只覆盖 Worker
+设备与 NVIDIA 资源请求。Embedding 权重始终位于宿主机缓存并挂载到
+`/models/huggingface`，不写入镜像；API 与 Worker 共享上传卷，确保异步摄取能读取 API 保存
+的原文件。日常开发可以只在 Compose 中运行 PostgreSQL 与 Redis，其余进程在宿主机热更新。
+
+## 10. 何时拆分服务
 
 仅在出现以下证据时考虑拆分：Worker 与 API 需要显著不同的资源配置；模块拥有独立团队
 和发布周期；数据隔离或合规要求强制独立部署；或单体内已无法满足经测量的容量目标。

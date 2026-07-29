@@ -731,7 +731,7 @@ export interface components {
             status: "ok" | "degraded";
             /** Checks */
             checks: {
-                [key: string]: "ok" | "not_configured";
+                [key: string]: "ok" | "unavailable";
             };
         };
         /** ValidationError */

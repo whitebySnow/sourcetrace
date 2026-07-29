@@ -33,6 +33,111 @@ services:
       retries: 10
     restart: unless-stopped
 
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: sourcetrace-api:local
+    command: ["alembic", "-c", "apps/api/alembic.ini", "upgrade", "head"]
+    environment: &application-environment
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sourcetrace}:${POSTGRES_PASSWORD:-sourcetrace_dev}@postgres:5432/${POSTGRES_DB:-sourcetrace}
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /data/uploads
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai-compatible}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.example.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.6-luna}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-sentence-transformers}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL_CONTAINER:-BAAI/bge-m3}
+      EMBEDDING_MODEL_REVISION: ${EMBEDDING_MODEL_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      EMBEDDING_CACHE_DIR: /models/huggingface
+      EMBEDDING_HF_ENDPOINT: ${EMBEDDING_HF_ENDPOINT:-https://hf-mirror.com}
+      EMBEDDING_DEVICE: cpu
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-8}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
+      EMBEDDING_CONFIG_VERSION: ${EMBEDDING_CONFIG_VERSION:-bge-m3-dense-v1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: sourcetrace-api:local
+    init: true
+    environment:
+      <<: *application-environment
+      API_CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/data/uploads
+      - ${HF_CACHE_HOST_PATH:-./data/huggingface}:/models/huggingface
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    image: sourcetrace-api:local
+    init: true
+    command:
+      [
+        "dramatiq",
+        "sourcetrace.workers.tasks",
+        "--processes",
+        "1",
+        "--threads",
+        "4",
+      ]
+    environment: *application-environment
+    volumes:
+      - uploads_data:/data/uploads
+      - ${HF_CACHE_HOST_PATH:-./data/huggingface}:/models/huggingface
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    image: sourcetrace-web:local
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/web-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:
