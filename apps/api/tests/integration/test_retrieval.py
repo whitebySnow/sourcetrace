@@ -1,8 +1,10 @@
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sourcetrace.evaluation.repository import EvaluationCorpusRepository
 from sourcetrace.modules.documents.models import Chunk
 from sourcetrace.modules.documents.repository import DocumentRepository
 from sourcetrace.modules.documents.service import DocumentService
@@ -50,6 +52,7 @@ async def _create_searchable_version(
     text: str,
     page_number: int,
     embedding: list[float],
+    embedding_config_version: str = "bge-m3-dense-v1",
 ) -> UUID:
     repository = DocumentRepository(session)
     registration = await DocumentService(repository).register_version(
@@ -81,6 +84,11 @@ async def _create_searchable_version(
     )
     await repository.create_chunks([chunk])
     await repository.set_chunk_embeddings([chunk], [embedding])
+    run.embedding_provider = "sentence-transformers"
+    run.embedding_model = "BAAI/bge-m3"
+    run.embedding_model_revision = "test-revision"
+    run.embedding_dimension = 1024
+    run.embedding_config_version = embedding_config_version
     registration.version.status = "completed"
     run.status = "completed"
     run.stage = "completed"
@@ -181,3 +189,79 @@ async def test_retrieval_service_owns_follow_up_query_resolution(
     assert rewriter.calls == [
         ("How does that work?", ["What is cosine similarity?"]),
     ]
+
+
+async def test_retrieval_can_be_pinned_to_an_exact_document_version_snapshot(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Evaluation snapshot"
+    )
+    old_version_id = await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="snapshot.pdf",
+        checksum="a" * 64,
+        text="Reviewed snapshot evidence",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="snapshot.pdf",
+        checksum="b" * 64,
+        text="Newer evidence outside the reviewed snapshot",
+        page_number=2,
+        embedding=_vector(1.0, 0.0),
+    )
+    service = RetrievalService(
+        repository=PgVectorRetrievalRepository(
+            session,
+            document_version_ids=(old_version_id,),
+        ),
+        embedding_provider=QueryEmbeddingProvider(),
+        question_rewriter=UnusedQuestionRewriter(),
+        top_k=8,
+    )
+
+    evidence = await service.search(
+        knowledge_base_id=knowledge_base.id,
+        query="How are vectors normalized?",
+    )
+
+    assert [item.document_version_id for item in evidence] == [old_version_id]
+    assert [item.text for item in evidence] == ["Reviewed snapshot evidence"]
+
+
+async def test_evaluation_snapshot_rejects_mixed_ingestion_provenance(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Mixed provenance"
+    )
+    first_version_id = await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="first.pdf",
+        checksum="c" * 64,
+        text="First evidence",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+    )
+    second_version_id = await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="second.pdf",
+        checksum="d" * 64,
+        text="Second evidence",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+        embedding_config_version="different-embedding-v2",
+    )
+
+    with pytest.raises(ValueError, match="same ingestion configuration"):
+        await EvaluationCorpusRepository(session).get_provenance(
+            knowledge_base.id,
+            (first_version_id, second_version_id),
+        )

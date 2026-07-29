@@ -1,0 +1,117 @@
+{
+  "$defs": {
+    "CaseJudgment": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/HumanJudgment"
+        }
+      },
+      "required": [
+        "case_id",
+        "status"
+      ],
+      "title": "CaseJudgment",
+      "type": "object"
+    },
+    "DatasetReview": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "reviewed",
+            "fixture"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reviewed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "DatasetReview",
+      "type": "object"
+    },
+    "HumanJudgment": {
+      "enum": [
+        "passed",
+        "failed"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "report_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Report Sha256",
+      "type": "string"
+    },
+    "review": {
+      "$ref": "#/$defs/DatasetReview"
+    },
+    "judgments": {
+      "items": {
+        "$ref": "#/$defs/CaseJudgment"
+      },
+      "minItems": 1,
+      "title": "Judgments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_version",
+    "report_sha256",
+    "review",
+    "judgments"
+  ],
+  "title": "EvaluationJudgmentSet",
+  "type": "object"
+}

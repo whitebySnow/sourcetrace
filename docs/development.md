@@ -109,6 +109,22 @@ uv run --project apps/api python apps/api/scripts/probe_llm_provider.py
 - 端到端测试只覆盖上传、摄取、提问、引用跳转等关键旅程。
 - RAG 效果通过 `evals/` 中版本化样本评测，不把主观示例当准确率。
 
+## RAG 评测
+
+评测数据、fixture 和 JSON Schema 位于 `evals/`。日常开发运行 `pnpm eval:fake`，它只消费
+仓库内的确定性 JSON，不连接 PostgreSQL，也不加载本地 embedding 模型或调用 LLM。修改
+Pydantic 评测契约后运行 `pnpm generate:eval` 并提交同步生成的 schema。
+
+真实评测通过 `python -m sourcetrace.evaluation.cli real` 单独运行，必须传入 reviewed 数据集、
+当前 Git commit、输出路径和 `--confirm-real-provider`。该命令复用生产 `RetrievalService`、
+BGE-M3、pgvector 和 `AnswerWorkflow`，但检索只允许数据集声明的不可变文档版本快照，并从
+对应 completed ingestion run 读取实际 parser、切分和 embedding provenance。每个 case 使用
+独立 run 且不携带会话历史。报告同时记录四个 prompt 版本、检索数量和门禁阈值。回答的人工
+端到端结论必须在运行后通过 `review` 命令应用，judgment 文件用 SHA-256 绑定原始待审报告，
+禁止把旧结论套到新一轮模型输出。
+基础设施
+错误会终止评测，不能被统计为回答失败。完整参数和数据审核规则见 `evals/README.md`。
+
 ## API 与错误
 
 所有业务接口放在 `/api/v1` 下。错误响应必须使用统一结构；业务代码抛出 `AppError`

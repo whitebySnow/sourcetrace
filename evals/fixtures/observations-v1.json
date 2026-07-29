@@ -1,0 +1,41 @@
+{
+  "schema_version": "1",
+  "dataset_id": "sourcetrace-tooling-fixture",
+  "dataset_version": "1.0.0",
+  "observations": [
+    {
+      "case_id": "direct-001",
+      "outcome": "answered",
+      "answer": "The workflow allows one retry.",
+      "retrieved_evidence": [{"document_version_id": "22222222-2222-4222-8222-222222222222", "page_number": 3, "text": "The bounded workflow allows one retry before refusing."}],
+      "citations": [{"document_version_id": "22222222-2222-4222-8222-222222222222", "page_number": 3, "text": "The bounded workflow allows one retry before refusing."}]
+    },
+    {
+      "case_id": "multi-chunk-001",
+      "outcome": "answered",
+      "answer": "It cites immutable versions and page-local excerpts.",
+      "retrieved_evidence": [
+        {"document_version_id": "33333333-3333-4333-8333-333333333333", "page_number": 4, "text": "Each citation points to an immutable document version."},
+        {"document_version_id": "33333333-3333-4333-8333-333333333333", "page_number": 7, "text": "A citation includes a page-local excerpt for inspection."}
+      ],
+      "citations": [
+        {"document_version_id": "33333333-3333-4333-8333-333333333333", "page_number": 4, "text": "Each citation points to an immutable document version."},
+        {"document_version_id": "33333333-3333-4333-8333-333333333333", "page_number": 7, "text": "A citation includes a page-local excerpt for inspection."}
+      ]
+    },
+    {
+      "case_id": "unanswerable-001",
+      "outcome": "refused",
+      "answer": null,
+      "retrieved_evidence": [],
+      "citations": []
+    },
+    {
+      "case_id": "confusing-001",
+      "outcome": "answered",
+      "answer": "No. Retrieval retries are bounded.",
+      "retrieved_evidence": [{"document_version_id": "44444444-4444-4444-8444-444444444444", "page_number": 8, "text": "The agent performs at most one supplemental retrieval."}],
+      "citations": [{"document_version_id": "55555555-5555-4555-8555-555555555555", "page_number": 2, "text": "A distractor incorrectly claims unlimited retries."}]
+    }
+  ]
+}

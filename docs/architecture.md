@@ -39,6 +39,7 @@ sourcetrace/
           health/                  存活与就绪检查
           <feature>/               router/service/repository/schema/model
         rag/                       RAG 跨模块编排与供应商端口
+        evaluation/                版本化数据、评分、离线与真实评测适配
         workers/                   独立 Worker 进程入口
       tests/
         unit/                      纯逻辑测试
@@ -88,6 +89,7 @@ flowchart LR
 | `conversations` | 知识库绑定的会话与不可变问题历史 | 检索与回答生成 |
 | `retrieval` | 查询改写、召回、重排和证据集合 | HTTP 流式协议 |
 | `answers` | 引用约束、拒答策略和回答运行 | 文档存储 |
+| `evaluation` | 数据集校验、分轴评分和可重放报告 | 在线回答生命周期 |
 | `identity` | 用户身份和授权策略 | 业务资源查询 |
 | `health` | 存活与依赖就绪状态 | 业务监控面板 |
 
@@ -153,6 +155,16 @@ PostgreSQL 部分唯一索引保证同一 Conversation 在 `pending`、`running`
 当前部署契约是单 API 进程。进程启动时会把上次进程遗留的活动 Answer Run 标记为
 `failed`，防止会话被活动运行唯一索引永久阻塞；未知的工作流异常也会回滚当前事务并将运行
 安全地终态化。未来若引入多个 API 副本，必须先用租约或实例所有权替代该启动恢复策略。
+
+评测作为进程外工具复用公开应用接缝，不进入在线 Router 或 Answer Run 生命周期。版本化
+Dataset 保存完整不可变文档版本快照，以及预期回答或拒答、页码和证据摘录；Harness 分别计算检索召回、
+引用正确性、拒答和端到端结果。离线模式消费确定性 fixture，真实模式用记录型检索适配器包装
+生产 RetrievalService，把 pgvector 限定在该快照，并消费 AnswerWorkflow 的最终事件。真实
+运行从快照 chunk 对应的 completed Ingestion Run 读取实际 parser、切分和 embedding
+provenance；不完整或混用配置的快照不能运行。Report 绑定 Dataset、代码提交、模型、四个
+prompt、工作流、切分、embedding 和检索参数/版本。端到端 Judgment 只能在运行后离线应用，
+并以 SHA-256 绑定待审 Report，同时保存审核人和 UTC 时间。真实模式只接受人工审核数据集
+并要求 CLI 显式确认，避免常规测试误用数据库、本地模型或付费供应商。
 
 ## 7. API 契约
 

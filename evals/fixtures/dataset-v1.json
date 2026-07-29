@@ -1,0 +1,53 @@
+{
+  "schema_version": "1",
+  "dataset_id": "sourcetrace-tooling-fixture",
+  "dataset_version": "1.0.0",
+  "knowledge_base_id": "11111111-1111-4111-8111-111111111111",
+  "document_version_ids": [
+    "22222222-2222-4222-8222-222222222222",
+    "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444"
+  ],
+  "review": {"status": "fixture"},
+  "cases": [
+    {
+      "id": "direct-001",
+      "category": "direct",
+      "question": "What is the retry limit?",
+      "expected": {
+        "outcome": "answered",
+        "reference_answer": "The workflow allows one retry.",
+        "evidence": [{"document_version_id": "22222222-2222-4222-8222-222222222222", "page_number": 3, "text": "one retry"}]
+      }
+    },
+    {
+      "id": "multi-chunk-001",
+      "category": "multi_chunk",
+      "question": "How is an answer made traceable?",
+      "expected": {
+        "outcome": "answered",
+        "reference_answer": "It cites immutable document versions and page-local excerpts.",
+        "evidence": [
+          {"document_version_id": "33333333-3333-4333-8333-333333333333", "page_number": 4, "text": "immutable document version"},
+          {"document_version_id": "33333333-3333-4333-8333-333333333333", "page_number": 7, "text": "page-local excerpt"}
+        ]
+      }
+    },
+    {
+      "id": "unanswerable-001",
+      "category": "unanswerable",
+      "question": "What was the weather during the design meeting?",
+      "expected": {"outcome": "refused", "reference_answer": null, "evidence": []}
+    },
+    {
+      "id": "confusing-001",
+      "category": "confusing",
+      "question": "Does the system allow unlimited retrieval retries?",
+      "expected": {
+        "outcome": "answered",
+        "reference_answer": "No. It allows at most one supplemental retrieval.",
+        "evidence": [{"document_version_id": "44444444-4444-4444-8444-444444444444", "page_number": 8, "text": "at most one supplemental retrieval"}]
+      }
+    }
+  ]
+}
