@@ -1,8 +1,14 @@
+import asyncio
 from uuid import uuid4
+
+from dramatiq.middleware import AsyncIO
+from pytest import MonkeyPatch
 
 from sourcetrace.core.config import Settings
 from sourcetrace.modules.documents.models import IngestionRun
 from sourcetrace.modules.documents.queue import DramatiqIngestionQueue
+from sourcetrace.workers import tasks
+from sourcetrace.workers.broker import broker
 from sourcetrace.workers.tasks import chunking_config_for_run, ingest_document_version
 
 
@@ -43,6 +49,27 @@ def test_worker_has_two_retries_for_three_total_attempts_with_backoff() -> None:
     assert ingest_document_version.options["max_backoff"] >= (
         ingest_document_version.options["min_backoff"]
     )
+
+
+def test_worker_reuses_one_event_loop_across_messages(monkeypatch: MonkeyPatch) -> None:
+    event_loops: list[asyncio.AbstractEventLoop] = []
+
+    async def record_event_loop(_version_id: object) -> None:
+        event_loops.append(asyncio.get_running_loop())
+
+    monkeypatch.setattr(tasks, "_ingest_document_version", record_event_loop)
+    middleware = next(
+        item for item in broker.middleware if isinstance(item, AsyncIO)
+    )
+    middleware.before_worker_boot(broker, object())
+    try:
+        ingest_document_version(str(uuid4()))
+        ingest_document_version(str(uuid4()))
+    finally:
+        middleware.after_worker_shutdown(broker, object())
+
+    assert len(event_loops) == 2
+    assert event_loops[0] is event_loops[1]
 
 
 async def test_queue_delivery_retries_three_times_with_backoff() -> None:

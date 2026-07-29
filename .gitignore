@@ -32,6 +32,7 @@ data/uploads/*
 !data/uploads/.gitkeep
 data/postgres/
 data/redis/
+data/huggingface/
 logs/
 
 # Local browser verification

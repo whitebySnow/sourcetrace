@@ -1,4 +1,3 @@
-import asyncio
 from functools import lru_cache
 from uuid import UUID
 
@@ -19,14 +18,14 @@ from sourcetrace.rag.embeddings import (
 from sourcetrace.workers.broker import broker as broker
 
 
-@dramatiq.actor(
+@dramatiq.actor(  # type: ignore[arg-type]
     queue_name="document-ingestion",
     max_retries=2,
     min_backoff=1_000,
     max_backoff=30_000,
 )
-def ingest_document_version(version_id: str) -> None:
-    asyncio.run(_ingest_document_version(UUID(version_id)))
+async def ingest_document_version(version_id: str) -> None:
+    await _ingest_document_version(UUID(version_id))
 
 
 async def _ingest_document_version(version_id: UUID) -> None:

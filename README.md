@@ -6,6 +6,23 @@ SourceTrace 是一个强调证据可定位、回答可追溯和证据不足时�
 
 ## 快速开始
 
+### 完整 Docker Compose
+
+只需 Docker Desktop 即可启动 Web、API、Worker、PostgreSQL 和 Redis。先从示例生成本地
+配置，并填写 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`：
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose ps
+```
+
+Web 默认运行在 `http://localhost:5173`，API 默认运行在 `http://localhost:8000`。Compose
+会先等待 PostgreSQL 就绪并执行 Alembic 迁移，迁移成功后才启动 API 和 Worker。停止服务时
+运行 `docker compose down`；除非明确要清空数据，不要添加 `-v`。
+
+### 混合开发
+
 前置条件：Python 3.12+、uv、Node.js 22+、pnpm 10+ 和 Docker。
 
 ```powershell
@@ -18,9 +35,10 @@ pnpm dev
 
 API 默认运行在 `http://localhost:8000`，Web 默认运行在 `http://localhost:5173`。健康检查为 `GET /health`，依赖就绪检查为 `GET /ready`，OpenAPI 文档为 `/docs`。
 
-首次处理文档时，Worker 会通过配置的 Hugging Face 镜像下载 BGE-M3 到宿主机
-`D:\DevelopEnvironment\huggingface`。模型缓存不在仓库内，也不会写入 Docker 镜像；详细的
-镜像切换、本地模型目录和设备配置见 [开发约定](docs/development.md)。
+首次处理文档时，Worker 会通过配置的 Hugging Face 镜像下载 BGE-M3。完整 Compose 默认将
+宿主机 `./data/huggingface` 挂载到容器 `/models/huggingface`；已有缓存可通过
+`HF_CACHE_HOST_PATH` 复用。模型缓存不进入 Git 或 Docker 镜像；CPU、NVIDIA GPU、镜像切换
+和本地模型目录配置见 [开发约定](docs/development.md)。
 
 ## 常用命令
 

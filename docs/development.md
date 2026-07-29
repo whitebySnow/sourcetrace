@@ -2,7 +2,44 @@
 
 ## 环境准备
 
-需要 Python 3.12+、uv、Node.js 22+、pnpm 和 Docker。首次启动：
+SourceTrace 支持完整 Compose 与混合开发两种方式。两者使用相同业务代码和数据库迁移，
+不要同时启动它们占用相同的 `5173`、`8000` 端口。
+
+### 完整 Docker Compose
+
+完整模式只要求 Docker Desktop。创建 `.env` 并填写远程回答模型配置后启动：
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose ps
+```
+
+基础 Compose 使用 CPU 配置，包含 Web、API、Worker、PostgreSQL、Redis 和一次性迁移容器。
+API 只有在迁移成功且数据库、Redis 均就绪后才对外提供服务。可使用以下命令观察状态：
+
+```powershell
+docker compose logs -f api worker
+Invoke-WebRequest http://localhost:8000/health
+Invoke-WebRequest http://localhost:8000/ready
+Invoke-WebRequest http://localhost:5173/web-health
+```
+
+使用 NVIDIA GPU 运行 Worker 时，需要宿主机已安装可供 Docker 使用的 NVIDIA 驱动和
+Container Toolkit，然后叠加 GPU override：
+
+```powershell
+docker compose -f compose.yaml -f compose.gpu.yaml up --build -d
+```
+
+GPU override 只把 Worker 的 `EMBEDDING_DEVICE` 改为 `cuda` 并请求 GPU；API 和迁移仍使用
+基础配置。停止服务使用 `docker compose down`。该命令保留数据库和上传卷；只有确认要删除
+所有本地数据时才使用 `docker compose down -v`。
+
+### 混合开发
+
+混合模式需要 Python 3.12+、uv、Node.js 22+、pnpm 和 Docker。PostgreSQL 与 Redis 在
+Docker 中运行，API、Worker 和 Web 在宿主机运行，适合热更新与调试：
 
 ```powershell
 Copy-Item .env.example .env
@@ -58,17 +95,37 @@ uv run --project apps/api alembic -c apps/api/alembic.ini downgrade -1
 ## 本地嵌入模型
 
 默认模型为固定 revision 的 `BAAI/bge-m3`，只使用 1024 维 dense embedding。Worker 首次
-执行 embedding 时才加载模型，模型缓存在宿主机 `D:\DevelopEnvironment\huggingface`。
-仓库、上传目录和 Docker 镜像均不保存模型权重。
+执行 embedding 时才加载模型。混合开发由 `EMBEDDING_CACHE_DIR` 指定宿主机缓存；完整
+Compose 默认使用仓库下被忽略的 `./data/huggingface`，并挂载到容器固定路径
+`/models/huggingface`。例如本机已有 `D:\DevelopEnvironment\huggingface` 缓存时，在 `.env`
+中设置：
+
+```dotenv
+HF_CACHE_HOST_PATH=D:\DevelopEnvironment\huggingface
+```
+
+这样容器直接复用已有文件，不会把权重复制到镜像。仓库、上传目录和 Docker 镜像均不保存
+模型权重。
+
+`EMBEDDING_MODEL` 供宿主机进程使用，可能是 Windows 本地路径；完整 Compose 使用独立的
+`EMBEDDING_MODEL_CONTAINER`，避免把宿主机路径原样传入 Linux 容器。默认值
+`BAAI/bge-m3` 会在挂载缓存中查找或下载模型。若缓存根目录中已有 ModelScope 完整模型，
+可同时配置：
+
+```dotenv
+HF_CACHE_HOST_PATH=D:\DevelopEnvironment\huggingface
+EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
+```
 
 默认配置优先使用 `https://hf-mirror.com`。网络环境允许直连 Hugging Face 时，将
 `EMBEDDING_HF_ENDPOINT` 设为空；也可以先通过 ModelScope 下载完整模型目录，再把
 `EMBEDDING_MODEL` 设置为该本地目录。两种方式都应继续把文件放在统一的宿主机缓存根目录，
 不要提交模型文件。
 
-`EMBEDDING_DEVICE=cpu` 是跨机器默认值。安装匹配的 CUDA 版 PyTorch 后可改为 `cuda`，
-业务代码和数据库契约无需变化。`EMBEDDING_BATCH_SIZE` 应根据实际内存或显存 smoke test
-调整，不能把未经测量的吞吐量写入文档。
+`EMBEDDING_DEVICE=cpu` 是跨机器默认值。混合开发安装匹配的 CUDA 版 PyTorch 后可改为
+`cuda`；完整 Compose 使用 `compose.gpu.yaml`，业务代码和数据库契约均无需变化。
+`EMBEDDING_BATCH_SIZE` 应根据实际内存或显存 smoke test 调整，不能把未经测量的吞吐量写入
+文档。
 
 项目使用 `sentence-transformers`，因为 BGE-M3 官方发布了对应的 pooling 与归一化模型图；
 直接使用底层 Transformers 需要自行重复这些模型特定推理规则，更容易产生与查询侧不一致的
