@@ -1,11 +1,35 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from sourcetrace.evaluation import EvaluationDataset, EvaluationObservation, load_dataset
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+
+
+def test_reviewed_agentic_rag_dataset_is_versioned_and_complete() -> None:
+    dataset = load_dataset(
+        REPOSITORY_ROOT / "evals" / "datasets" / "agentic-rag-foundations-v1.json"
+    )
+
+    assert dataset.dataset_id == "agentic-rag-foundations"
+    assert dataset.dataset_version == "1.0.0"
+    assert dataset.review.status == "reviewed"
+    assert len(dataset.document_version_ids) == 3
+    assert len(dataset.cases) == 30
+    assert {case.category for case in dataset.cases} == {
+        "direct",
+        "multi_chunk",
+        "unanswerable",
+        "confusing",
+    }
+    refusal_cases = [case for case in dataset.cases if case.expected.outcome == "refused"]
+    assert len(refusal_cases) == 3
+    assert all(not case.expected.evidence for case in refusal_cases)
 
 
 def test_reviewed_dataset_loads_with_versioned_ground_truth(tmp_path) -> None:

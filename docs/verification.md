@@ -91,19 +91,18 @@ ReAct 和 Self-RAG。三个版本分别为 16、33 和 30 页，产生 44、90 �
 `pypdf-v2`、`token-window-v1` 和同一本地 BGE-M3 配置首次摄取完成。PDF、向量和运行数据不
 提交到 Git。
 
-仓库中的 `evals/candidates/agentic-rag-foundations-v1.md` 提供 30 条中文候选问题，覆盖
-direct、multi_chunk、confusing 和 unanswerable。它只是模型起草的人工审核工作表，不是
-`EvaluationDataset`，也没有 `reviewed` 状态。
+用户已逐条审核 `evals/candidates/agentic-rag-foundations-v1.md` 中的 30 条中文问题、参考答案、
+拒答标签、页码和证据摘录。审核结果已转换为正式数据集
+`evals/datasets/agentic-rag-foundations-v1.json`，状态为 `reviewed`，固定上述三个不可变文档
+版本，并覆盖 direct、multi_chunk、confusing 和 unanswerable。数据集通过项目 Pydantic
+契约校验；47 条回答证据也已逐条确认是对应文档版本、页码中实际 chunk 文本的子串。
 
-真实供应商正式评测仍未运行。原因是候选题的参考答案、页码和逐字证据尚未由用户逐条审核。
-模型不能替用户填写 reviewer、审核时间或期望证据。完成该人工门禁前，只能在简历和面试中
-陈述“已实现版本化评测框架、真实评测入口和候选评测集”，不能声明未经运行的效果数字。
+真实供应商正式评测仍未运行，回答结果也尚未进行绑定报告 SHA-256 的二次人工 judgment。
+因此目前只能陈述“已实现版本化评测框架、真实评测入口和人工审核的正式评测集”，不能声明
+未经运行和复核的效果数字。
 
 ## 6. 剩余人工门禁
 
-1. 用户确认三篇候选论文是否作为最终演示语料。
-2. 用户逐条审核 30 个问题、预期回答或拒答、页码和证据摘录。
-3. 将审核结果转换为正式 Dataset，状态设为 reviewed，并记录真实审核人和 UTC 时间。
-4. 使用当前 Git 提交运行 `real` 评测。
-5. 用户逐条审阅待审回答并应用绑定报告 SHA-256 的 judgments。
-6. 只有最终 reviewed report 中的结果可以进入简历。
+1. 使用当前 Git 提交运行 `real` 评测。
+2. 用户逐条审阅待审回答并应用绑定报告 SHA-256 的 judgments。
+3. 只有最终 reviewed report 中的结果可以进入简历。
