@@ -97,12 +97,28 @@ ReAct 和 Self-RAG。三个版本分别为 16、33 和 30 页，产生 44、90 �
 版本，并覆盖 direct、multi_chunk、confusing 和 unanswerable。数据集通过项目 Pydantic
 契约校验；47 条回答证据也已逐条确认是对应文档版本、页码中实际 chunk 文本的子串。
 
-真实供应商正式评测仍未运行，回答结果也尚未进行绑定报告 SHA-256 的二次人工 judgment。
-因此目前只能陈述“已实现版本化评测框架、真实评测入口和人工审核的正式评测集”，不能声明
-未经运行和复核的效果数字。
+### 真实供应商评测
 
-## 6. 剩余人工门禁
+2026-07-30 使用提交 `d1261fa0ee74ac4ebc9c8e5262183ed43fa3dde1`、`gpt-5.6-luna`、
+本地 BGE-M3 和数据集 `agentic-rag-foundations@1.0.0` 完成 30 题真实评测。运行耗时约
+475 秒；原始待审报告 SHA-256 为
+`186a5ab703bc3d3e3cb149a02d916db4ef14828ee84b2b58437d1114a04a633a`。用户将唯一待审样本
+`ARF-017` 判定为通过后，生成 reviewed report，其 SHA-256 为
+`88084fe0b28e06f00f02a6f6c24c71404ec02133a3e83a975312f23f4c29a795`。
 
-1. 使用当前 Git 提交运行 `real` 评测。
-2. 用户逐条审阅待审回答并应用绑定报告 SHA-256 的 judgments。
-3. 只有最终 reviewed report 中的结果可以进入简历。
+| 维度 | 结果 |
+|---|---|
+| 检索 | 17 passed，10 failed，3 not applicable |
+| 引用 | 1 passed，26 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 4 passed，26 failed，0 pending review |
+
+27 个应回答样本中只有 4 个生成答案，23 个被错误拒答。因此当前首要效果问题不是拒答安全性，
+而是证据充分性判断的召回过低；引用维度的大量失败也主要随错误拒答产生。上述数字只描述该
+数据集、提交和固定配置，不能泛化为其他知识库上的产品准确率。
+
+## 6. 后续评测工作
+
+1. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
+2. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。
+3. 简历只能引用 reviewed report 的限定结果，并同时说明发现的问题和后续优化方向。

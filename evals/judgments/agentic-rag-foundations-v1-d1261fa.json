@@ -1,0 +1,17 @@
+{
+  "schema_version": "1",
+  "dataset_id": "agentic-rag-foundations",
+  "dataset_version": "1.0.0",
+  "report_sha256": "186a5ab703bc3d3e3cb149a02d916db4ef14828ee84b2b58437d1114a04a633a",
+  "review": {
+    "status": "reviewed",
+    "reviewed_by": "whitebySnow",
+    "reviewed_at": "2026-07-30T06:15:43.889Z"
+  },
+  "judgments": [
+    {
+      "case_id": "ARF-017",
+      "status": "passed"
+    }
+  ]
+}
