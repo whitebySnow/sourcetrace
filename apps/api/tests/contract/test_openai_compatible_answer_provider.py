@@ -335,6 +335,37 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     assert "citation-1" in serialized
 
 
+async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"answer":"The objective is \\(x + y\\) '
+                                '[citation-1]"}'
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+
+        answer = await repairer.repair(
+            question="What is the objective?",
+            answer="The objective is x + y.",
+            evidence=_evidence(),
+        )
+
+    assert answer == r"The objective is \(x + y\) [citation-1]"
+
+
 async def test_evidence_assessor_rejects_unstructured_output() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
