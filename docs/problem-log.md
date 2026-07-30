@@ -128,3 +128,20 @@ GPU override 已验证配置正确；镜像体积优化留给单独任务，通�
 
 **面试表达**：这是已识别的交付成本，不应声称镜像已经轻量化，也不应在没有构建数据时填写
 节省比例。
+
+## 10. 摄取 provenance 中的容器模型路径无法在宿主机重放
+
+**症状**：正式评测在首次检索时失败。数据集与数据库快照校验均已通过，但宿主机 CLI 尝试
+从 `/models/huggingface/modelscope/BAAI/bge-m3` 加载 embedding 模型并报告路径不存在。
+
+**根因**：摄取任务在 Compose Worker 中运行，provenance 如实记录了当时的容器模型路径；
+真实评测 CLI 在 Windows 宿主机运行，却把这个部署定位符直接当作本地路径。模型 revision、
+维度和配置版本可以跨环境标识同一配置，文件系统路径则不能。
+
+**修复**：真实评测继续使用摄取 provenance 绑定报告，并校验 provider、模型标识、revision、
+维度和配置版本；校验一致后，模型加载改用当前运行环境的 `settings.embedding_model`，从而
+允许同一模型在容器和宿主机使用不同路径。
+
+**验证**：回归测试覆盖“provenance 为 Linux 容器路径、Settings 为 Windows 宿主机路径”
+以及 revision 不一致时拒绝重放；最小真实烟测从数据库读取三篇论文的 provenance，成功加载
+本地 BGE-M3 并生成一个 1024 维查询向量。

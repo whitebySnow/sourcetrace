@@ -10,7 +10,7 @@ from sourcetrace.evaluation.models import (
     EvaluationReport,
     EvaluationRunMetadata,
 )
-from sourcetrace.evaluation.repository import EvaluationCorpusRepository
+from sourcetrace.evaluation.repository import CorpusProvenance, EvaluationCorpusRepository
 from sourcetrace.evaluation.workflow_subject import WorkflowEvaluationSubject
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
 from sourcetrace.modules.retrieval.service import RetrievalService
@@ -34,6 +34,33 @@ class EvaluationRunControl:
 
     async def is_cancel_requested(self, run_id: UUID) -> bool:
         return False
+
+
+def _model_identity(model: str) -> str:
+    parts = [part for part in model.replace("\\", "/").rstrip("/").split("/") if part]
+    return "/".join(parts[-2:])
+
+
+def _resolve_embedding_model(provenance: CorpusProvenance, settings: Settings) -> str:
+    mismatches: list[str] = []
+    if settings.embedding_provider != provenance.embedding_provider:
+        mismatches.append("embedding provider")
+    if _model_identity(settings.embedding_model) != _model_identity(
+        provenance.embedding_model
+    ):
+        mismatches.append("embedding model")
+    if settings.embedding_model_revision != provenance.embedding_revision:
+        mismatches.append("embedding revision")
+    if settings.embedding_dimension != provenance.embedding_dimension:
+        mismatches.append("embedding dimension")
+    if settings.embedding_config_version != provenance.embedding_version:
+        mismatches.append("embedding config version")
+    if mismatches:
+        details = ", ".join(mismatches)
+        raise RuntimeError(
+            f"runtime embedding configuration does not match corpus provenance: {details}"
+        )
+    return settings.embedding_model
 
 
 def _llm_config(settings: Settings, *, prompt_version: str) -> OpenAICompatibleConfig:
@@ -68,7 +95,7 @@ async def run_real_evaluation(
         embedding = BgeM3EmbeddingProvider(
             EmbeddingConfig(
                 provider=provenance.embedding_provider,
-                model=provenance.embedding_model,
+                model=_resolve_embedding_model(provenance, settings),
                 revision=provenance.embedding_revision,
                 cache_dir=settings.embedding_cache_dir,
                 endpoint=settings.embedding_hf_endpoint,
