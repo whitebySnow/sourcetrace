@@ -289,7 +289,12 @@ async def test_failed_manual_retry_remains_retryable_when_queue_is_unavailable(
     previous.retryable = True
     version.status = "failed"
     await repository.commit()
-    coordinator = DocumentIngestionCoordinator(repository=repository, queue=UnavailableQueue())
+    coordinator = DocumentIngestionCoordinator(
+        repository=repository,
+        queue=UnavailableQueue(),
+        parser_version="pypdf-v2",
+        config=ChunkingConfig("cl100k_base", 600, 100, "token-window-v2"),
+    )
 
     with pytest.raises(IngestionQueueUnavailableError):
         await coordinator.retry(version.knowledge_base_id, version_id)
@@ -300,3 +305,7 @@ async def test_failed_manual_retry_remains_retryable_when_queue_is_unavailable(
     assert latest.status == "failed"
     assert latest.retryable is True
     assert latest.failure_code == "QUEUE_UNAVAILABLE"
+    assert latest.parser_version == "pypdf-v2"
+    assert latest.chunk_size == 600
+    assert latest.chunk_overlap == 100
+    assert latest.chunking_config_version == "token-window-v2"

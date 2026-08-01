@@ -10,9 +10,11 @@ from sourcetrace.core.config import get_settings
 from sourcetrace.core.errors import AppError, ErrorResponse
 from sourcetrace.db.session import get_session
 from sourcetrace.modules.documents.ingestion import (
+    ChunkingConfig,
     DocumentIngestionCoordinator,
     IngestionNotRetryableError,
 )
+from sourcetrace.modules.documents.parsing import PypdfDocumentParser
 from sourcetrace.modules.documents.queue import DramatiqIngestionQueue
 from sourcetrace.modules.documents.repository import DocumentRepository
 from sourcetrace.modules.documents.schemas import (
@@ -91,9 +93,17 @@ def get_ingestion_coordinator(
     session: Annotated[AsyncSession, Depends(get_session)],
     ingestion_queue: Annotated[DramatiqIngestionQueue, Depends(get_ingestion_queue)],
 ) -> DocumentIngestionCoordinator:
+    settings = get_settings()
     return DocumentIngestionCoordinator(
         repository=DocumentRepository(session),
         queue=ingestion_queue,
+        parser_version=PypdfDocumentParser.version,
+        config=ChunkingConfig(
+            tokenizer=settings.ingestion_tokenizer,
+            chunk_size=settings.ingestion_chunk_size,
+            chunk_overlap=settings.ingestion_chunk_overlap,
+            version=settings.ingestion_chunking_config_version,
+        ),
     )
 
 

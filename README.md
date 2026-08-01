@@ -2,6 +2,9 @@
 
 SourceTrace 是一个强调证据可定位、回答可追溯和证据不足时拒答的 RAG 知识库应用。
 
+SourceTrace is a strictly grounded Agentic RAG application: every completed answer must cite
+inspectable PDF evidence, while insufficient evidence produces an explicit refusal.
+
 当前仓库采用模块化单体架构：FastAPI API 与异步 Worker 共享 Python 领域代码，Vue 3 前端通过 OpenAPI 契约访问后端，PostgreSQL/pgvector 保存业务数据与向量，Redis 承担任务队列和短期缓存。
 
 ## 快速开始
@@ -56,6 +59,22 @@ pnpm eval:fake    # 离线重放四类确定性评测 fixture
 pnpm eval:review  # 将绑定报告摘要的人工 judgment 应用到既有报告
 ```
 
+## 完整 MVP 验收
+
+完整 Compose 启动后，可通过公开 HTTP/SSE 接口运行一次可清理的真实旅程。该命令会调用已
+配置的 embedding 和回答模型，覆盖上传、摄取、引用回答、拒答、取消与历史记录，但不会
+输出密钥或回答正文：
+
+```powershell
+uv run --project apps/api python apps/api/scripts/verify_mvp.py `
+  --output output/verification/mvp.json
+```
+
+2026-07-29 的实际验收结果、环境版本、质量门禁和评测限制见
+[MVP 验收记录](docs/verification.md)。项目代码调用链、技术原理和常见面试追问见
+[代码与面试 Walkthrough](docs/walkthrough.md)，开发中真实遇到的问题见
+[问题日志](docs/problem-log.md)。
+
 ## 目录
 
 ```text
@@ -78,8 +97,9 @@ data/uploads/     本地开发上传目录，不提交用户文件
 知识库范围内的最新可检索版本召回、有限历史追问改写，以及带稳定引用或明确拒答的 SSE
 回答链路。回答决策由有界 LangGraph 状态机编排，最多执行一次补充检索和一次引用修复。
 仓库同时提供版本化评测数据契约、确定性离线重放和必须显式确认的真实供应商评测入口，
-分别输出检索、引用、拒答和端到端结果。当前四类 fixture 只验证工具链，正式约 30 条人工
-审核数据集仍需基于最终演示知识库整理，不能把 fixture 结果当作产品指标。业务功能按
-`docs/roadmap.md` 分阶段实现，所有效果指标必须来自实际运行的版本化评测集，不填写虚构
-数值。大模型或自动化代理开始修改前必须阅读
+分别输出检索、引用、拒答和端到端结果。`evals/datasets/agentic-rag-foundations-v1.json`
+包含首个由用户逐条审核的 30 条正式评测样本。该数据集已在提交 `d1261fa` 上完成真实供应商
+评测和回答结果的二次人工审核；结果显示当前证据充分性判断会错误拒答大量可回答问题，详见
+`docs/verification.md`。业务功能按 `docs/roadmap.md` 分阶段实现，效果数字必须同时注明数据集、
+提交和配置，不能把单次评测泛化为产品准确率。大模型或自动化代理开始修改前必须阅读
 [`AGENTS.md`](AGENTS.md)。

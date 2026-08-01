@@ -12,6 +12,12 @@
 数据集顶层 `document_version_ids` 固定评测语料快照；所有证据必须属于该集合，无法回答的
 case 也因此能在文档更新后稳定重放。
 
+`candidates/` 只存放人工审核工作表。它不是评测输入，模型起草的参考答案、页码和核验要点
+不构成人工真值，也不能填写 `reviewed` 元数据。用户完成逐条核验后，才把结果转换为
+`evals/datasets/` 中符合 Schema 的正式数据集。当前
+`datasets/agentic-rag-foundations-v1.json` 已完成 30 条逐项审核，固定三篇论文版本并覆盖
+direct、multi_chunk、unanswerable 和 confusing 四类样本；其中不可回答样本的 evidence 为空。
+
 ## 离线重放
 
 ```powershell

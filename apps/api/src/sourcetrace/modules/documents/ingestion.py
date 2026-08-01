@@ -281,9 +281,13 @@ class DocumentIngestionCoordinator:
         *,
         repository: IngestionRepositoryPort,
         queue: IngestionQueuePort,
+        parser_version: str,
+        config: ChunkingConfig,
     ) -> None:
         self._repository = repository
         self._queue = queue
+        self._parser_version = parser_version
+        self._config = config
 
     async def retry(
         self,
@@ -296,15 +300,15 @@ class DocumentIngestionCoordinator:
         previous = await self._repository.get_latest_ingestion_run(version_id)
         if previous is None or previous.status != "failed" or not previous.retryable:
             raise IngestionNotRetryableError
-        run = await self._repository.create_ingestion_run(
-            version_id,
-            parser_version=previous.parser_version,
-            tokenizer=previous.tokenizer,
-            chunk_size=previous.chunk_size,
-            chunk_overlap=previous.chunk_overlap,
-            chunking_config_version=previous.chunking_config_version,
-        )
         if previous.embedding_model is not None:
+            run = await self._repository.create_ingestion_run(
+                version_id,
+                parser_version=previous.parser_version,
+                tokenizer=previous.tokenizer,
+                chunk_size=previous.chunk_size,
+                chunk_overlap=previous.chunk_overlap,
+                chunking_config_version=previous.chunking_config_version,
+            )
             run.status = "chunked"
             run.stage = "chunked"
             run.embedding_provider = previous.embedding_provider
@@ -314,6 +318,14 @@ class DocumentIngestionCoordinator:
             run.embedding_config_version = previous.embedding_config_version
             version.status = "chunked"
         else:
+            run = await self._repository.create_ingestion_run(
+                version_id,
+                parser_version=self._parser_version,
+                tokenizer=self._config.tokenizer,
+                chunk_size=self._config.chunk_size,
+                chunk_overlap=self._config.chunk_overlap,
+                chunking_config_version=self._config.version,
+            )
             version.status = "pending"
         await self._repository.commit()
         try:

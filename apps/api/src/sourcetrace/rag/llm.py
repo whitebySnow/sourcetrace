@@ -331,7 +331,7 @@ async def _structured_completion(
         content = message.get("content")
         if not isinstance(content, str):
             raise ValueError
-        parsed = json.loads(content)
+        parsed = _load_structured_json(content)
         if not isinstance(parsed, dict):
             raise ValueError
         return parsed
@@ -350,6 +350,55 @@ async def _structured_completion(
             "LLM_PROVIDER_UNAVAILABLE",
             "Language model is temporarily unavailable",
         ) from error
+
+
+def _load_structured_json(content: str) -> Any:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return json.loads(_escape_invalid_json_string_backslashes(content))
+
+
+def _escape_invalid_json_string_backslashes(content: str) -> str:
+    valid_simple_escapes = {'"', "\\", "/", "b", "f", "n", "r", "t"}
+    result: list[str] = []
+    in_string = False
+    index = 0
+
+    while index < len(content):
+        character = content[index]
+        if character == '"':
+            in_string = not in_string
+            result.append(character)
+            index += 1
+            continue
+        if not in_string or character != "\\":
+            result.append(character)
+            index += 1
+            continue
+
+        next_index = index + 1
+        if next_index < len(content) and content[next_index] in valid_simple_escapes:
+            result.extend((character, content[next_index]))
+            index += 2
+            continue
+        if (
+            next_index < len(content)
+            and content[next_index] == "u"
+            and index + 6 <= len(content)
+            and all(
+                hex_character in "0123456789abcdefABCDEF"
+                for hex_character in content[index + 2 : index + 6]
+            )
+        ):
+            result.extend(content[index : index + 6])
+            index += 6
+            continue
+
+        result.append("\\\\")
+        index += 1
+
+    return "".join(result)
 
 
 class OpenAICompatibleEvidenceAssessor:
