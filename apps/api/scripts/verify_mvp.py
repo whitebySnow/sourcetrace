@@ -16,6 +16,7 @@ from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 TERMINAL_EVENT_TYPES = {"final", "refusal", "error", "cancelled"}
+VERIFICATION_FACT = "37 days"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -122,6 +123,66 @@ async def _stream_and_cancel(
     return event_types, terminal, cancellation_status
 
 
+def _require_grounded_answer(
+    answer: dict[str, Any],
+    version_id: str,
+) -> dict[str, Any]:
+    if answer.get("type") != "final":
+        raise RuntimeError(f"grounded question ended with {answer.get('type')}")
+    answer_text = answer.get("answer")
+    if not isinstance(answer_text, str) or VERIFICATION_FACT not in answer_text.casefold():
+        raise RuntimeError("grounded answer does not contain the verification fact")
+    citations = answer.get("citations")
+    if not isinstance(citations, list) or len(citations) != 1:
+        raise RuntimeError("grounded answer did not contain exactly one citation")
+    citation = citations[0]
+    if not isinstance(citation, dict):
+        raise RuntimeError("grounded answer citation is not an object")
+    if citation.get("document_version_id") != version_id:
+        raise RuntimeError("citation does not target the uploaded document version")
+    excerpt = citation.get("excerpt")
+    if not isinstance(excerpt, str) or VERIFICATION_FACT not in excerpt.casefold():
+        raise RuntimeError("citation excerpt does not contain the verification fact")
+    return citation
+
+
+def _require_insufficient_evidence(refusal: dict[str, Any]) -> None:
+    if refusal.get("type") != "refusal":
+        raise RuntimeError(f"unsupported question ended with {refusal.get('type')}")
+    if refusal.get("code") != "INSUFFICIENT_EVIDENCE":
+        raise RuntimeError("unsupported question did not refuse with INSUFFICIENT_EVIDENCE")
+
+
+def _require_cancel_requested(request_status: str) -> None:
+    if request_status != "cancel_requested":
+        raise RuntimeError("cancellation request did not enter cancel_requested")
+
+
+def _require_cancelled_history(
+    answer_items: Sequence[Any],
+    run_id: str,
+) -> dict[str, Any]:
+    cancelled_item = next(
+        (
+            item
+            for item in answer_items
+            if isinstance(item, dict) and item.get("id") == run_id
+        ),
+        None,
+    )
+    if cancelled_item is None:
+        raise RuntimeError("cancelled answer run is missing from history")
+    if cancelled_item.get("status") != "cancelled":
+        raise RuntimeError("cancelled answer run did not reach cancelled history state")
+    if cancelled_item.get("outcome") is not None:
+        raise RuntimeError("cancelled answer run has a persisted outcome")
+    if cancelled_item.get("answer") is not None:
+        raise RuntimeError("cancelled answer run has a persisted answer")
+    if cancelled_item.get("citations") != []:
+        raise RuntimeError("cancelled answer run has persisted citations")
+    return cancelled_item
+
+
 async def _wait_for_ingestion(
     client: httpx.AsyncClient,
     documents_url: str,
@@ -202,21 +263,17 @@ async def _verify(args: argparse.Namespace) -> dict[str, Any]:
                 answer_url,
                 "According to the uploaded document, how long is the Atlas retention period?",
             )
-            if answer.get("type") != "final":
-                raise RuntimeError(f"grounded question ended with {answer.get('type')}")
-            citations = answer.get("citations")
-            if not isinstance(citations, list) or len(citations) != 1:
-                raise RuntimeError("grounded answer did not contain exactly one citation")
-            citation = citations[0]
-            if citation.get("document_version_id") != version_id:
-                raise RuntimeError("citation does not target the uploaded document version")
-            source = await client.get(str(citation["source_url"]))
+            citation = _require_grounded_answer(answer, version_id)
+            source_url = citation.get("source_url")
+            if not isinstance(source_url, str) or not source_url:
+                raise RuntimeError("citation does not contain a source URL")
+            source = await client.get(source_url)
             source.raise_for_status()
             result["answer"] = {
                 "events": answer_events,
                 "terminal": "final",
-                "citation_count": len(citations),
-                "citation_page": citation["page_number"],
+                "citation_count": 1,
+                "citation_page": citation.get("page_number"),
                 "source_status": source.status_code,
             }
 
@@ -225,8 +282,7 @@ async def _verify(args: argparse.Namespace) -> dict[str, Any]:
                 answer_url,
                 "What launch date was approved for Project Orion?",
             )
-            if refusal.get("type") != "refusal":
-                raise RuntimeError(f"unsupported question ended with {refusal.get('type')}")
+            _require_insufficient_evidence(refusal)
             result["refusal"] = {
                 "events": refusal_events,
                 "terminal": "refusal",
@@ -240,6 +296,10 @@ async def _verify(args: argparse.Namespace) -> dict[str, Any]:
             )
             if cancellation.get("type") != "cancelled":
                 raise RuntimeError(f"cancelled question ended with {cancellation.get('type')}")
+            _require_cancel_requested(request_status)
+            cancellation_run_id = cancellation.get("run_id")
+            if not isinstance(cancellation_run_id, str):
+                raise RuntimeError("cancelled event is missing its run identifier")
             result["cancellation"] = {
                 "events": cancellation_events,
                 "request_status": request_status,
@@ -251,6 +311,7 @@ async def _verify(args: argparse.Namespace) -> dict[str, Any]:
             questions = await client.get(f"{conversation_url}/questions", params={"limit": 20})
             questions.raise_for_status()
             answer_items = answers.json()["items"]
+            cancelled_item = _require_cancelled_history(answer_items, cancellation_run_id)
             result["history"] = {
                 "answer_run_count": len(answer_items),
                 "question_count": len(questions.json()["items"]),
@@ -258,6 +319,8 @@ async def _verify(args: argparse.Namespace) -> dict[str, Any]:
                 "outcomes": sorted(
                     item["outcome"] for item in answer_items if item["outcome"] is not None
                 ),
+                "cancelled_run_has_answer": cancelled_item["answer"] is not None,
+                "cancelled_run_citation_count": len(cancelled_item["citations"]),
             }
             if result["history"]["statuses"] != ["cancelled", "completed", "completed"]:
                 raise RuntimeError("answer history does not contain the expected terminal states")

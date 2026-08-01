@@ -53,6 +53,17 @@ uv run --project apps/api python apps/api/scripts/verify_mvp.py `
 该运行不保存答案正文、完整 PDF 内容、提示词或模型密钥。原始去敏 JSON 位于被 Git 忽略的
 `output/verification/`，不作为仓库内长期结果。
 
+仓库提交版本化评测数据集、人工 judgment 及原始报告 SHA-256，但不提交包含本地论文摘录和
+模型输出的 case 级报告。要独立重放真实评测，需保留三篇固定的本地论文版本、对应 ingestion
+provenance、本地 BGE-M3 和有效的 OpenAI-compatible 供应商配置；缺少这些本地输入时只能核对
+已提交的配置、数据集、judgment 和聚合结果，不能复现 case 级输出。
+
+2026-08-01 在同一 Compose 环境上使用增强后的脚本重新执行完整旅程，报告为
+`output/verification/mvp-strict-20260801.json`。本次额外断言：最终答案和其唯一引用摘录均
+包含合成 PDF 中的唯一事实 `37 days`；拒答代码必须为 `INSUFFICIENT_EVIDENCE`；取消端点先
+返回 `cancel_requested`，且取消 run 的历史记录没有答案或引用。所有断言通过，清理仍返回
+HTTP 204。
+
 ## 4. 工程质量门禁
 
 以下命令均在相同工作区实际运行：
