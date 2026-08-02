@@ -7,6 +7,7 @@ from sourcetrace.evaluation.models import (
     EvaluationCase,
     EvaluationDecisionTrace,
     EvaluationObservation,
+    ObservedCitationValidation,
     ObservedEvidence,
     ObservedEvidenceAssessment,
     ObservedRetrieval,
@@ -202,6 +203,13 @@ class WorkflowEvaluationSubject:
                     supplemental_query=assessment.supplemental_query,
                 )
                 for assessment in trace.assessments
+            ),
+            citation_validations=tuple(
+                ObservedCitationValidation(
+                    valid=validation.valid,
+                    issue=validation.issue,
+                )
+                for validation in trace.citation_validations
             ),
             supplemental_retrieval_attempts=trace.supplemental_retrieval_attempts,
             citation_repair_attempts=trace.citation_repair_attempts,

@@ -17,6 +17,13 @@
           "title": "Assessments",
           "type": "array"
         },
+        "citation_validations": {
+          "items": {
+            "$ref": "#/$defs/ObservedCitationValidation"
+          },
+          "title": "Citation Validations",
+          "type": "array"
+        },
         "supplemental_retrieval_attempts": {
           "maximum": 1,
           "minimum": 0,
@@ -33,6 +40,7 @@
       "required": [
         "retrievals",
         "assessments",
+        "citation_validations",
         "supplemental_retrieval_attempts",
         "citation_repair_attempts"
       ],
@@ -101,6 +109,31 @@
         "case_id"
       ],
       "title": "FixtureObservation",
+      "type": "object"
+    },
+    "ObservedCitationValidation": {
+      "additionalProperties": false,
+      "properties": {
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        },
+        "issue": {
+          "enum": [
+            "empty_answer",
+            "uncited_claim",
+            "unknown_label",
+            "valid"
+          ],
+          "title": "Issue",
+          "type": "string"
+        }
+      },
+      "required": [
+        "valid",
+        "issue"
+      ],
+      "title": "ObservedCitationValidation",
       "type": "object"
     },
     "ObservedEvidence": {

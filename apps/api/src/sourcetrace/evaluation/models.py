@@ -119,9 +119,15 @@ class ObservedEvidenceAssessment(StrictModel):
     supplemental_query: str | None
 
 
+class ObservedCitationValidation(StrictModel):
+    valid: bool
+    issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+
+
 class EvaluationDecisionTrace(StrictModel):
     retrievals: tuple[ObservedRetrieval, ...]
     assessments: tuple[ObservedEvidenceAssessment, ...]
+    citation_validations: tuple[ObservedCitationValidation, ...]
     supplemental_retrieval_attempts: int = Field(ge=0, le=1)
     citation_repair_attempts: int = Field(ge=0, le=1)
 

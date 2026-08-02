@@ -176,3 +176,4 @@ async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence
     assessment = observation.decision_trace.assessments[0]
     assert assessment.sufficient is False
     assert assessment.selected_chunk_ids == ()
+    assert observation.decision_trace.citation_validations == ()

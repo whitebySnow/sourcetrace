@@ -46,9 +46,19 @@ class EvidenceAssessmentTrace:
 
 
 @dataclass(frozen=True, slots=True)
+class CitationValidationTrace:
+    valid: bool
+    issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+
+    def to_payload(self) -> dict[str, str | bool]:
+        return {"valid": self.valid, "issue": self.issue}
+
+
+@dataclass(frozen=True, slots=True)
 class WorkflowTrace:
     retrieval_queries: tuple[str, ...] = ()
     assessments: tuple[EvidenceAssessmentTrace, ...] = ()
+    citation_validations: tuple[CitationValidationTrace, ...] = ()
     supplemental_retrieval_attempts: int = 0
     citation_repair_attempts: int = 0
 
@@ -56,6 +66,9 @@ class WorkflowTrace:
         return {
             "retrieval_queries": list(self.retrieval_queries),
             "assessments": [item.to_payload() for item in self.assessments],
+            "citation_validations": [
+                item.to_payload() for item in self.citation_validations
+            ],
             "supplemental_retrieval_attempts": self.supplemental_retrieval_attempts,
             "citation_repair_attempts": self.citation_repair_attempts,
         }
@@ -274,6 +287,7 @@ class AnswerWorkflow:
                     supplemental_query=decision.supplemental_query,
                 ),
             ),
+            citation_validations=state["workflow_trace"].citation_validations,
             supplemental_retrieval_attempts=(
                 state["workflow_trace"].supplemental_retrieval_attempts
             ),
@@ -312,6 +326,7 @@ class AnswerWorkflow:
                 state["supplemental_query"],
             ),
             assessments=state["workflow_trace"].assessments,
+            citation_validations=state["workflow_trace"].citation_validations,
             supplemental_retrieval_attempts=1,
             citation_repair_attempts=state["workflow_trace"].citation_repair_attempts,
         )
@@ -362,12 +377,27 @@ class AnswerWorkflow:
             for item in state["selected_evidence"]
         }
         cited = _CITATION_LABEL.findall(state["answer"])
-        citation_valid = self._claims_are_cited(state["answer"], set(allowed))
+        issue = self._citation_validation_issue(state["answer"], set(allowed))
+        citation_valid = issue == "valid"
+        trace = WorkflowTrace(
+            retrieval_queries=state["workflow_trace"].retrieval_queries,
+            assessments=state["workflow_trace"].assessments,
+            citation_validations=(
+                *state["workflow_trace"].citation_validations,
+                CitationValidationTrace(valid=citation_valid, issue=issue),
+            ),
+            supplemental_retrieval_attempts=(
+                state["workflow_trace"].supplemental_retrieval_attempts
+            ),
+            citation_repair_attempts=state["workflow_trace"].citation_repair_attempts,
+        )
+        await self._record_trace(state["run_id"], trace)
         if not citation_valid and state["repair_attempts"] >= 1:
             return _WorkflowState(
                 citation_valid=False,
                 refusal_code="CITATION_VALIDATION_FAILED",
                 refusal_message=("The generated answer did not contain a valid evidence citation."),
+                workflow_trace=trace,
             )
         cited_ids = set(cited)
         return _WorkflowState(
@@ -375,6 +405,7 @@ class AnswerWorkflow:
             cited_evidence=[
                 item for citation_id, item in allowed.items() if citation_id in cited_ids
             ],
+            workflow_trace=trace,
         )
 
     async def _repair_citations(self, state: _WorkflowState) -> _WorkflowState:
@@ -383,6 +414,7 @@ class AnswerWorkflow:
         trace = WorkflowTrace(
             retrieval_queries=state["workflow_trace"].retrieval_queries,
             assessments=state["workflow_trace"].assessments,
+            citation_validations=state["workflow_trace"].citation_validations,
             supplemental_retrieval_attempts=(
                 state["workflow_trace"].supplemental_retrieval_attempts
             ),
@@ -456,9 +488,12 @@ class AnswerWorkflow:
             raise _WorkflowCancellation
 
     @staticmethod
-    def _claims_are_cited(answer: str, allowed: set[str]) -> bool:
+    def _citation_validation_issue(
+        answer: str,
+        allowed: set[str],
+    ) -> Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]:
         if not answer.strip():
-            return False
+            return "empty_answer"
         units = [
             unit.strip()
             for unit in re.split(
@@ -468,11 +503,11 @@ class AnswerWorkflow:
             if unit.strip()
         ]
         if not units:
-            return False
+            return "empty_answer"
         for index, unit in enumerate(units):
             labels = _CITATION_LABEL.findall(unit)
             if any(label not in allowed for label in labels):
-                return False
+                return "unknown_label"
             if AnswerWorkflow._is_citation_only(unit):
                 continue
             if labels:
@@ -480,8 +515,8 @@ class AnswerWorkflow:
             if index + 1 >= len(units) or not AnswerWorkflow._is_citation_only(
                 units[index + 1], allowed
             ):
-                return False
-        return True
+                return "uncited_claim"
+        return "valid"
 
     @staticmethod
     def _is_citation_only(unit: str, allowed: set[str] | None = None) -> bool:
