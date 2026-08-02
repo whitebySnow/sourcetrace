@@ -101,11 +101,43 @@ class ObservedEvidence(StrictModel):
     text: str = Field(min_length=1)
 
 
+class ObservedRetrievalCandidate(StrictModel):
+    chunk_id: UUID
+    document_version_id: UUID
+    page_number: int = Field(ge=1)
+    score: float = Field(ge=-1, le=1)
+
+
+class ObservedRetrieval(StrictModel):
+    query: str = Field(min_length=1)
+    candidates: tuple[ObservedRetrievalCandidate, ...]
+
+
+class ObservedEvidenceAssessment(StrictModel):
+    sufficient: bool
+    selected_chunk_ids: tuple[str, ...]
+    supplemental_query: str | None
+
+
+class ObservedCitationValidation(StrictModel):
+    valid: bool
+    issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+
+
+class EvaluationDecisionTrace(StrictModel):
+    retrievals: tuple[ObservedRetrieval, ...]
+    assessments: tuple[ObservedEvidenceAssessment, ...]
+    citation_validations: tuple[ObservedCitationValidation, ...]
+    supplemental_retrieval_attempts: int = Field(ge=0, le=1)
+    citation_repair_attempts: int = Field(ge=0, le=1)
+
+
 class EvaluationObservation(StrictModel):
     outcome: Literal["answered", "refused", "error"]
     answer: str | None
     retrieved_evidence: tuple[ObservedEvidence, ...]
     citations: tuple[ObservedEvidence, ...]
+    decision_trace: EvaluationDecisionTrace | None = None
 
     @model_validator(mode="after")
     def require_consistent_outcome(self) -> "EvaluationObservation":

@@ -5,7 +5,7 @@ from sourcetrace.evaluation.models import EvaluationCase
 from sourcetrace.evaluation.workflow_subject import WorkflowEvaluationSubject
 from sourcetrace.modules.retrieval.service import RetrievedEvidence
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
-from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowTrace
+from sourcetrace.rag.workflow import AnswerWorkflow
 
 
 class StaticRetrieval:
@@ -41,6 +41,15 @@ class SelectingAssessor:
         )
 
 
+class RefusingAssessor:
+    async def assess(self, **kwargs: object) -> EvidenceDecision:
+        return EvidenceDecision(
+            sufficient=False,
+            selected_chunk_ids=(),
+            supplemental_query=None,
+        )
+
+
 class CitingGenerator:
     async def stream_answer(
         self,
@@ -54,17 +63,6 @@ class CitingGenerator:
 class UnusedRepairer:
     async def repair(self, **kwargs: object) -> str:
         raise AssertionError("valid citations must not be repaired")
-
-
-class ActiveRunControl:
-    async def record_retrieval_query(self, run_id: UUID, query: str) -> bool:
-        return True
-
-    async def record_workflow_trace(self, run_id: UUID, trace: WorkflowTrace) -> bool:
-        return True
-
-    async def is_cancel_requested(self, run_id: UUID) -> bool:
-        return False
 
 
 async def test_workflow_subject_captures_retrieval_and_final_citations() -> None:
@@ -81,12 +79,12 @@ async def test_workflow_subject_captures_retrieval_and_final_citations() -> None
     )
     subject = WorkflowEvaluationSubject(
         retrieval=StaticRetrieval(evidence),
-        workflow_factory=lambda retrieval: AnswerWorkflow(
+        workflow_factory=lambda retrieval, run_control: AnswerWorkflow(
             retrieval=retrieval,
             assessor=SelectingAssessor(evidence.chunk_id),
             generator=CitingGenerator(),
             citation_repairer=UnusedRepairer(),
-            run_control=ActiveRunControl(),
+            run_control=run_control,
             minimum_score=0.5,
             minimum_evidence=1,
         ),
@@ -121,3 +119,61 @@ async def test_workflow_subject_captures_retrieval_and_final_citations() -> None
     assert [item.document_version_id for item in observation.citations] == [
         evidence.document_version_id
     ]
+
+
+async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence() -> None:
+    knowledge_base_id = uuid4()
+    evidence = RetrievedEvidence(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_version_id=uuid4(),
+        document_name="rag.pdf",
+        storage_key="knowledge/rag.pdf",
+        page_number=1,
+        text="RAG combines parametric and non-parametric memory.",
+        score=0.9,
+    )
+    subject = WorkflowEvaluationSubject(
+        retrieval=StaticRetrieval(evidence),
+        workflow_factory=lambda retrieval, run_control: AnswerWorkflow(
+            retrieval=retrieval,
+            assessor=RefusingAssessor(),
+            generator=CitingGenerator(),
+            citation_repairer=UnusedRepairer(),
+            run_control=run_control,
+            minimum_score=0.5,
+            minimum_evidence=1,
+        ),
+        knowledge_base_id=knowledge_base_id,
+    )
+    case = EvaluationCase.model_validate(
+        {
+            "id": "direct-refusal-001",
+            "category": "direct",
+            "question": "Which memories does RAG combine?",
+            "expected": {
+                "outcome": "answered",
+                "reference_answer": "Parametric and non-parametric memory.",
+                "evidence": [
+                    {
+                        "document_version_id": evidence.document_version_id,
+                        "page_number": 1,
+                        "text": "parametric and non-parametric memory",
+                    }
+                ],
+            },
+        }
+    )
+
+    observation = await subject.evaluate(case)
+
+    assert observation.outcome == "refused"
+    assert observation.decision_trace is not None
+    assert observation.decision_trace.retrievals[0].query == case.question
+    candidate = observation.decision_trace.retrievals[0].candidates[0]
+    assert candidate.chunk_id == evidence.chunk_id
+    assert candidate.score == 0.9
+    assessment = observation.decision_trace.assessments[0]
+    assert assessment.sufficient is False
+    assert assessment.selected_chunk_ids == ()
+    assert observation.decision_trace.citation_validations == ()

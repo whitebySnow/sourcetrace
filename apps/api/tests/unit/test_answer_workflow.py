@@ -418,12 +418,13 @@ async def test_workflow_refuses_after_one_unsuccessful_supplemental_retrieval() 
 async def test_workflow_refuses_when_the_single_citation_repair_is_still_invalid() -> None:
     evidence = _evidence()
     repairer = RecordingCitationRepairer("Still has no citation")
+    control = ActiveRunControl()
     workflow = AnswerWorkflow(
         retrieval=RecordingRetrieval([evidence]),
         assessor=SelectingAssessor(evidence.chunk_id),
         generator=RecordingGenerator("Initial answer without citation"),
         citation_repairer=repairer,
-        run_control=ActiveRunControl(),
+        run_control=control,
         minimum_score=0.5,
         minimum_evidence=1,
     )
@@ -438,6 +439,10 @@ async def test_workflow_refuses_when_the_single_citation_repair_is_still_invalid
     assert repairer.answers == ["Initial answer without citation"]
     assert events[-1].type == "refused"
     assert events[-1].code == "CITATION_VALIDATION_FAILED"
+    assert [item.issue for item in control.traces[-1].citation_validations] == [
+        "uncited_claim",
+        "uncited_claim",
+    ]
 
 
 async def test_workflow_rejects_an_assessment_that_selects_unknown_chunks() -> None:

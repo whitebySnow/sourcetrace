@@ -1,5 +1,52 @@
 {
   "$defs": {
+    "EvaluationDecisionTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "retrievals": {
+          "items": {
+            "$ref": "#/$defs/ObservedRetrieval"
+          },
+          "title": "Retrievals",
+          "type": "array"
+        },
+        "assessments": {
+          "items": {
+            "$ref": "#/$defs/ObservedEvidenceAssessment"
+          },
+          "title": "Assessments",
+          "type": "array"
+        },
+        "citation_validations": {
+          "items": {
+            "$ref": "#/$defs/ObservedCitationValidation"
+          },
+          "title": "Citation Validations",
+          "type": "array"
+        },
+        "supplemental_retrieval_attempts": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Supplemental Retrieval Attempts",
+          "type": "integer"
+        },
+        "citation_repair_attempts": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Citation Repair Attempts",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retrievals",
+        "assessments",
+        "citation_validations",
+        "supplemental_retrieval_attempts",
+        "citation_repair_attempts"
+      ],
+      "title": "EvaluationDecisionTrace",
+      "type": "object"
+    },
     "FixtureObservation": {
       "additionalProperties": false,
       "properties": {
@@ -37,6 +84,17 @@
           "title": "Citations",
           "type": "array"
         },
+        "decision_trace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluationDecisionTrace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "case_id": {
           "minLength": 1,
           "title": "Case Id",
@@ -51,6 +109,31 @@
         "case_id"
       ],
       "title": "FixtureObservation",
+      "type": "object"
+    },
+    "ObservedCitationValidation": {
+      "additionalProperties": false,
+      "properties": {
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        },
+        "issue": {
+          "enum": [
+            "empty_answer",
+            "uncited_claim",
+            "unknown_label",
+            "valid"
+          ],
+          "title": "Issue",
+          "type": "string"
+        }
+      },
+      "required": [
+        "valid",
+        "issue"
+      ],
+      "title": "ObservedCitationValidation",
       "type": "object"
     },
     "ObservedEvidence": {
@@ -78,6 +161,97 @@
         "text"
       ],
       "title": "ObservedEvidence",
+      "type": "object"
+    },
+    "ObservedEvidenceAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "sufficient": {
+          "title": "Sufficient",
+          "type": "boolean"
+        },
+        "selected_chunk_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selected Chunk Ids",
+          "type": "array"
+        },
+        "supplemental_query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Supplemental Query"
+        }
+      },
+      "required": [
+        "sufficient",
+        "selected_chunk_ids",
+        "supplemental_query"
+      ],
+      "title": "ObservedEvidenceAssessment",
+      "type": "object"
+    },
+    "ObservedRetrieval": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/ObservedRetrievalCandidate"
+          },
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "candidates"
+      ],
+      "title": "ObservedRetrieval",
+      "type": "object"
+    },
+    "ObservedRetrievalCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "document_version_id",
+        "page_number",
+        "score"
+      ],
+      "title": "ObservedRetrievalCandidate",
       "type": "object"
     }
   },

@@ -1,5 +1,3 @@
-from uuid import UUID
-
 import httpx
 
 from sourcetrace.core.config import Settings
@@ -22,18 +20,7 @@ from sourcetrace.rag.llm import (
     OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionRewriter,
 )
-from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowTrace
-
-
-class EvaluationRunControl:
-    async def record_retrieval_query(self, run_id: UUID, query: str) -> bool:
-        return True
-
-    async def record_workflow_trace(self, run_id: UUID, trace: WorkflowTrace) -> bool:
-        return True
-
-    async def is_cancel_requested(self, run_id: UUID) -> bool:
-        return False
+from sourcetrace.rag.workflow import AnswerWorkflow
 
 
 def _model_identity(model: str) -> str:
@@ -123,7 +110,7 @@ async def run_real_evaluation(
         )
         subject = WorkflowEvaluationSubject(
             retrieval=retrieval,
-            workflow_factory=lambda recording_retrieval: AnswerWorkflow(
+            workflow_factory=lambda recording_retrieval, run_control: AnswerWorkflow(
                 retrieval=recording_retrieval,
                 assessor=OpenAICompatibleEvidenceAssessor(
                     _llm_config(
@@ -143,7 +130,7 @@ async def run_real_evaluation(
                     ),
                     client=client,
                 ),
-                run_control=EvaluationRunControl(),
+                run_control=run_control,
                 minimum_score=settings.retrieval_minimum_score,
                 minimum_evidence=settings.retrieval_minimum_evidence,
             ),

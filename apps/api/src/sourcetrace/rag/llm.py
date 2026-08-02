@@ -48,6 +48,9 @@ def _grounded_prompt(
                 "Answer only from the evidence below. Cite the evidence labels in the "
                 "answer and do not create any other citation labels. Put an allowed label in "
                 "or immediately after every sentence or list item that makes a factual claim. "
+                "Every citation must use ASCII square brackets in exactly this form: "
+                "[citation_id]. Replace citation_id with a supplied label copied verbatim. "
+                "Do not use bare IDs, full-width brackets, footnotes, or a sources section. "
                 "Use the same language as the question. Do not use outside knowledge. If the "
                 f"evidence cannot answer the question, say so.\n\n{evidence_text}"
             ),
@@ -135,8 +138,11 @@ def _citation_repair_prompt(
             "content": (
                 "Repair the draft so every factual claim is supported by the supplied evidence "
                 "and cites only its allowed citation labels. Do not add claims or use outside "
-                "knowledge. Keep the question's language. Return JSON with exactly one string "
-                "field named answer."
+                "knowledge. Every factual sentence or list item must cite an allowed label with "
+                "ASCII square brackets in exactly this form: [citation_id]. Replace citation_id "
+                "with a supplied label copied verbatim; do not use bare IDs, full-width brackets, "
+                "footnotes, or a sources section. Keep the question's language. Return JSON with "
+                "exactly one string field named answer."
             ),
         },
         {
