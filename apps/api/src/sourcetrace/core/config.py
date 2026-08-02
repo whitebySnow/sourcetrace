@@ -40,10 +40,10 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model: str = "gpt-5.6-luna"
     llm_timeout_seconds: float = Field(default=60, gt=0)
-    llm_prompt_version: str = "grounded-answer-v1"
+    llm_prompt_version: str = "grounded-answer-v2"
     llm_question_rewrite_prompt_version: str = "follow-up-query-v1"
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v1"
-    llm_citation_repair_prompt_version: str = "citation-repair-v1"
+    llm_citation_repair_prompt_version: str = "citation-repair-v2"
     answer_context_question_limit: int = Field(default=4, ge=1, le=20)
     retrieval_top_k: int = Field(default=8, ge=1, le=100)
     retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)

@@ -372,12 +372,12 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["answer"] == final["answer"]
         assert persisted["llm_provider"] == "openai-compatible"
         assert persisted["llm_model"] == "gpt-5.6-luna"
-        assert persisted["prompt_version"] == "grounded-answer-v1"
+        assert persisted["prompt_version"] == "grounded-answer-v2"
         assert persisted["retrieval_version"] == "pgvector-cosine-v1"
         assert persisted["evidence_assessment_prompt_version"] == (
             "evidence-assessment-v1"
         )
-        assert persisted["citation_repair_prompt_version"] == "citation-repair-v1"
+        assert persisted["citation_repair_prompt_version"] == "citation-repair-v2"
         assert persisted["workflow_version"] == "langgraph-bounded-v1"
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]

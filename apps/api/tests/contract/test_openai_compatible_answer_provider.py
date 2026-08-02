@@ -92,6 +92,8 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
     assert payload["stream"] is True
     assert "citation-1" in payload["messages"][0]["content"]
     assert "BGE-M3 dense vectors" in payload["messages"][0]["content"]
+    assert "ASCII square brackets" in payload["messages"][0]["content"]
+    assert "[citation_id]" in payload["messages"][0]["content"]
 
 
 @pytest.mark.parametrize(
@@ -333,6 +335,8 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     serialized = json.dumps(payload["messages"])
     assert "Vectors are normalized." in serialized
     assert "citation-1" in serialized
+    assert "ASCII square brackets" in payload["messages"][0]["content"]
+    assert "[citation_id]" in payload["messages"][0]["content"]
 
 
 async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() -> None:
