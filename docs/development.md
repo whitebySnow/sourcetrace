@@ -137,8 +137,9 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
 `LLM_API_KEY` 和 `LLM_MODEL` 后，API 进程直接请求供应商；回答模型权重不会下载到本机，
 也不会进入仓库或 Docker 镜像。本项目默认模型名仅是远程供应商路由标识。
 
-`LLM_TIMEOUT_SECONDS` 同时约束单次流式请求的完整生命周期。供应商发送的 SSE keep-alive
-注释可以保持底层连接，但不能无限延长回答运行；超时统一映射为 `LLM_TIMEOUT`。
+`LLM_TIMEOUT_SECONDS` 约束每次供应商请求的完整生命周期，包括流式回答以及问题改写、证据判断
+和引用修复的非流式结构化调用。供应商发送的 SSE 或空行 keep-alive 注释可以保持底层连接，但
+不能无限延长回答运行；超时统一映射为 `LLM_TIMEOUT`。
 
 追问查询改写使用同一供应商，并由 `LLM_QUESTION_REWRITE_PROMPT_VERSION` 记录提示词版本。
 `ANSWER_CONTEXT_QUESTION_LIMIT` 限制可用于指代消解的近期用户问题数量；历史模型回答不会

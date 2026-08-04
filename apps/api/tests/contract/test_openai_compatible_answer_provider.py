@@ -206,6 +206,37 @@ async def test_provider_times_out_a_keep_alive_only_stream() -> None:
     assert upstream.closed is True
 
 
+async def test_evidence_assessor_times_out_a_keep_alive_only_response() -> None:
+    upstream = KeepAliveResponseStream()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=upstream)
+
+    config = OpenAICompatibleConfig(
+        base_url="https://gateway.example/v1",
+        api_key="test-secret",
+        model="gpt-5.6-luna",
+        timeout_seconds=0.01,
+        prompt_version="evidence-assessment-v1",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(config, client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await asyncio.wait_for(
+                assessor.assess(
+                    question="Question",
+                    query="Question",
+                    evidence=_evidence(),
+                    supplemental_allowed=True,
+                ),
+                timeout=0.5,
+            )
+
+    assert error.value.code == "LLM_TIMEOUT"
+    assert upstream.closed is True
+
+
 async def test_consumer_cancellation_closes_the_upstream_response_stream() -> None:
     upstream = RecordingResponseStream()
 

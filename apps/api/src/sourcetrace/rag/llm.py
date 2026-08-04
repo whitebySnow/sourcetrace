@@ -313,42 +313,43 @@ async def _structured_completion(
 ) -> dict[str, Any]:
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     try:
-        response = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {config.api_key}"},
-            json={
-                "model": config.model,
-                "messages": messages,
-                "stream": False,
-            },
-            timeout=config.timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError
-        choices = payload.get("choices")
-        if not isinstance(choices, list) or len(choices) != 1:
-            raise ValueError
-        choice = choices[0]
-        if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
-            raise ValueError
-        message = choice.get("message")
-        if not isinstance(message, dict):
-            raise ValueError
-        content = message.get("content")
-        if not isinstance(content, str):
-            raise ValueError
-        parsed = _load_structured_json(content)
-        if not isinstance(parsed, dict):
-            raise ValueError
-        return parsed
+        async with asyncio.timeout(config.timeout_seconds):
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {config.api_key}"},
+                json={
+                    "model": config.model,
+                    "messages": messages,
+                    "stream": False,
+                },
+                timeout=config.timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError
+            choices = payload.get("choices")
+            if not isinstance(choices, list) or len(choices) != 1:
+                raise ValueError
+            choice = choices[0]
+            if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+                raise ValueError
+            message = choice.get("message")
+            if not isinstance(message, dict):
+                raise ValueError
+            content = message.get("content")
+            if not isinstance(content, str):
+                raise ValueError
+            parsed = _load_structured_json(content)
+            if not isinstance(parsed, dict):
+                raise ValueError
+            return parsed
     except (json.JSONDecodeError, TypeError, ValueError) as error:
         raise LlmProviderError(
             "LLM_INVALID_RESPONSE",
             "Language model returned an invalid response",
         ) from error
-    except httpx.TimeoutException as error:
+    except (httpx.TimeoutException, TimeoutError) as error:
         raise LlmProviderError(
             "LLM_TIMEOUT",
             "Language model request timed out",
