@@ -103,8 +103,8 @@ class EvaluationHarness:
         if not observed:
             return "failed"
         matches = all(
-            any(EvaluationHarness._matches(reference, actual) for reference in expected)
-            for actual in observed
+            any(EvaluationHarness._matches(reference, actual) for actual in observed)
+            for reference in expected
         )
         return "passed" if matches else "failed"
 

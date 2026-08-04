@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import Literal
 
 import httpx
 import pytest
@@ -31,6 +32,28 @@ class RecordingResponseStream(httpx.AsyncByteStream):
         self.release.set()
 
 
+class KeepAliveResponseStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        while True:
+            yield b": keep-alive\n\n"
+            await asyncio.sleep(0)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class BrokenResponseStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        raise httpx.RemoteProtocolError("upstream closed before first delta")
+        yield b""
+
+    async def aclose(self) -> None:
+        return None
+
+
 def _evidence() -> list[RetrievalCandidate]:
     return [
         RetrievalCandidate(
@@ -42,13 +65,19 @@ def _evidence() -> list[RetrievalCandidate]:
     ]
 
 
-def _config() -> OpenAICompatibleConfig:
+def _config(
+    *,
+    structured_output_mode: Literal["text", "json_object"] = "text",
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default",
+) -> OpenAICompatibleConfig:
     return OpenAICompatibleConfig(
         base_url="https://gateway.example/v1",
         api_key="test-secret",
         model="gpt-5.6-luna",
         timeout_seconds=30,
         prompt_version="grounded-answer-v1",
+        structured_output_mode=structured_output_mode,
+        structured_output_thinking=structured_output_thinking,
     )
 
 
@@ -140,6 +169,37 @@ async def test_provider_rejects_a_stream_that_ends_without_completion() -> None:
     assert error.value.code == "LLM_INVALID_RESPONSE"
 
 
+async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                stream=BrokenResponseStream(),
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"}}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Recovered"]
+    assert attempts == 2
+
+
 async def test_provider_rejects_a_length_truncated_completion() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -161,6 +221,67 @@ async def test_provider_rejects_a_length_truncated_completion() -> None:
             )
 
     assert error.value.code == "LLM_INCOMPLETE_RESPONSE"
+
+
+async def test_provider_times_out_a_keep_alive_only_stream() -> None:
+    upstream = KeepAliveResponseStream()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=upstream,
+        )
+
+    config = OpenAICompatibleConfig(
+        base_url="https://gateway.example/v1",
+        api_key="test-secret",
+        model="gpt-5.6-luna",
+        timeout_seconds=0.01,
+        prompt_version="grounded-answer-v1",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(config, client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await asyncio.wait_for(
+                _collect(provider.stream_answer(question="Question", evidence=_evidence())),
+                timeout=0.5,
+            )
+
+    assert error.value.code == "LLM_TIMEOUT"
+    assert upstream.closed is True
+
+
+async def test_evidence_assessor_times_out_a_keep_alive_only_response() -> None:
+    upstream = KeepAliveResponseStream()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=upstream)
+
+    config = OpenAICompatibleConfig(
+        base_url="https://gateway.example/v1",
+        api_key="test-secret",
+        model="gpt-5.6-luna",
+        timeout_seconds=0.01,
+        prompt_version="evidence-assessment-v1",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(config, client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await asyncio.wait_for(
+                assessor.assess(
+                    question="Question",
+                    query="Question",
+                    evidence=_evidence(),
+                    supplemental_allowed=True,
+                ),
+                timeout=0.5,
+            )
+
+    assert error.value.code == "LLM_TIMEOUT"
+    assert upstream.closed is True
 
 
 async def test_consumer_cancellation_closes_the_upstream_response_stream() -> None:
@@ -296,6 +417,55 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     assert "chunk-1" in serialized
     assert "BGE-M3 dense vectors" in serialized
     assert "supplemental_allowed" in serialized
+
+
+async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> None:
+    payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert isinstance(payload, dict)
+        payloads.append(payload)
+        content = "" if len(payloads) == 1 else json.dumps(
+            {
+                "sufficient": True,
+                "selected_chunk_ids": ["chunk-1"],
+                "supplemental_query": None,
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": content}, "finish_reason": "stop"}
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(
+            _config(
+                structured_output_mode="json_object",
+                structured_output_thinking="disabled",
+            ),
+            client=client,
+        )
+
+        decision = await assessor.assess(
+            question="How are vectors indexed?",
+            query="vector indexing",
+            evidence=_evidence(),
+            supplemental_allowed=True,
+        )
+
+    assert decision.sufficient is True
+    assert decision.selected_chunk_ids == ("chunk-1",)
+    assert len(payloads) == 2
+    assert all(
+        payload["response_format"] == {"type": "json_object"}
+        for payload in payloads
+    )
+    assert all(payload["thinking"] == {"type": "disabled"} for payload in payloads)
 
 
 async def test_citation_repairer_returns_only_the_repaired_answer() -> None:

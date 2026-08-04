@@ -1,7 +1,8 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -22,6 +23,8 @@ class OpenAICompatibleConfig:
     model: str
     timeout_seconds: float
     prompt_version: str
+    structured_output_mode: Literal["text", "json_object"] = "text"
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
 
     def __post_init__(self) -> None:
         if not self.base_url.startswith(("http://", "https://")):
@@ -212,52 +215,61 @@ class OpenAICompatibleAnswerGenerator:
     ) -> AsyncIterator[str]:
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         try:
-            async with self._client.stream(
-                "POST",
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.config.api_key}",
-                    "Accept": "text/event-stream",
-                },
-                json={
-                    "model": self.config.model,
-                    "messages": _grounded_prompt(question, evidence),
-                    "stream": True,
-                },
-                timeout=self.config.timeout_seconds,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line.removeprefix("data:").strip()
-                    if data == "[DONE]":
-                        return
+            async with asyncio.timeout(self.config.timeout_seconds):
+                emitted_content = False
+                for attempt in range(2):
                     try:
-                        payload = json.loads(data)
-                    except (json.JSONDecodeError, TypeError) as error:
-                        raise LlmProviderError(
-                            "LLM_INVALID_RESPONSE",
-                            "Language model returned an invalid response",
-                        ) from error
-                    content = _delta_content(payload)
-                    if content is not None:
-                        yield content
-                    finish_reason = _finish_reason(payload)
-                    if finish_reason is not None:
-                        if finish_reason == "stop":
-                            return
-                        raise LlmProviderError(
-                            "LLM_INCOMPLETE_RESPONSE",
-                            "Language model did not complete the response",
-                        )
-                raise LlmProviderError(
-                    "LLM_INVALID_RESPONSE",
-                    "Language model returned an incomplete response",
-                )
+                        async with self._client.stream(
+                            "POST",
+                            url,
+                            headers={
+                                "Authorization": f"Bearer {self.config.api_key}",
+                                "Accept": "text/event-stream",
+                            },
+                            json={
+                                "model": self.config.model,
+                                "messages": _grounded_prompt(question, evidence),
+                                "stream": True,
+                            },
+                            timeout=self.config.timeout_seconds,
+                        ) as response:
+                            response.raise_for_status()
+                            async for line in response.aiter_lines():
+                                if not line.startswith("data:"):
+                                    continue
+                                data = line.removeprefix("data:").strip()
+                                if data == "[DONE]":
+                                    return
+                                try:
+                                    payload = json.loads(data)
+                                except (json.JSONDecodeError, TypeError) as error:
+                                    raise LlmProviderError(
+                                        "LLM_INVALID_RESPONSE",
+                                        "Language model returned an invalid response",
+                                    ) from error
+                                content = _delta_content(payload)
+                                if content is not None:
+                                    emitted_content = True
+                                    yield content
+                                finish_reason = _finish_reason(payload)
+                                if finish_reason is not None:
+                                    if finish_reason == "stop":
+                                        return
+                                    raise LlmProviderError(
+                                        "LLM_INCOMPLETE_RESPONSE",
+                                        "Language model did not complete the response",
+                                    )
+                            raise LlmProviderError(
+                                "LLM_INVALID_RESPONSE",
+                                "Language model returned an incomplete response",
+                            )
+                    except httpx.RemoteProtocolError:
+                        if emitted_content or attempt == 1:
+                            raise
+                        continue
         except LlmProviderError:
             raise
-        except httpx.TimeoutException as error:
+        except (httpx.TimeoutException, TimeoutError) as error:
             raise LlmProviderError(
                 "LLM_TIMEOUT",
                 "Language model request timed out",
@@ -311,42 +323,51 @@ async def _structured_completion(
 ) -> dict[str, Any]:
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     try:
-        response = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {config.api_key}"},
-            json={
-                "model": config.model,
-                "messages": messages,
-                "stream": False,
-            },
-            timeout=config.timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
+        async with asyncio.timeout(config.timeout_seconds):
+            for attempt in range(2):
+                request: dict[str, Any] = {
+                    "model": config.model,
+                    "messages": messages,
+                    "stream": False,
+                }
+                if config.structured_output_mode == "json_object":
+                    request["response_format"] = {"type": "json_object"}
+                if config.structured_output_thinking != "default":
+                    request["thinking"] = {"type": config.structured_output_thinking}
+                response = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {config.api_key}"},
+                    json=request,
+                    timeout=config.timeout_seconds,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError
+                choices = payload.get("choices")
+                if not isinstance(choices, list) or len(choices) != 1:
+                    raise ValueError
+                choice = choices[0]
+                if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+                    raise ValueError
+                message = choice.get("message")
+                if not isinstance(message, dict):
+                    raise ValueError
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    parsed = _load_structured_json(content)
+                    if not isinstance(parsed, dict):
+                        raise ValueError
+                    return parsed
+                if attempt == 1:
+                    raise ValueError
             raise ValueError
-        choices = payload.get("choices")
-        if not isinstance(choices, list) or len(choices) != 1:
-            raise ValueError
-        choice = choices[0]
-        if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
-            raise ValueError
-        message = choice.get("message")
-        if not isinstance(message, dict):
-            raise ValueError
-        content = message.get("content")
-        if not isinstance(content, str):
-            raise ValueError
-        parsed = _load_structured_json(content)
-        if not isinstance(parsed, dict):
-            raise ValueError
-        return parsed
     except (json.JSONDecodeError, TypeError, ValueError) as error:
         raise LlmProviderError(
             "LLM_INVALID_RESPONSE",
             "Language model returned an invalid response",
         ) from error
-    except httpx.TimeoutException as error:
+    except (httpx.TimeoutException, TimeoutError) as error:
         raise LlmProviderError(
             "LLM_TIMEOUT",
             "Language model request timed out",

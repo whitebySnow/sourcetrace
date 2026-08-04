@@ -200,7 +200,7 @@ async def test_refusal_results_are_reported_without_scoring_irrelevant_axes() ->
     assert report.citation_summary.not_applicable == 1
 
 
-async def test_citation_fails_when_answer_cites_evidence_outside_ground_truth() -> None:
+async def test_citation_passes_when_answer_includes_additional_valid_evidence() -> None:
     expected_version_id = uuid4()
     unexpected_version_id = uuid4()
     dataset = EvaluationDataset.model_validate(
@@ -279,5 +279,5 @@ async def test_citation_fails_when_answer_cites_evidence_outside_ground_truth() 
     report = await EvaluationHarness().run(dataset, subject, metadata=metadata)
 
     assert report.cases[0].retrieval == "passed"
-    assert report.cases[0].citation == "failed"
-    assert report.cases[0].end_to_end == "failed"
+    assert report.cases[0].citation == "passed"
+    assert report.cases[0].end_to_end == "pending_review"

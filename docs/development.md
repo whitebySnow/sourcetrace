@@ -137,6 +137,18 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
 `LLM_API_KEY` 和 `LLM_MODEL` 后，API 进程直接请求供应商；回答模型权重不会下载到本机，
 也不会进入仓库或 Docker 镜像。本项目默认模型名仅是远程供应商路由标识。
 
+`LLM_TIMEOUT_SECONDS` 约束每次供应商请求的完整生命周期，包括流式回答以及问题改写、证据判断
+和引用修复的非流式结构化调用。供应商发送的 SSE 或空行 keep-alive 注释可以保持底层连接，但
+不能无限延长回答运行；超时统一映射为 `LLM_TIMEOUT`。
+
+`LLM_STRUCTURED_OUTPUT_MODE=json_object` 只在供应商明确兼容 OpenAI JSON Output 时启用。它会
+为问题改写、证据判断和引用修复发送 `response_format: {"type": "json_object"}`；若供应商成功响应
+但返回空正文，客户端在同一总时限内仅重试一次，随后报告 `LLM_INVALID_RESPONSE`。
+
+`LLM_STRUCTURED_OUTPUT_THINKING` 默认为 `default`，不向供应商发送 thinking 控制参数。仅当供应商
+明确支持该 OpenAI 兼容扩展时，可以设为 `enabled` 或 `disabled`；它只影响格式化的内部决策调用，
+不改变面向用户的流式回答生成。
+
 追问查询改写使用同一供应商，并由 `LLM_QUESTION_REWRITE_PROMPT_VERSION` 记录提示词版本。
 `ANSWER_CONTEXT_QUESTION_LIMIT` 限制可用于指代消解的近期用户问题数量；历史模型回答不会
 发送给改写器，也不会成为后续回答证据。
