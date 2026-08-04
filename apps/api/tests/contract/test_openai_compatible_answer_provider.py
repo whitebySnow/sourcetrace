@@ -57,7 +57,9 @@ def _evidence() -> list[RetrievalCandidate]:
 
 
 def _config(
-    *, structured_output_mode: Literal["text", "json_object"] = "text"
+    *,
+    structured_output_mode: Literal["text", "json_object"] = "text",
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default",
 ) -> OpenAICompatibleConfig:
     return OpenAICompatibleConfig(
         base_url="https://gateway.example/v1",
@@ -66,6 +68,7 @@ def _config(
         timeout_seconds=30,
         prompt_version="grounded-answer-v1",
         structured_output_mode=structured_output_mode,
+        structured_output_thinking=structured_output_thinking,
     )
 
 
@@ -401,7 +404,10 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assessor = OpenAICompatibleEvidenceAssessor(
-            _config(structured_output_mode="json_object"),
+            _config(
+                structured_output_mode="json_object",
+                structured_output_thinking="disabled",
+            ),
             client=client,
         )
 
@@ -419,6 +425,7 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
         payload["response_format"] == {"type": "json_object"}
         for payload in payloads
     )
+    assert all(payload["thinking"] == {"type": "disabled"} for payload in payloads)
 
 
 async def test_citation_repairer_returns_only_the_repaired_answer() -> None:

@@ -24,6 +24,7 @@ class OpenAICompatibleConfig:
     timeout_seconds: float
     prompt_version: str
     structured_output_mode: Literal["text", "json_object"] = "text"
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
 
     def __post_init__(self) -> None:
         if not self.base_url.startswith(("http://", "https://")):
@@ -323,6 +324,8 @@ async def _structured_completion(
                 }
                 if config.structured_output_mode == "json_object":
                     request["response_format"] = {"type": "json_object"}
+                if config.structured_output_thinking != "default":
+                    request["thinking"] = {"type": config.structured_output_thinking}
                 response = await client.post(
                     url,
                     headers={"Authorization": f"Bearer {config.api_key}"},
