@@ -153,8 +153,39 @@ report 的 SHA-256 为 `72738f24653e850cc73ed9434809e6b2ebdad28433786df4164f5f57
 视为评测问题已经解决。后续工作应保持同一数据集和人工审核流程，分别处理残余的引用格式
 失败与 10 个未命中检索样本。
 
+### Issue #31 页边界证据扩展
+
+提交 `86715f4` 在 dense top-8 初始候选不变的前提下，为命中候选补入同一文档版本相邻一页的
+chunk，并保留原始候选的分数来源。这用于处理答案证据恰好跨页、但单页 chunk 边界将其拆开的
+情形；它不改变知识库范围、拒答条件、引用校验或向模型提供无引用的事实。改动还增加了去敏化
+的 `diagnose-retrieval` 输出，以区分 embedding 检索弱点和后续回答策略问题。
+
+对 Issue #31 开始时固定的 10 条 raw retrieval 未命中样本，使用相同本地 BGE-M3、数据库快照
+和 `pgvector-cosine-page-context-v2` 配置重放后，未命中数为 8。这个受限回放只验证该 cohort 的
+检索行为，不能等同于端到端正确率。
+
+2026-08-04 使用同一正式数据集、本地 BGE-M3 与 `gpt-5.6-luna` 完成一次真实供应商评测。原始
+报告为 `agentic-rag-foundations-v1-86715f4-attempt3.json`，SHA-256 为
+`155fdff9d85e8a1b28b73c6c0336b12c7a87e664114a76ab84a724228027b9c9`。用户审核全部六个待审
+样本 `ARF-002`、`ARF-003`、`ARF-005`、`ARF-013`、`ARF-014` 和 `ARF-016`，均判定通过；版本化
+judgment 位于 `evals/judgments/agentic-rag-foundations-v1-86715f4.json`，其绑定后的 reviewed
+report SHA-256 为 `cef15a9c2a9a3a4dccd884a1d51d9173c8b5924c515f736c1aa05f2b4d84b4a7`。
+
+| 维度 | 结果 |
+|---|---|
+| 检索 | 18 passed，9 failed，3 not applicable |
+| 引用 | 6 passed，21 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 9 passed，21 failed，0 pending review |
+
+该真实运行不是与前一报告完全受控的 A/B 对照：它仍有 9 条 embedding 检索弱点，其中包括此前
+未列入 raw-miss cohort 的 case。因此不得把聚合数字表述为整体效果提升。它证明了评测、人工
+审核和报告 SHA 绑定链路可重放，也明确留下了后续分别优化检索和证据充分性判断的失败样本。
+原始 case 级报告包含本地摘录和模型输出，继续保留在被 Git 忽略的 `output/evals/` 目录，不提交。
+
 ## 6. 后续评测工作
 
-1. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
-2. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。
-3. 简历只能引用 reviewed report 的限定结果，并同时说明发现的问题和后续优化方向。
+1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
+2. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
+3. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。
+4. 简历只能引用 reviewed report 的限定结果，并同时说明发现的问题和后续优化方向。
