@@ -107,6 +107,7 @@ async def run_real_evaluation(
             embedding_provider=embedding,
             question_rewriter=rewriter,
             top_k=settings.retrieval_top_k,
+            page_neighbor_count=settings.retrieval_page_neighbor_count,
         )
         subject = WorkflowEvaluationSubject(
             retrieval=retrieval,

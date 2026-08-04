@@ -6,6 +6,7 @@ from sourcetrace.evaluation.models import (
     EvaluationDataset,
     EvaluationJudgmentSet,
     EvaluationReport,
+    RetrievalDiagnosticsReport,
 )
 
 
@@ -17,6 +18,7 @@ def main() -> None:
         "fixture-observations-v1.schema.json": FixtureObservationSet.model_json_schema(),
         "judgments-v1.schema.json": EvaluationJudgmentSet.model_json_schema(),
         "report-v1.schema.json": EvaluationReport.model_json_schema(),
+        "retrieval-diagnostics-v1.schema.json": RetrievalDiagnosticsReport.model_json_schema(),
     }
     for filename, schema in schemas.items():
         (output_dir / filename).write_text(

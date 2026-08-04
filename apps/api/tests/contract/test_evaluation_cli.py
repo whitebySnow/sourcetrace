@@ -17,6 +17,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     judgments_path = tmp_path / "judgments.json"
     output_path = tmp_path / "reports" / "report.json"
     reviewed_output_path = tmp_path / "reports" / "reviewed-report.json"
+    diagnostics_output_path = tmp_path / "reports" / "retrieval-diagnostics.json"
     dataset_path.write_text(
         json.dumps(
             {
@@ -151,15 +152,30 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
             str(reviewed_output_path),
         ]
     )
+    diagnostics_exit_code = main(
+        [
+            "diagnose-retrieval",
+            "--dataset",
+            str(dataset_path),
+            "--report",
+            str(output_path),
+            "--output",
+            str(diagnostics_output_path),
+        ]
+    )
 
     report = json.loads(reviewed_output_path.read_text(encoding="utf-8"))
+    diagnostics = json.loads(diagnostics_output_path.read_text(encoding="utf-8"))
     assert exit_code == 0
     assert review_exit_code == 0
+    assert diagnostics_exit_code == 0
     assert report["dataset_id"] == "cli-fixture"
     assert report["metadata"]["code_commit"] == "test-commit"
     assert report["retrieval_summary"]["passed"] == 1
     assert report["end_to_end_summary"]["passed"] == 1
     assert report["judgment_review"]["reviewed_by"] == "project-owner"
+    assert diagnostics["dataset_id"] == "cli-fixture"
+    assert diagnostics["cases"] == []
 
 
 def test_real_cli_requires_explicit_provider_confirmation() -> None:

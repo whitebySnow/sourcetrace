@@ -174,6 +174,7 @@ def get_answer_service(
         embedding_provider=embedding_provider,
         question_rewriter=question_rewriter,
         top_k=settings.retrieval_top_k,
+        page_neighbor_count=settings.retrieval_page_neighbor_count,
     )
     return AnswerService(
         repository=repository,

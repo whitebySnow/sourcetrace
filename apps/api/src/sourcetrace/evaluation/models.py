@@ -232,3 +232,37 @@ class EvaluationReport(StrictModel):
     citation_summary: EvaluationSummary
     refusal_summary: EvaluationSummary
     end_to_end_summary: EvaluationSummary
+
+
+type RetrievalFailureMechanism = Literal[
+    "query_rewrite_drift",
+    "chunk_boundary_mismatch",
+    "embedding_retrieval_weakness",
+    "score_filtering",
+]
+type ExpectedEvidenceMatchStatus = Literal[
+    "matched",
+    "same_page_different_chunk",
+    "not_retrieved",
+]
+
+
+class ExpectedEvidenceDiagnostic(StrictModel):
+    document_version_id: UUID
+    page_number: int = Field(ge=1)
+    match_status: ExpectedEvidenceMatchStatus
+
+
+class RetrievalCaseDiagnostic(StrictModel):
+    case_id: str = Field(min_length=1)
+    primary_mechanism: RetrievalFailureMechanism
+    retrievals: tuple[ObservedRetrieval, ...]
+    expected_evidence: tuple[ExpectedEvidenceDiagnostic, ...]
+
+
+class RetrievalDiagnosticsReport(StrictModel):
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cases: tuple[RetrievalCaseDiagnostic, ...]

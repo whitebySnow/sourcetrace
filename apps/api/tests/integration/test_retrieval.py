@@ -53,6 +53,7 @@ async def _create_searchable_version(
     page_number: int,
     embedding: list[float],
     embedding_config_version: str = "bge-m3-dense-v1",
+    additional_page_chunks: Sequence[tuple[str, list[float]]] = (),
 ) -> UUID:
     repository = DocumentRepository(session)
     registration = await DocumentService(repository).register_version(
@@ -82,8 +83,28 @@ async def _create_searchable_version(
         token_count=4,
         chunking_config_version="token-window-v1",
     )
-    await repository.create_chunks([chunk])
-    await repository.set_chunk_embeddings([chunk], [embedding])
+    chunks = [chunk]
+    embeddings = [embedding]
+    for page_chunk_index, (additional_text, additional_embedding) in enumerate(
+        additional_page_chunks,
+        start=1,
+    ):
+        chunks.append(
+            Chunk(
+                id=uuid4(),
+                document_version_id=registration.version.id,
+                ingestion_run_id=run.id,
+                page_number=page_number,
+                chunk_index=page_chunk_index,
+                page_chunk_index=page_chunk_index,
+                text=additional_text,
+                token_count=4,
+                chunking_config_version="token-window-v1",
+            )
+        )
+        embeddings.append(additional_embedding)
+    await repository.create_chunks(chunks)
+    await repository.set_chunk_embeddings(chunks, embeddings)
     run.embedding_provider = "sentence-transformers"
     run.embedding_model = "BAAI/bge-m3"
     run.embedding_model_revision = "test-revision"
@@ -232,6 +253,53 @@ async def test_retrieval_can_be_pinned_to_an_exact_document_version_snapshot(
 
     assert [item.document_version_id for item in evidence] == [old_version_id]
     assert [item.text for item in evidence] == ["Reviewed snapshot evidence"]
+
+
+async def test_retrieval_expands_a_top_ranked_chunk_with_its_page_neighbor(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Page context"
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="target.pdf",
+        checksum="e" * 64,
+        text="Top ranked context",
+        page_number=4,
+        embedding=_vector(1.0, 0.0),
+        additional_page_chunks=(("Adjacent expected evidence", _vector(0.1, 0.995)),),
+    )
+    for index in range(7):
+        await _create_searchable_version(
+            session,
+            knowledge_base_id=knowledge_base.id,
+            file_name=f"distractor-{index}.pdf",
+            checksum=f"{index}" * 64,
+            text=f"Distractor {index}",
+            page_number=1,
+            embedding=_vector(0.8, 0.6),
+        )
+    service = RetrievalService(
+        repository=PgVectorRetrievalRepository(session),
+        embedding_provider=QueryEmbeddingProvider(),
+        question_rewriter=UnusedQuestionRewriter(),
+        top_k=8,
+        page_neighbor_count=1,
+    )
+
+    evidence = await service.search(
+        knowledge_base_id=knowledge_base.id,
+        query="How are vectors normalized?",
+    )
+
+    assert len(evidence) == 9
+    assert evidence[0].text == "Top ranked context"
+    assert evidence[-1].text == "Adjacent expected evidence"
+    assert evidence[-1].page_number == 4
+    assert evidence[-1].page_chunk_index == 1
+    assert evidence[-1].score == evidence[0].score
 
 
 async def test_evaluation_snapshot_rejects_mixed_ingestion_provenance(

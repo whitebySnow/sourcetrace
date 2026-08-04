@@ -11,6 +11,7 @@ from sourcetrace.evaluation.fixtures import (
 )
 from sourcetrace.evaluation.harness import EvaluationHarness
 from sourcetrace.evaluation.models import EvaluationRunMetadata
+from sourcetrace.evaluation.retrieval_diagnostics import build_retrieval_diagnostics
 from sourcetrace.evaluation.review import apply_judgments
 
 
@@ -36,6 +37,10 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--report", type=Path, required=True)
     review.add_argument("--judgments", type=Path, required=True)
     review.add_argument("--output", type=Path, required=True)
+    diagnose = subparsers.add_parser("diagnose-retrieval")
+    diagnose.add_argument("--dataset", type=Path, required=True)
+    diagnose.add_argument("--report", type=Path, required=True)
+    diagnose.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -75,6 +80,17 @@ def _run_review(args: argparse.Namespace) -> None:
     args.output.write_text(reviewed.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
+def _run_diagnose_retrieval(args: argparse.Namespace) -> None:
+    report_bytes = args.report.read_bytes()
+    diagnostics = build_retrieval_diagnostics(
+        load_dataset(args.dataset),
+        load_report(args.report),
+        report_sha256=hashlib.sha256(report_bytes).hexdigest(),
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(diagnostics.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.mode == "fake":
@@ -85,6 +101,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.mode == "review":
         _run_review(args)
+        return 0
+    if args.mode == "diagnose-retrieval":
+        _run_diagnose_retrieval(args)
         return 0
     raise AssertionError("unreachable evaluation mode")
 
