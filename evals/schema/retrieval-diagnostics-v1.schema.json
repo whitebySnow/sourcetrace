@@ -1,0 +1,177 @@
+{
+  "$defs": {
+    "ExpectedEvidenceDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "match_status": {
+          "$ref": "#/$defs/ExpectedEvidenceMatchStatus"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number",
+        "match_status"
+      ],
+      "title": "ExpectedEvidenceDiagnostic",
+      "type": "object"
+    },
+    "ExpectedEvidenceMatchStatus": {
+      "enum": [
+        "matched",
+        "same_page_different_chunk",
+        "not_retrieved"
+      ],
+      "type": "string"
+    },
+    "ObservedRetrieval": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/ObservedRetrievalCandidate"
+          },
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "candidates"
+      ],
+      "title": "ObservedRetrieval",
+      "type": "object"
+    },
+    "ObservedRetrievalCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "document_version_id",
+        "page_number",
+        "score"
+      ],
+      "title": "ObservedRetrievalCandidate",
+      "type": "object"
+    },
+    "RetrievalCaseDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "primary_mechanism": {
+          "$ref": "#/$defs/RetrievalFailureMechanism"
+        },
+        "retrievals": {
+          "items": {
+            "$ref": "#/$defs/ObservedRetrieval"
+          },
+          "title": "Retrievals",
+          "type": "array"
+        },
+        "expected_evidence": {
+          "items": {
+            "$ref": "#/$defs/ExpectedEvidenceDiagnostic"
+          },
+          "title": "Expected Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "case_id",
+        "primary_mechanism",
+        "retrievals",
+        "expected_evidence"
+      ],
+      "title": "RetrievalCaseDiagnostic",
+      "type": "object"
+    },
+    "RetrievalFailureMechanism": {
+      "enum": [
+        "query_rewrite_drift",
+        "chunk_boundary_mismatch",
+        "embedding_retrieval_weakness",
+        "score_filtering"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "report_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Report Sha256",
+      "type": "string"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/RetrievalCaseDiagnostic"
+      },
+      "title": "Cases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "report_sha256",
+    "cases"
+  ],
+  "title": "RetrievalDiagnosticsReport",
+  "type": "object"
+}

@@ -7,7 +7,9 @@ from sourcetrace.evaluation.models import (
     EvaluationReport,
     EvaluationRunMetadata,
     ObservedEvidence,
+    RetrievalDiagnosticsReport,
 )
+from sourcetrace.evaluation.retrieval_diagnostics import build_retrieval_diagnostics
 
 __all__ = [
     "EvaluationDataset",
@@ -18,6 +20,8 @@ __all__ = [
     "EvaluationRunMetadata",
     "EvaluationSubject",
     "ObservedEvidence",
+    "RetrievalDiagnosticsReport",
+    "build_retrieval_diagnostics",
     "load_dataset",
     "load_judgments",
 ]

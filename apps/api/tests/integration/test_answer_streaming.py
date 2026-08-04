@@ -373,7 +373,7 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["llm_provider"] == "openai-compatible"
         assert persisted["llm_model"] == "gpt-5.6-luna"
         assert persisted["prompt_version"] == "grounded-answer-v2"
-        assert persisted["retrieval_version"] == "pgvector-cosine-v1"
+        assert persisted["retrieval_version"] == "pgvector-cosine-page-context-v2"
         assert persisted["evidence_assessment_prompt_version"] == (
             "evidence-assessment-v1"
         )

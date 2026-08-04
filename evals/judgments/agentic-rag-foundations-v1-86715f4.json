@@ -1,0 +1,19 @@
+{
+  "schema_version": "1",
+  "dataset_id": "agentic-rag-foundations",
+  "dataset_version": "1.0.0",
+  "report_sha256": "155fdff9d85e8a1b28b73c6c0336b12c7a87e664114a76ab84a724228027b9c9",
+  "review": {
+    "status": "reviewed",
+    "reviewed_by": "whitebySnow",
+    "reviewed_at": "2026-08-04T10:51:52Z"
+  },
+  "judgments": [
+    { "case_id": "ARF-002", "status": "passed" },
+    { "case_id": "ARF-003", "status": "passed" },
+    { "case_id": "ARF-005", "status": "passed" },
+    { "case_id": "ARF-013", "status": "passed" },
+    { "case_id": "ARF-014", "status": "passed" },
+    { "case_id": "ARF-016", "status": "passed" }
+  ]
+}
