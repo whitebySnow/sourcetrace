@@ -37,6 +37,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        TORCH_RUNTIME: cpu
     image: sourcetrace-api:local
     command: ["alembic", "-c", "apps/api/alembic.ini", "upgrade", "head"]
     environment: &application-environment
@@ -66,6 +68,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        TORCH_RUNTIME: cpu
     image: sourcetrace-api:local
     init: true
     environment:

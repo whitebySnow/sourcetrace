@@ -39,7 +39,7 @@ pnpm eval:fake
 模型，并已在 `.env` 配置 OpenAI-compatible 供应商。命令必须显式提供当前代码提交和确认参数：
 
 ```powershell
-uv run --project apps/api python -m sourcetrace.evaluation.cli real `
+uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli real `
   --dataset evals/datasets/<dataset>.json `
   --code-commit (git rev-parse HEAD) `
   --output output/evals/<report>.json `

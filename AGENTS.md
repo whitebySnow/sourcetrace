@@ -106,7 +106,7 @@ OpenAPI 类型由后端契约生成，禁止手写一份同名响应模型。所
 
 ```powershell
 pnpm install
-uv sync --project apps/api --all-groups
+uv sync --project apps/api --all-groups --extra cpu
 pnpm check
 pnpm test
 pnpm build

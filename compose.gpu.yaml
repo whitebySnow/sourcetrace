@@ -1,5 +1,11 @@
 services:
   worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        TORCH_RUNTIME: cu130
+    image: sourcetrace-worker:gpu
     environment:
       EMBEDDING_DEVICE: cuda
     deploy:

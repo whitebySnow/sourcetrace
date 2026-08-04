@@ -198,8 +198,9 @@ prompt、工作流、切分、embedding 和检索参数/版本。端到端 Judgm
 API 进程存活，`/ready` 实际探测 PostgreSQL 与 Redis，任一依赖不可用时返回非就绪状态。
 PostgreSQL、Redis 和上传文件使用独立持久卷，普通停止或重建容器不会删除数据。
 
-基础 Compose 将 Worker 配置为 CPU，不假设宿主机存在 GPU。`compose.gpu.yaml` 只覆盖 Worker
-设备与 NVIDIA 资源请求。Embedding 权重始终位于宿主机缓存并挂载到
+基础 Compose 将 API 与 Worker 的 PyTorch 运行时固定为 CPU，不安装 CUDA 运行库，也不假设
+宿主机存在 GPU。`compose.gpu.yaml` 为 Worker 构建独立的 CUDA PyTorch 镜像，并覆盖运行设备
+与 NVIDIA 资源请求；API 和迁移容器继续复用 CPU 镜像。Embedding 权重始终位于宿主机缓存并挂载到
 `/models/huggingface`，不写入镜像；API 与 Worker 共享上传卷，确保异步摄取能读取 API 保存
 的原文件。日常开发可以只在 Compose 中运行 PostgreSQL 与 Redis，其余进程在宿主机热更新。
 

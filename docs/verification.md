@@ -30,7 +30,7 @@
 执行命令：
 
 ```powershell
-uv run --project apps/api python apps/api/scripts/verify_mvp.py `
+uv run --project apps/api --extra cpu python apps/api/scripts/verify_mvp.py `
   --output output/verification/issue-14.json
 ```
 
