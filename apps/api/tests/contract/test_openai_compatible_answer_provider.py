@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import Literal
 
 import httpx
 import pytest
@@ -55,13 +56,16 @@ def _evidence() -> list[RetrievalCandidate]:
     ]
 
 
-def _config() -> OpenAICompatibleConfig:
+def _config(
+    *, structured_output_mode: Literal["text", "json_object"] = "text"
+) -> OpenAICompatibleConfig:
     return OpenAICompatibleConfig(
         base_url="https://gateway.example/v1",
         api_key="test-secret",
         model="gpt-5.6-luna",
         timeout_seconds=30,
         prompt_version="grounded-answer-v1",
+        structured_output_mode=structured_output_mode,
     )
 
 
@@ -370,6 +374,51 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     assert "chunk-1" in serialized
     assert "BGE-M3 dense vectors" in serialized
     assert "supplemental_allowed" in serialized
+
+
+async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> None:
+    payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert isinstance(payload, dict)
+        payloads.append(payload)
+        content = "" if len(payloads) == 1 else json.dumps(
+            {
+                "sufficient": True,
+                "selected_chunk_ids": ["chunk-1"],
+                "supplemental_query": None,
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": content}, "finish_reason": "stop"}
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(
+            _config(structured_output_mode="json_object"),
+            client=client,
+        )
+
+        decision = await assessor.assess(
+            question="How are vectors indexed?",
+            query="vector indexing",
+            evidence=_evidence(),
+            supplemental_allowed=True,
+        )
+
+    assert decision.sufficient is True
+    assert decision.selected_chunk_ids == ("chunk-1",)
+    assert len(payloads) == 2
+    assert all(
+        payload["response_format"] == {"type": "json_object"}
+        for payload in payloads
+    )
 
 
 async def test_citation_repairer_returns_only_the_repaired_answer() -> None:

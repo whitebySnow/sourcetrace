@@ -52,6 +52,7 @@ def _openai_compatible_config(*, prompt_version: str) -> OpenAICompatibleConfig:
         model=settings.llm_model,
         timeout_seconds=settings.llm_timeout_seconds,
         prompt_version=prompt_version,
+        structured_output_mode=settings.llm_structured_output_mode,
     )
 
 

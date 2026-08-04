@@ -2,7 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -23,6 +23,7 @@ class OpenAICompatibleConfig:
     model: str
     timeout_seconds: float
     prompt_version: str
+    structured_output_mode: Literal["text", "json_object"] = "text"
 
     def __post_init__(self) -> None:
         if not self.base_url.startswith(("http://", "https://")):
@@ -314,36 +315,42 @@ async def _structured_completion(
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     try:
         async with asyncio.timeout(config.timeout_seconds):
-            response = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {config.api_key}"},
-                json={
+            for attempt in range(2):
+                request: dict[str, Any] = {
                     "model": config.model,
                     "messages": messages,
                     "stream": False,
-                },
-                timeout=config.timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise ValueError
-            choices = payload.get("choices")
-            if not isinstance(choices, list) or len(choices) != 1:
-                raise ValueError
-            choice = choices[0]
-            if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
-                raise ValueError
-            message = choice.get("message")
-            if not isinstance(message, dict):
-                raise ValueError
-            content = message.get("content")
-            if not isinstance(content, str):
-                raise ValueError
-            parsed = _load_structured_json(content)
-            if not isinstance(parsed, dict):
-                raise ValueError
-            return parsed
+                }
+                if config.structured_output_mode == "json_object":
+                    request["response_format"] = {"type": "json_object"}
+                response = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {config.api_key}"},
+                    json=request,
+                    timeout=config.timeout_seconds,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError
+                choices = payload.get("choices")
+                if not isinstance(choices, list) or len(choices) != 1:
+                    raise ValueError
+                choice = choices[0]
+                if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+                    raise ValueError
+                message = choice.get("message")
+                if not isinstance(message, dict):
+                    raise ValueError
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    parsed = _load_structured_json(content)
+                    if not isinstance(parsed, dict):
+                        raise ValueError
+                    return parsed
+                if attempt == 1:
+                    raise ValueError
+            raise ValueError
     except (json.JSONDecodeError, TypeError, ValueError) as error:
         raise LlmProviderError(
             "LLM_INVALID_RESPONSE",

@@ -141,6 +141,10 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
 和引用修复的非流式结构化调用。供应商发送的 SSE 或空行 keep-alive 注释可以保持底层连接，但
 不能无限延长回答运行；超时统一映射为 `LLM_TIMEOUT`。
 
+`LLM_STRUCTURED_OUTPUT_MODE=json_object` 只在供应商明确兼容 OpenAI JSON Output 时启用。它会
+为问题改写、证据判断和引用修复发送 `response_format: {"type": "json_object"}`；若供应商成功响应
+但返回空正文，客户端在同一总时限内仅重试一次，随后报告 `LLM_INVALID_RESPONSE`。
+
 追问查询改写使用同一供应商，并由 `LLM_QUESTION_REWRITE_PROMPT_VERSION` 记录提示词版本。
 `ANSWER_CONTEXT_QUESTION_LIMIT` 限制可用于指代消解的近期用户问题数量；历史模型回答不会
 发送给改写器，也不会成为后续回答证据。

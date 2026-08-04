@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model: str = "gpt-5.6-luna"
     llm_timeout_seconds: float = Field(default=60, gt=0)
+    llm_structured_output_mode: Literal["text", "json_object"] = "text"
     llm_prompt_version: str = "grounded-answer-v2"
     llm_question_rewrite_prompt_version: str = "follow-up-query-v1"
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v1"
