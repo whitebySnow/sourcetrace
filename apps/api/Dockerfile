@@ -4,6 +4,8 @@ FROM ghcr.io/astral-sh/uv:0.10.0 AS uv
 
 FROM python:3.12-slim-bookworm
 
+ARG TORCH_RUNTIME=cpu
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
@@ -18,12 +20,16 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY README.md ./README.md
 COPY apps/api/pyproject.toml apps/api/uv.lock ./apps/api/
-RUN uv sync --project apps/api --frozen --no-dev --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    touch README.md \
+    && uv sync --project apps/api --frozen --no-dev --no-install-project --extra ${TORCH_RUNTIME}
 
+COPY README.md ./README.md
 COPY apps/api ./apps/api
-RUN uv sync --project apps/api --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --project apps/api --frozen --no-dev --extra ${TORCH_RUNTIME} \
+    && python -c "import torch; expected = '${TORCH_RUNTIME}'; assert (torch.version.cuda is None) == (expected == 'cpu'), (expected, torch.version.cuda)"
 
 EXPOSE 8000
 

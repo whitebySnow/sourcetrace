@@ -31,7 +31,7 @@ Web 默认运行在 `http://localhost:5173`，API 默认运行在 `http://localh
 ```powershell
 Copy-Item .env.example .env
 docker compose up -d postgres redis
-uv sync --project apps/api --all-groups
+uv sync --project apps/api --all-groups --extra cpu
 pnpm install
 pnpm dev
 ```
@@ -66,7 +66,7 @@ pnpm eval:review  # 将绑定报告摘要的人工 judgment 应用到既有报�
 输出密钥或回答正文：
 
 ```powershell
-uv run --project apps/api python apps/api/scripts/verify_mvp.py `
+uv run --project apps/api --extra cpu python apps/api/scripts/verify_mvp.py `
   --output output/verification/mvp.json
 ```
 

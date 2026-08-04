@@ -44,9 +44,9 @@ Docker 中运行，API、Worker 和 Web 在宿主机运行，适合热更新与�
 ```powershell
 Copy-Item .env.example .env
 docker compose up -d postgres redis
-uv sync --project apps/api --all-groups
+uv sync --project apps/api --all-groups --extra cpu
 pnpm install
-uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
+uv run --project apps/api --extra cpu alembic -c apps/api/alembic.ini upgrade head
 pnpm dev
 ```
 
@@ -87,9 +87,9 @@ modules/documents/
 ## 数据库迁移
 
 ```powershell
-uv run --project apps/api alembic -c apps/api/alembic.ini revision --autogenerate -m "add documents"
-uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
-uv run --project apps/api alembic -c apps/api/alembic.ini downgrade -1
+uv run --project apps/api --extra cpu alembic -c apps/api/alembic.ini revision --autogenerate -m "add documents"
+uv run --project apps/api --extra cpu alembic -c apps/api/alembic.ini upgrade head
+uv run --project apps/api --extra cpu alembic -c apps/api/alembic.ini downgrade -1
 ```
 
 ## 本地嵌入模型
@@ -127,6 +127,12 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
 `EMBEDDING_BATCH_SIZE` 应根据实际内存或显存 smoke test 调整，不能把未经测量的吞吐量写入
 文档。
 
+基础 Compose 使用 `cpu` optional dependency，并从 PyTorch 官方 CPU 索引安装不含 CUDA
+运行库的 wheel。GPU overlay 只为 Worker 构建独立的 `sourcetrace-worker:gpu` 镜像，使用
+`cu130` optional dependency；API 和迁移容器继续使用 CPU 镜像。两个 extra 互斥，禁止在同一
+环境中同时安装。`python apps/api/scripts/verify_cpu_dependencies.py` 会在同步依赖前检查 CPU
+导出结果，防止基础镜像再次引入 NVIDIA 或 Triton 运行库。
+
 项目使用 `sentence-transformers`，因为 BGE-M3 官方发布了对应的 pooling 与归一化模型图；
 直接使用底层 Transformers 需要自行重复这些模型特定推理规则，更容易产生与查询侧不一致的
 向量。适配器仍显式请求归一化并校验维度与范数，避免第三方模型输出静默污染 pgvector。
@@ -161,7 +167,7 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
 可使用以下命令做最小连通性检查：
 
 ```powershell
-uv run --project apps/api python apps/api/scripts/probe_llm_provider.py
+uv run --project apps/api --extra cpu python apps/api/scripts/probe_llm_provider.py
 ```
 
 探针只输出模型名、流式分片数和字符数，不输出密钥、提示词或回答正文。单元、集成和契约

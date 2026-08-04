@@ -53,8 +53,11 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
+      - name: Verify CPU dependency contract
+        run: python apps/api/scripts/verify_cpu_dependencies.py
+
       - name: Install Python dependencies
-        run: uv sync --project apps/api --all-groups --frozen
+        run: uv sync --project apps/api --all-groups --extra cpu --frozen
 
       - name: Install Node.js dependencies
         run: pnpm install --frozen-lockfile
@@ -65,7 +68,7 @@ jobs:
           git diff --exit-code -- apps/web/openapi.json apps/web/src/shared/api/schema.d.ts
 
       - name: Verify database migrations
-        run: uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
+        run: uv run --project apps/api --extra cpu alembic -c apps/api/alembic.ini upgrade head
 
       - name: Static checks
         run: pnpm check
