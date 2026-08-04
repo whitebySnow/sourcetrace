@@ -31,6 +31,19 @@ class RecordingResponseStream(httpx.AsyncByteStream):
         self.release.set()
 
 
+class KeepAliveResponseStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        while True:
+            yield b": keep-alive\n\n"
+            await asyncio.sleep(0)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
 def _evidence() -> list[RetrievalCandidate]:
     return [
         RetrievalCandidate(
@@ -161,6 +174,36 @@ async def test_provider_rejects_a_length_truncated_completion() -> None:
             )
 
     assert error.value.code == "LLM_INCOMPLETE_RESPONSE"
+
+
+async def test_provider_times_out_a_keep_alive_only_stream() -> None:
+    upstream = KeepAliveResponseStream()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=upstream,
+        )
+
+    config = OpenAICompatibleConfig(
+        base_url="https://gateway.example/v1",
+        api_key="test-secret",
+        model="gpt-5.6-luna",
+        timeout_seconds=0.01,
+        prompt_version="grounded-answer-v1",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(config, client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await asyncio.wait_for(
+                _collect(provider.stream_answer(question="Question", evidence=_evidence())),
+                timeout=0.5,
+            )
+
+    assert error.value.code == "LLM_TIMEOUT"
+    assert upstream.closed is True
 
 
 async def test_consumer_cancellation_closes_the_upstream_response_stream() -> None:

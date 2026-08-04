@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
@@ -212,52 +213,53 @@ class OpenAICompatibleAnswerGenerator:
     ) -> AsyncIterator[str]:
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         try:
-            async with self._client.stream(
-                "POST",
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.config.api_key}",
-                    "Accept": "text/event-stream",
-                },
-                json={
-                    "model": self.config.model,
-                    "messages": _grounded_prompt(question, evidence),
-                    "stream": True,
-                },
-                timeout=self.config.timeout_seconds,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line.removeprefix("data:").strip()
-                    if data == "[DONE]":
-                        return
-                    try:
-                        payload = json.loads(data)
-                    except (json.JSONDecodeError, TypeError) as error:
-                        raise LlmProviderError(
-                            "LLM_INVALID_RESPONSE",
-                            "Language model returned an invalid response",
-                        ) from error
-                    content = _delta_content(payload)
-                    if content is not None:
-                        yield content
-                    finish_reason = _finish_reason(payload)
-                    if finish_reason is not None:
-                        if finish_reason == "stop":
+            async with asyncio.timeout(self.config.timeout_seconds):
+                async with self._client.stream(
+                    "POST",
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self.config.api_key}",
+                        "Accept": "text/event-stream",
+                    },
+                    json={
+                        "model": self.config.model,
+                        "messages": _grounded_prompt(question, evidence),
+                        "stream": True,
+                    },
+                    timeout=self.config.timeout_seconds,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line.removeprefix("data:").strip()
+                        if data == "[DONE]":
                             return
-                        raise LlmProviderError(
-                            "LLM_INCOMPLETE_RESPONSE",
-                            "Language model did not complete the response",
-                        )
-                raise LlmProviderError(
-                    "LLM_INVALID_RESPONSE",
-                    "Language model returned an incomplete response",
-                )
+                        try:
+                            payload = json.loads(data)
+                        except (json.JSONDecodeError, TypeError) as error:
+                            raise LlmProviderError(
+                                "LLM_INVALID_RESPONSE",
+                                "Language model returned an invalid response",
+                            ) from error
+                        content = _delta_content(payload)
+                        if content is not None:
+                            yield content
+                        finish_reason = _finish_reason(payload)
+                        if finish_reason is not None:
+                            if finish_reason == "stop":
+                                return
+                            raise LlmProviderError(
+                                "LLM_INCOMPLETE_RESPONSE",
+                                "Language model did not complete the response",
+                            )
+                    raise LlmProviderError(
+                        "LLM_INVALID_RESPONSE",
+                        "Language model returned an incomplete response",
+                    )
         except LlmProviderError:
             raise
-        except httpx.TimeoutException as error:
+        except (httpx.TimeoutException, TimeoutError) as error:
             raise LlmProviderError(
                 "LLM_TIMEOUT",
                 "Language model request timed out",
