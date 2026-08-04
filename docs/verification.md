@@ -183,6 +183,30 @@ report SHA-256 为 `cef15a9c2a9a3a4dccd884a1d51d9173c8b5924c515f736c1aa05f2b4d84
 审核和报告 SHA 绑定链路可重放，也明确留下了后续分别优化检索和证据充分性判断的失败样本。
 原始 case 级报告包含本地摘录和模型输出，继续保留在被 Git 忽略的 `output/evals/` 目录，不提交。
 
+### Issue #33 DeepSeek 兼容与供应商超时边界
+
+提交 `285a06d` 为 OpenAI-compatible 适配器补充了覆盖整个响应生命周期的超时、结构化 JSON
+响应、可配置 thinking 模式，以及只允许在首个 SSE 文本增量前执行一次的空流重连。2026-08-04
+使用同一正式数据集、本地 BGE-M3、`deepseek-v4-pro` 和
+`pgvector-cosine-page-context-v2` 完成真实供应商评测。原始报告 SHA-256 为
+`0c25921f35ea72c89dada4f922e3443bddea95b61261d5a03855c0a52c093d15`。
+
+用户逐条审核全部 14 个待审样本，均判定通过。版本化 judgment 位于
+`evals/judgments/agentic-rag-foundations-v1-285a06d-deepseek-v4-pro.json`；绑定后的 reviewed
+report SHA-256 为 `70bdb2f3d9b92a10e6150bace7873cd33c3009c261bf2986484582cc8c5f0080`。
+
+| 维度 | 结果 |
+|---|---|
+| 检索 | 19 passed，8 failed，3 not applicable |
+| 引用 | 14 passed，13 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 17 passed，13 failed，0 pending review |
+
+本次运行同时改变了模型供应商、结构化响应配置和引用覆盖率评测语义，因此不是与此前
+`gpt-5.6-luna` 报告的受控单变量 A/B 对照。结果只能描述该数据集、提交和固定配置；它不能
+泛化为产品准确率，也不能单独证明 DeepSeek 优于其他模型。当前仍有 8 个应回答样本未通过
+检索召回，另有已生成回答未满足版本化预期证据覆盖，后续应继续按失败类型分别诊断。
+
 ## 6. 后续评测工作
 
 1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
