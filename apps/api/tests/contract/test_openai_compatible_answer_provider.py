@@ -45,6 +45,15 @@ class KeepAliveResponseStream(httpx.AsyncByteStream):
         self.closed = True
 
 
+class BrokenResponseStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        raise httpx.RemoteProtocolError("upstream closed before first delta")
+        yield b""
+
+    async def aclose(self) -> None:
+        return None
+
+
 def _evidence() -> list[RetrievalCandidate]:
     return [
         RetrievalCandidate(
@@ -158,6 +167,37 @@ async def test_provider_rejects_a_stream_that_ends_without_completion() -> None:
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                stream=BrokenResponseStream(),
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"}}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Recovered"]
+    assert attempts == 2
 
 
 async def test_provider_rejects_a_length_truncated_completion() -> None:
