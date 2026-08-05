@@ -35,7 +35,6 @@ class PageContextRepository:
         limit: int,
     ) -> list[RetrievedEvidence]:
         assert query_embedding == [1.0, 0.0]
-        assert limit == 8
         return [self.primary]
 
     async def expand_page_neighbors(
@@ -114,4 +113,16 @@ def test_retrieval_rejects_negative_page_neighbor_count() -> None:
             question_rewriter=UnusedQuestionRewriter(),
             top_k=8,
             page_neighbor_count=-1,
+        )
+
+
+def test_retrieval_rejects_more_than_eight_primary_candidates() -> None:
+    primary = _evidence(page_chunk_index=1, text="Initial matching chunk")
+
+    with pytest.raises(ValueError, match="at most 8"):
+        RetrievalService(
+            repository=PageContextRepository(primary, primary),
+            embedding_provider=StaticEmbeddingProvider(),
+            question_rewriter=UnusedQuestionRewriter(),
+            top_k=9,
         )

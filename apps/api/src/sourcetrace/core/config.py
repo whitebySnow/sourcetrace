@@ -47,11 +47,11 @@ class Settings(BaseSettings):
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v1"
     llm_citation_repair_prompt_version: str = "citation-repair-v2"
     answer_context_question_limit: int = Field(default=4, ge=1, le=20)
-    retrieval_top_k: int = Field(default=8, ge=1, le=100)
+    retrieval_top_k: int = Field(default=8, ge=1, le=8)
     retrieval_page_neighbor_count: int = Field(default=1, ge=0, le=3)
     retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)
     retrieval_minimum_evidence: int = Field(default=1, ge=1)
-    retrieval_config_version: str = "pgvector-cosine-page-context-v2"
+    retrieval_config_version: str = "pgvector-cosine-page-diverse-v3"
     answer_workflow_version: str = "langgraph-bounded-v1"
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "BAAI/bge-m3"
