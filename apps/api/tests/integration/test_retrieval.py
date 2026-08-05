@@ -54,6 +54,7 @@ async def _create_searchable_version(
     embedding: list[float],
     embedding_config_version: str = "bge-m3-dense-v1",
     additional_page_chunks: Sequence[tuple[str, list[float]]] = (),
+    additional_chunks: Sequence[tuple[int, str, list[float]]] = (),
 ) -> UUID:
     repository = DocumentRepository(session)
     registration = await DocumentService(repository).register_version(
@@ -62,7 +63,9 @@ async def _create_searchable_version(
         checksum_sha256=checksum,
         storage_key=f"{knowledge_base_id}/{checksum}.pdf",
         file_size_bytes=1024,
-        page_count=page_number,
+        page_count=max(
+            [page_number, *(item[0] for item in additional_chunks)],
+        ),
     )
     run = await repository.create_ingestion_run(
         registration.version.id,
@@ -103,6 +106,26 @@ async def _create_searchable_version(
             )
         )
         embeddings.append(additional_embedding)
+    next_chunk_index = len(chunks)
+    page_chunk_indexes: dict[int, int] = {}
+    for additional_page, additional_text, additional_embedding in additional_chunks:
+        page_chunk_index = page_chunk_indexes.get(additional_page, 0)
+        chunks.append(
+            Chunk(
+                id=uuid4(),
+                document_version_id=registration.version.id,
+                ingestion_run_id=run.id,
+                page_number=additional_page,
+                chunk_index=next_chunk_index,
+                page_chunk_index=page_chunk_index,
+                text=additional_text,
+                token_count=4,
+                chunking_config_version="token-window-v1",
+            )
+        )
+        embeddings.append(additional_embedding)
+        next_chunk_index += 1
+        page_chunk_indexes[additional_page] = page_chunk_index + 1
     await repository.create_chunks(chunks)
     await repository.set_chunk_embeddings(chunks, embeddings)
     run.embedding_provider = "sentence-transformers"
@@ -300,6 +323,45 @@ async def test_retrieval_expands_a_top_ranked_chunk_with_its_page_neighbor(
     assert evidence[-1].page_number == 4
     assert evidence[-1].page_chunk_index == 1
     assert evidence[-1].score == evidence[0].score
+
+
+async def test_retrieval_primary_candidates_prefer_distinct_document_pages(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Page-diverse retrieval"
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="crowded.pdf",
+        checksum="f" * 64,
+        text="Highest scoring chunk",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+        additional_page_chunks=tuple(
+            (f"Same-page candidate {index}", _vector(0.99, 0.1))
+            for index in range(7)
+        ),
+        additional_chunks=(
+            (2, "Relevant evidence on another page", _vector(0.9, 0.435)),
+        ),
+    )
+    service = RetrievalService(
+        repository=PgVectorRetrievalRepository(session),
+        embedding_provider=QueryEmbeddingProvider(),
+        question_rewriter=UnusedQuestionRewriter(),
+        top_k=8,
+    )
+
+    evidence = await service.search(
+        knowledge_base_id=knowledge_base.id,
+        query="How are vectors normalized?",
+    )
+
+    assert len(evidence) == 8
+    assert [item.page_number for item in evidence[:2]] == [1, 2]
+    assert "Relevant evidence on another page" in {item.text for item in evidence}
 
 
 async def test_evaluation_snapshot_rejects_mixed_ingestion_provenance(

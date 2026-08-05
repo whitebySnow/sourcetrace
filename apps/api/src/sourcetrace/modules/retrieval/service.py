@@ -5,6 +5,9 @@ from uuid import UUID
 
 from sourcetrace.rag.ports import EmbeddingProvider, QuestionRewriter
 
+_PAGE_DIVERSITY_POOL_MULTIPLIER = 4
+_MAX_CANDIDATE_POOL_SIZE = 100
+
 
 @dataclass(frozen=True, slots=True)
 class RetrievedEvidence:
@@ -79,11 +82,15 @@ class RetrievalService:
         embeddings = await self._embedding_provider.embed([query])
         if len(embeddings) != 1:
             raise ValueError("query embedding provider returned an invalid result")
-        retrieved = await self._repository.search(
+        candidate_pool = await self._repository.search(
             knowledge_base_id,
             embeddings[0],
-            limit=self._top_k,
+            limit=min(
+                self._top_k * _PAGE_DIVERSITY_POOL_MULTIPLIER,
+                _MAX_CANDIDATE_POOL_SIZE,
+            ),
         )
+        retrieved = _select_page_diverse(candidate_pool, limit=self._top_k)
         if not retrieved or self._page_neighbor_count == 0:
             return retrieved
         neighbors = await self._repository.expand_page_neighbors(
@@ -95,3 +102,26 @@ class RetrievalService:
         for neighbor in neighbors:
             by_chunk_id.setdefault(neighbor.chunk_id, neighbor)
         return list(by_chunk_id.values())
+
+
+def _select_page_diverse(
+    evidence: Sequence[RetrievedEvidence],
+    *,
+    limit: int,
+) -> list[RetrievedEvidence]:
+    selected: list[RetrievedEvidence] = []
+    deferred: list[RetrievedEvidence] = []
+    selected_pages: set[tuple[UUID, int]] = set()
+
+    for item in evidence:
+        page = (item.document_version_id, item.page_number)
+        if page in selected_pages:
+            deferred.append(item)
+            continue
+        selected.append(item)
+        selected_pages.add(page)
+        if len(selected) == limit:
+            return selected
+
+    selected.extend(deferred[: limit - len(selected)])
+    return selected

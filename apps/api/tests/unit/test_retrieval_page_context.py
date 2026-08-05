@@ -35,7 +35,7 @@ class PageContextRepository:
         limit: int,
     ) -> list[RetrievedEvidence]:
         assert query_embedding == [1.0, 0.0]
-        assert limit == 8
+        assert limit == 32
         return [self.primary]
 
     async def expand_page_neighbors(
