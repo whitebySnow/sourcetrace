@@ -150,6 +150,8 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
 `LLM_STRUCTURED_OUTPUT_MODE=json_object` 只在供应商明确兼容 OpenAI JSON Output 时启用。它会
 为查询规划、证据判断和引用修复发送 `response_format: {"type": "json_object"}`；若供应商成功响应
 但返回空正文，客户端在同一总时限内仅重试一次，随后报告 `LLM_INVALID_RESPONSE`。
+非流式结构化调用遇到连接或协议级瞬时异常时也会在同一总时限内最多重试一次；HTTP 状态错误
+和已收到的无效业务响应不会被当作可无限重放的请求。
 
 `LLM_STRUCTURED_OUTPUT_THINKING` 默认为 `default`，不向供应商发送 thinking 控制参数。仅当供应商
 明确支持该 OpenAI 兼容扩展时，可以设为 `enabled` 或 `disabled`；它只影响格式化的内部决策调用，

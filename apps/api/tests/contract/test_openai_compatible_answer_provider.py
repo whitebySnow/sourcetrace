@@ -394,6 +394,37 @@ async def test_question_planner_rejects_more_than_two_additional_queries() -> No
     assert error.value.code == "LLM_INVALID_RESPONSE"
 
 
+async def test_question_planner_retries_one_transient_disconnect() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.RemoteProtocolError("server disconnected before sending a response")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"additional_queries": ["standalone expansion"]})
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(question="Question", recent_questions=[])
+
+    assert attempts == 2
+    assert proposal.additional_queries == ("standalone expansion",)
+
+
 async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None:
     captured: dict[str, object] = {}
 

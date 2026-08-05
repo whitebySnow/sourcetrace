@@ -346,12 +346,17 @@ async def _structured_completion(
                     request["response_format"] = {"type": "json_object"}
                 if config.structured_output_thinking != "default":
                     request["thinking"] = {"type": config.structured_output_thinking}
-                response = await client.post(
-                    url,
-                    headers={"Authorization": f"Bearer {config.api_key}"},
-                    json=request,
-                    timeout=config.timeout_seconds,
-                )
+                try:
+                    response = await client.post(
+                        url,
+                        headers={"Authorization": f"Bearer {config.api_key}"},
+                        json=request,
+                        timeout=config.timeout_seconds,
+                    )
+                except (httpx.NetworkError, httpx.ProtocolError):
+                    if attempt == 1:
+                        raise
+                    continue
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict):
