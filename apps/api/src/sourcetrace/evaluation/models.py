@@ -106,6 +106,7 @@ class ObservedRetrievalCandidate(StrictModel):
     document_version_id: UUID
     page_number: int = Field(ge=1)
     score: float = Field(ge=-1, le=1)
+    raw_rank: int | None = Field(default=None, gt=0)
 
 
 class ObservedRetrieval(StrictModel):
@@ -124,8 +125,37 @@ class ObservedCitationValidation(StrictModel):
     issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
 
 
+class ObservedQueryCandidateTrace(StrictModel):
+    chunk_id: UUID
+    raw_rank: int = Field(gt=0)
+    raw_cosine_score: float = Field(ge=-1, le=1)
+
+
+class ObservedQueryRetrievalTrace(StrictModel):
+    query: str = Field(min_length=1)
+    candidates: tuple[ObservedQueryCandidateTrace, ...]
+
+
+class ObservedFusedCandidateTrace(StrictModel):
+    chunk_id: UUID
+    fused_score: float = Field(gt=0)
+    best_raw_cosine_score: float = Field(ge=-1, le=1)
+    selected_as_primary: bool
+
+
+class ObservedRetrievalRoundTrace(StrictModel):
+    round_number: int = Field(gt=0, le=2)
+    queries: tuple[str, ...] = Field(min_length=1, max_length=3)
+    query_results: tuple[ObservedQueryRetrievalTrace, ...]
+    fused_candidates: tuple[ObservedFusedCandidateTrace, ...]
+    final_evidence_chunk_ids: tuple[UUID, ...]
+    rrf_rank_constant: int = Field(gt=0)
+
+
 class EvaluationDecisionTrace(StrictModel):
     retrievals: tuple[ObservedRetrieval, ...]
+    retrieval_plan_version: str | None = None
+    retrieval_rounds: tuple[ObservedRetrievalRoundTrace, ...] = ()
     assessments: tuple[ObservedEvidenceAssessment, ...]
     citation_validations: tuple[ObservedCitationValidation, ...]
     supplemental_retrieval_attempts: int = Field(ge=0, le=1)
@@ -165,6 +195,8 @@ class EvaluationRunMetadata(StrictModel):
     embedding_version: str = Field(min_length=1)
     retrieval_version: str = Field(min_length=1)
     retrieval_top_k: int = Field(gt=0)
+    retrieval_page_neighbor_count: int = Field(default=0, ge=0)
+    retrieval_rrf_rank_constant: int | None = Field(default=None, gt=0)
     retrieval_minimum_score: float = Field(ge=-1, le=1)
     retrieval_minimum_evidence: int = Field(gt=0)
     generation_prompt_version: str = Field(min_length=1)

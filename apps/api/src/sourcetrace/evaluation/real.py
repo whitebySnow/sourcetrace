@@ -18,7 +18,7 @@ from sourcetrace.rag.llm import (
     OpenAICompatibleCitationRepairer,
     OpenAICompatibleConfig,
     OpenAICompatibleEvidenceAssessor,
-    OpenAICompatibleQuestionRewriter,
+    OpenAICompatibleQuestionPlanner,
 )
 from sourcetrace.rag.workflow import AnswerWorkflow
 
@@ -32,9 +32,7 @@ def _resolve_embedding_model(provenance: CorpusProvenance, settings: Settings) -
     mismatches: list[str] = []
     if settings.embedding_provider != provenance.embedding_provider:
         mismatches.append("embedding provider")
-    if _model_identity(settings.embedding_model) != _model_identity(
-        provenance.embedding_model
-    ):
+    if _model_identity(settings.embedding_model) != _model_identity(provenance.embedding_model):
         mismatches.append("embedding model")
     if settings.embedding_model_revision != provenance.embedding_revision:
         mismatches.append("embedding revision")
@@ -94,10 +92,10 @@ async def run_real_evaluation(
                 version=provenance.embedding_version,
             )
         )
-        rewriter = OpenAICompatibleQuestionRewriter(
+        planner = OpenAICompatibleQuestionPlanner(
             _llm_config(
                 settings,
-                prompt_version=settings.llm_question_rewrite_prompt_version,
+                prompt_version=settings.llm_retrieval_plan_prompt_version,
             ),
             client=client,
         )
@@ -107,9 +105,10 @@ async def run_real_evaluation(
                 document_version_ids=dataset.document_version_ids,
             ),
             embedding_provider=embedding,
-            question_rewriter=rewriter,
+            question_planner=planner,
             top_k=settings.retrieval_top_k,
             page_neighbor_count=settings.retrieval_page_neighbor_count,
+            rrf_rank_constant=settings.retrieval_rrf_rank_constant,
         )
         subject = WorkflowEvaluationSubject(
             retrieval=retrieval,
@@ -159,10 +158,12 @@ async def run_real_evaluation(
                 embedding_version=provenance.embedding_version,
                 retrieval_version=settings.retrieval_config_version,
                 retrieval_top_k=settings.retrieval_top_k,
+                retrieval_page_neighbor_count=settings.retrieval_page_neighbor_count,
+                retrieval_rrf_rank_constant=settings.retrieval_rrf_rank_constant,
                 retrieval_minimum_score=settings.retrieval_minimum_score,
                 retrieval_minimum_evidence=settings.retrieval_minimum_evidence,
                 generation_prompt_version=settings.llm_prompt_version,
-                question_rewrite_prompt_version=(settings.llm_question_rewrite_prompt_version),
+                question_rewrite_prompt_version=(settings.llm_retrieval_plan_prompt_version),
                 evidence_assessment_prompt_version=(
                     settings.llm_evidence_assessment_prompt_version
                 ),

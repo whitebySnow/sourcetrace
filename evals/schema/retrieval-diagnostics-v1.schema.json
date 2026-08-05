@@ -79,6 +79,19 @@
           "minimum": -1,
           "title": "Score",
           "type": "number"
+        },
+        "raw_rank": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Rank"
         }
       },
       "required": [

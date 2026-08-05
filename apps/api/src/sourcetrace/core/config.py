@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     api_request_id_header: str = "X-Request-ID"
     log_level: str = "INFO"
 
-    database_url: str = "postgresql+asyncpg://sourcetrace:sourcetrace_dev@localhost:5432/sourcetrace"
+    database_url: str = (
+        "postgresql+asyncpg://sourcetrace:sourcetrace_dev@localhost:5432/sourcetrace"
+    )
     database_pool_size: int = Field(default=10, ge=1, le=100)
     database_max_overflow: int = Field(default=10, ge=0, le=100)
     database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
@@ -43,16 +45,17 @@ class Settings(BaseSettings):
     llm_structured_output_mode: Literal["text", "json_object"] = "text"
     llm_structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
     llm_prompt_version: str = "grounded-answer-v2"
-    llm_question_rewrite_prompt_version: str = "follow-up-query-v1"
+    llm_retrieval_plan_prompt_version: str = "bounded-multi-query-v1"
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v1"
     llm_citation_repair_prompt_version: str = "citation-repair-v2"
     answer_context_question_limit: int = Field(default=4, ge=1, le=20)
     retrieval_top_k: int = Field(default=8, ge=1, le=8)
     retrieval_page_neighbor_count: int = Field(default=1, ge=0, le=3)
+    retrieval_rrf_rank_constant: int = Field(default=60, ge=1, le=1000)
     retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)
     retrieval_minimum_evidence: int = Field(default=1, ge=1)
-    retrieval_config_version: str = "pgvector-cosine-page-diverse-v3"
-    answer_workflow_version: str = "langgraph-bounded-v1"
+    retrieval_config_version: str = "pgvector-cosine-multi-query-rrf-v4"
+    answer_workflow_version: str = "langgraph-bounded-multi-query-v2"
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "BAAI/bge-m3"
     embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"

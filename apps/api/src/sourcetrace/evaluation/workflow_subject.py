@@ -10,10 +10,18 @@ from sourcetrace.evaluation.models import (
     ObservedCitationValidation,
     ObservedEvidence,
     ObservedEvidenceAssessment,
+    ObservedFusedCandidateTrace,
+    ObservedQueryCandidateTrace,
+    ObservedQueryRetrievalTrace,
     ObservedRetrieval,
     ObservedRetrievalCandidate,
+    ObservedRetrievalRoundTrace,
 )
-from sourcetrace.modules.retrieval.service import RetrievedEvidence
+from sourcetrace.modules.retrieval.service import (
+    RetrievalPlan,
+    RetrievalResult,
+    RetrievedEvidence,
+)
 from sourcetrace.rag.workflow import (
     WorkflowAnswered,
     WorkflowCancelled,
@@ -26,19 +34,19 @@ from sourcetrace.rag.workflow import (
 
 
 class WorkflowRetrieval(Protocol):
-    async def resolve_query(
+    async def resolve_plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str: ...
+    ) -> RetrievalPlan: ...
 
     async def search(
         self,
         *,
         knowledge_base_id: UUID,
-        query: str,
-    ) -> list[RetrievedEvidence]: ...
+        queries: Sequence[str],
+    ) -> RetrievalResult: ...
 
 
 class WorkflowRunner(Protocol):
@@ -69,13 +77,13 @@ class RecordingWorkflowRetrieval:
         self._evidence_by_chunk.clear()
         self._retrievals.clear()
 
-    async def resolve_query(
+    async def resolve_plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str:
-        return await self._retrieval.resolve_query(
+    ) -> RetrievalPlan:
+        return await self._retrieval.resolve_plan(
             question=question,
             recent_questions=recent_questions,
         )
@@ -84,15 +92,24 @@ class RecordingWorkflowRetrieval:
         self,
         *,
         knowledge_base_id: UUID,
-        query: str,
-    ) -> list[RetrievedEvidence]:
-        evidence = await self._retrieval.search(
+        queries: Sequence[str],
+    ) -> RetrievalResult:
+        result = await self._retrieval.search(
             knowledge_base_id=knowledge_base_id,
-            query=query,
+            queries=queries,
         )
-        self._retrievals.append(RecordedRetrieval(query=query, evidence=tuple(evidence)))
-        self._evidence_by_chunk.update({item.chunk_id: item for item in evidence})
-        return evidence
+        recorded_queries = {item.query for item in self._retrievals}
+        for query_result in result.query_results:
+            if query_result.query not in recorded_queries:
+                self._retrievals.append(
+                    RecordedRetrieval(
+                        query=query_result.query,
+                        evidence=tuple(candidate.evidence for candidate in query_result.candidates),
+                    )
+                )
+                recorded_queries.add(query_result.query)
+        self._evidence_by_chunk.update({item.chunk_id: item for item in result.evidence})
+        return result
 
 
 class RecordingWorkflowRunControl:
@@ -190,11 +207,47 @@ class WorkflowEvaluationSubject:
                             document_version_id=evidence.document_version_id,
                             page_number=evidence.page_number,
                             score=evidence.score,
+                            raw_rank=rank,
                         )
-                        for evidence in retrieval.evidence
+                        for rank, evidence in enumerate(retrieval.evidence, start=1)
                     ),
                 )
                 for retrieval in self._retrieval.retrievals
+            ),
+            retrieval_plan_version=trace.retrieval_plan_version,
+            retrieval_rounds=tuple(
+                ObservedRetrievalRoundTrace(
+                    round_number=retrieval_round.round_number,
+                    queries=retrieval_round.queries,
+                    query_results=tuple(
+                        ObservedQueryRetrievalTrace(
+                            query=query_result.query,
+                            candidates=tuple(
+                                ObservedQueryCandidateTrace(
+                                    chunk_id=UUID(candidate.chunk_id),
+                                    raw_rank=candidate.raw_rank,
+                                    raw_cosine_score=candidate.raw_cosine_score,
+                                )
+                                for candidate in query_result.candidates
+                            ),
+                        )
+                        for query_result in retrieval_round.query_results
+                    ),
+                    fused_candidates=tuple(
+                        ObservedFusedCandidateTrace(
+                            chunk_id=UUID(candidate.chunk_id),
+                            fused_score=candidate.fused_score,
+                            best_raw_cosine_score=(candidate.best_raw_cosine_score),
+                            selected_as_primary=candidate.selected_as_primary,
+                        )
+                        for candidate in retrieval_round.fused_candidates
+                    ),
+                    final_evidence_chunk_ids=tuple(
+                        UUID(chunk_id) for chunk_id in retrieval_round.final_evidence_chunk_ids
+                    ),
+                    rrf_rank_constant=retrieval_round.rrf_rank_constant,
+                )
+                for retrieval_round in trace.retrieval_rounds
             ),
             assessments=tuple(
                 ObservedEvidenceAssessment(

@@ -4,17 +4,18 @@ from uuid import UUID, uuid4
 import pytest
 
 from sourcetrace.modules.retrieval.service import RetrievalService, RetrievedEvidence
+from sourcetrace.rag.ports import RetrievalPlanProposal
 
 
 class StaticEmbeddingProvider:
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
-        assert texts == ["Where is the expected evidence?"]
+        assert list(texts) == ["Where is the expected evidence?"]
         return [[1.0, 0.0]]
 
 
-class UnusedQuestionRewriter:
-    async def rewrite(self, **kwargs: object) -> str:
-        raise AssertionError("direct questions do not need rewriting")
+class UnusedQuestionPlanner:
+    async def plan(self, **kwargs: object) -> RetrievalPlanProposal:
+        raise AssertionError("query planning must not start")
 
 
 class PageContextRepository:
@@ -70,17 +71,20 @@ async def test_retrieval_adds_only_repository_supplied_same_page_neighbors() -> 
     service = RetrievalService(
         repository=repository,
         embedding_provider=StaticEmbeddingProvider(),
-        question_rewriter=UnusedQuestionRewriter(),
+        question_planner=UnusedQuestionPlanner(),
         top_k=8,
         page_neighbor_count=1,
     )
 
     result = await service.search(
         knowledge_base_id=knowledge_base_id,
-        query="Where is the expected evidence?",
+        queries=("Where is the expected evidence?",),
     )
 
-    assert [item.chunk_id for item in result] == [primary.chunk_id, neighbor.chunk_id]
+    assert [item.chunk_id for item in result.evidence] == [
+        primary.chunk_id,
+        neighbor.chunk_id,
+    ]
     assert repository.neighbor_calls == [(knowledge_base_id, (primary,), 1)]
 
 
@@ -90,16 +94,16 @@ async def test_retrieval_does_not_expand_pages_when_disabled() -> None:
     service = RetrievalService(
         repository=repository,
         embedding_provider=StaticEmbeddingProvider(),
-        question_rewriter=UnusedQuestionRewriter(),
+        question_planner=UnusedQuestionPlanner(),
         top_k=8,
     )
 
     result = await service.search(
         knowledge_base_id=uuid4(),
-        query="Where is the expected evidence?",
+        queries=("Where is the expected evidence?",),
     )
 
-    assert result == [primary]
+    assert result.evidence == (primary,)
     assert repository.neighbor_calls == []
 
 
@@ -110,7 +114,7 @@ def test_retrieval_rejects_negative_page_neighbor_count() -> None:
         RetrievalService(
             repository=PageContextRepository(primary, primary),
             embedding_provider=StaticEmbeddingProvider(),
-            question_rewriter=UnusedQuestionRewriter(),
+            question_planner=UnusedQuestionPlanner(),
             top_k=8,
             page_neighbor_count=-1,
         )
@@ -123,6 +127,6 @@ def test_retrieval_rejects_more_than_eight_primary_candidates() -> None:
         RetrievalService(
             repository=PageContextRepository(primary, primary),
             embedding_provider=StaticEmbeddingProvider(),
-            question_rewriter=UnusedQuestionRewriter(),
+            question_planner=UnusedQuestionPlanner(),
             top_k=9,
         )

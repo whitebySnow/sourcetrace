@@ -12,7 +12,7 @@ from sourcetrace.rag.llm import (
     OpenAICompatibleCitationRepairer,
     OpenAICompatibleConfig,
     OpenAICompatibleEvidenceAssessor,
-    OpenAICompatibleQuestionRewriter,
+    OpenAICompatibleQuestionPlanner,
 )
 from sourcetrace.rag.ports import RetrievalCandidate
 
@@ -142,9 +142,7 @@ async def test_provider_maps_upstream_failures_without_leaking_details(
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
 
         with pytest.raises(LlmProviderError) as error:
-            await _collect(
-                provider.stream_answer(question="Question", evidence=_evidence())
-            )
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert error.value.code == expected_code
     assert "private" not in str(error.value)
@@ -162,9 +160,7 @@ async def test_provider_rejects_a_stream_that_ends_without_completion() -> None:
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
 
         with pytest.raises(LlmProviderError) as error:
-            await _collect(
-                provider.stream_answer(question="Question", evidence=_evidence())
-            )
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
 
@@ -184,17 +180,12 @@ async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
-            content=(
-                b'data: {"choices":[{"delta":{"content":"Recovered"}}]}\n\n'
-                b"data: [DONE]\n\n"
-            ),
+            content=(b'data: {"choices":[{"delta":{"content":"Recovered"}}]}\n\ndata: [DONE]\n\n'),
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
-        deltas = await _collect(
-            provider.stream_answer(question="Question", evidence=_evidence())
-        )
+        deltas = await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert deltas == ["Recovered"]
     assert attempts == 2
@@ -216,9 +207,7 @@ async def test_provider_rejects_a_length_truncated_completion() -> None:
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
 
         with pytest.raises(LlmProviderError) as error:
-            await _collect(
-                provider.stream_answer(question="Question", evidence=_evidence())
-            )
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert error.value.code == "LLM_INCOMPLETE_RESPONSE"
 
@@ -273,7 +262,7 @@ async def test_evidence_assessor_times_out_a_keep_alive_only_response() -> None:
             await asyncio.wait_for(
                 assessor.assess(
                     question="Question",
-                    query="Question",
+                    queries=("Question",),
                     evidence=_evidence(),
                     supplemental_allowed=True,
                 ),
@@ -307,7 +296,7 @@ async def test_consumer_cancellation_closes_the_upstream_response_stream() -> No
     assert upstream.closed is True
 
 
-async def test_question_rewriter_uses_only_recent_user_questions() -> None:
+async def test_question_planner_uses_only_recent_user_questions() -> None:
     captured: dict[str, object] = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -320,9 +309,9 @@ async def test_question_rewriter_uses_only_recent_user_questions() -> None:
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "retrieval_query": (
-                                        "Why are BGE-M3 dense vectors normalized?"
-                                    )
+                                    "additional_queries": [
+                                        "Why are BGE-M3 dense vectors normalized?",
+                                    ]
                                 }
                             )
                         },
@@ -333,9 +322,9 @@ async def test_question_rewriter_uses_only_recent_user_questions() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        rewriter = OpenAICompatibleQuestionRewriter(_config(), client=client)
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
-        rewritten = await rewriter.rewrite(
+        proposal = await planner.plan(
             question="Why is it normalized?",
             recent_questions=[
                 "What is BGE-M3 dense retrieval?",
@@ -343,7 +332,7 @@ async def test_question_rewriter_uses_only_recent_user_questions() -> None:
             ],
         )
 
-    assert rewritten == "Why are BGE-M3 dense vectors normalized?"
+    assert proposal.additional_queries == ("Why are BGE-M3 dense vectors normalized?",)
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert payload["stream"] is False
@@ -356,18 +345,51 @@ async def test_question_rewriter_uses_only_recent_user_questions() -> None:
     assert "UNSUPPORTED PRIOR ANSWER" not in serialized
 
 
-async def test_question_rewriter_rejects_an_invalid_response_shape() -> None:
+async def test_question_planner_rejects_an_invalid_response_shape() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=[])
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        rewriter = OpenAICompatibleQuestionRewriter(_config(), client=client)
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
         with pytest.raises(LlmProviderError) as error:
-            await rewriter.rewrite(
+            await planner.plan(
                 question="Why is it normalized?",
                 recent_questions=["How are BGE-M3 vectors stored?"],
             )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+async def test_question_planner_rejects_more_than_two_additional_queries() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "additional_queries": [
+                                        "first expansion",
+                                        "second expansion",
+                                        "forbidden third expansion",
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await planner.plan(question="Question", recent_questions=[])
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
 
@@ -402,7 +424,7 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
 
         decision = await assessor.assess(
             question="How are vectors indexed?",
-            query="vector indexing",
+            queries=("How are vectors indexed?", "vector indexing"),
             evidence=_evidence(),
             supplemental_allowed=True,
         )
@@ -417,6 +439,7 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     assert "chunk-1" in serialized
     assert "BGE-M3 dense vectors" in serialized
     assert "supplemental_allowed" in serialized
+    assert "retrieval_queries" in serialized
 
 
 async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> None:
@@ -426,20 +449,20 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
         payload = json.loads(request.content)
         assert isinstance(payload, dict)
         payloads.append(payload)
-        content = "" if len(payloads) == 1 else json.dumps(
-            {
-                "sufficient": True,
-                "selected_chunk_ids": ["chunk-1"],
-                "supplemental_query": None,
-            }
+        content = (
+            ""
+            if len(payloads) == 1
+            else json.dumps(
+                {
+                    "sufficient": True,
+                    "selected_chunk_ids": ["chunk-1"],
+                    "supplemental_query": None,
+                }
+            )
         )
         return httpx.Response(
             200,
-            json={
-                "choices": [
-                    {"message": {"content": content}, "finish_reason": "stop"}
-                ]
-            },
+            json={"choices": [{"message": {"content": content}, "finish_reason": "stop"}]},
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -453,7 +476,7 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
 
         decision = await assessor.assess(
             question="How are vectors indexed?",
-            query="vector indexing",
+            queries=("How are vectors indexed?", "vector indexing"),
             evidence=_evidence(),
             supplemental_allowed=True,
         )
@@ -461,10 +484,7 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
     assert decision.sufficient is True
     assert decision.selected_chunk_ids == ("chunk-1",)
     assert len(payloads) == 2
-    assert all(
-        payload["response_format"] == {"type": "json_object"}
-        for payload in payloads
-    )
+    assert all(payload["response_format"] == {"type": "json_object"} for payload in payloads)
     assert all(payload["thinking"] == {"type": "disabled"} for payload in payloads)
 
 
@@ -479,9 +499,7 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps(
-                                {"answer": "Vectors are normalized [citation-1]"}
-                            )
+                            "content": json.dumps({"answer": "Vectors are normalized [citation-1]"})
                         },
                         "finish_reason": "stop",
                     }
@@ -517,10 +535,7 @@ async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() 
                 "choices": [
                     {
                         "message": {
-                            "content": (
-                                '{"answer":"The objective is \\(x + y\\) '
-                                '[citation-1]"}'
-                            )
+                            "content": ('{"answer":"The objective is \\(x + y\\) [citation-1]"}')
                         },
                         "finish_reason": "stop",
                     }
@@ -560,7 +575,7 @@ async def test_evidence_assessor_rejects_unstructured_output() -> None:
         with pytest.raises(LlmProviderError) as error:
             await assessor.assess(
                 question="Question",
-                query="query",
+                queries=("Question", "query"),
                 evidence=_evidence(),
                 supplemental_allowed=True,
             )

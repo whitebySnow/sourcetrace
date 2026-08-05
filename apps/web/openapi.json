@@ -1715,12 +1715,30 @@
       },
       "AnswerWorkflowTrace": {
         "properties": {
+          "retrieval_plan_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval Plan Version"
+          },
           "retrieval_queries": {
             "items": {
               "type": "string"
             },
             "type": "array",
             "title": "Retrieval Queries"
+          },
+          "retrieval_rounds": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowRetrievalRoundTrace"
+            },
+            "type": "array",
+            "title": "Retrieval Rounds"
           },
           "assessments": {
             "items": {
@@ -1729,22 +1747,25 @@
             "type": "array",
             "title": "Assessments"
           },
+          "citation_validations": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowCitationValidationTrace"
+            },
+            "type": "array",
+            "title": "Citation Validations"
+          },
           "supplemental_retrieval_attempts": {
             "type": "integer",
-            "title": "Supplemental Retrieval Attempts"
+            "title": "Supplemental Retrieval Attempts",
+            "default": 0
           },
           "citation_repair_attempts": {
             "type": "integer",
-            "title": "Citation Repair Attempts"
+            "title": "Citation Repair Attempts",
+            "default": 0
           }
         },
         "type": "object",
-        "required": [
-          "retrieval_queries",
-          "assessments",
-          "supplemental_retrieval_attempts",
-          "citation_repair_attempts"
-        ],
         "title": "AnswerWorkflowTrace"
       },
       "Body_upload_document_api_v1_knowledge_bases__knowledge_base_id__documents_post": {
@@ -2486,6 +2507,30 @@
         ],
         "title": "ValidationError"
       },
+      "WorkflowCitationValidationTrace": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "issue": {
+            "type": "string",
+            "enum": [
+              "empty_answer",
+              "uncited_claim",
+              "unknown_label",
+              "valid"
+            ],
+            "title": "Issue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid",
+          "issue"
+        ],
+        "title": "WorkflowCitationValidationTrace"
+      },
       "WorkflowEvidenceAssessmentTrace": {
         "properties": {
           "sufficient": {
@@ -2518,6 +2563,128 @@
           "supplemental_query"
         ],
         "title": "WorkflowEvidenceAssessmentTrace"
+      },
+      "WorkflowFusedCandidateTrace": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "fused_score": {
+            "type": "number",
+            "title": "Fused Score"
+          },
+          "best_raw_cosine_score": {
+            "type": "number",
+            "title": "Best Raw Cosine Score"
+          },
+          "selected_as_primary": {
+            "type": "boolean",
+            "title": "Selected As Primary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "fused_score",
+          "best_raw_cosine_score",
+          "selected_as_primary"
+        ],
+        "title": "WorkflowFusedCandidateTrace"
+      },
+      "WorkflowQueryRetrievalTrace": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowRetrievalCandidateTrace"
+            },
+            "type": "array",
+            "title": "Candidates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "candidates"
+        ],
+        "title": "WorkflowQueryRetrievalTrace"
+      },
+      "WorkflowRetrievalCandidateTrace": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "raw_rank": {
+            "type": "integer",
+            "title": "Raw Rank"
+          },
+          "raw_cosine_score": {
+            "type": "number",
+            "title": "Raw Cosine Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "raw_rank",
+          "raw_cosine_score"
+        ],
+        "title": "WorkflowRetrievalCandidateTrace"
+      },
+      "WorkflowRetrievalRoundTrace": {
+        "properties": {
+          "round_number": {
+            "type": "integer",
+            "title": "Round Number"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Queries"
+          },
+          "query_results": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowQueryRetrievalTrace"
+            },
+            "type": "array",
+            "title": "Query Results"
+          },
+          "fused_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowFusedCandidateTrace"
+            },
+            "type": "array",
+            "title": "Fused Candidates"
+          },
+          "final_evidence_chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Final Evidence Chunk Ids"
+          },
+          "rrf_rank_constant": {
+            "type": "integer",
+            "title": "Rrf Rank Constant"
+          }
+        },
+        "type": "object",
+        "required": [
+          "round_number",
+          "queries",
+          "query_results",
+          "fused_candidates",
+          "final_evidence_chunk_ids",
+          "rrf_rank_constant"
+        ],
+        "title": "WorkflowRetrievalRoundTrace"
       }
     }
   }

@@ -100,11 +100,46 @@ class WorkflowEvidenceAssessmentTrace(BaseModel):
     supplemental_query: str | None
 
 
+class WorkflowRetrievalCandidateTrace(BaseModel):
+    chunk_id: str
+    raw_rank: int
+    raw_cosine_score: float
+
+
+class WorkflowQueryRetrievalTrace(BaseModel):
+    query: str
+    candidates: list[WorkflowRetrievalCandidateTrace]
+
+
+class WorkflowFusedCandidateTrace(BaseModel):
+    chunk_id: str
+    fused_score: float
+    best_raw_cosine_score: float
+    selected_as_primary: bool
+
+
+class WorkflowRetrievalRoundTrace(BaseModel):
+    round_number: int
+    queries: list[str]
+    query_results: list[WorkflowQueryRetrievalTrace]
+    fused_candidates: list[WorkflowFusedCandidateTrace]
+    final_evidence_chunk_ids: list[str]
+    rrf_rank_constant: int
+
+
+class WorkflowCitationValidationTrace(BaseModel):
+    valid: bool
+    issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+
+
 class AnswerWorkflowTrace(BaseModel):
-    retrieval_queries: list[str]
-    assessments: list[WorkflowEvidenceAssessmentTrace]
-    supplemental_retrieval_attempts: int
-    citation_repair_attempts: int
+    retrieval_plan_version: str | None = None
+    retrieval_queries: list[str] = Field(default_factory=list)
+    retrieval_rounds: list[WorkflowRetrievalRoundTrace] = Field(default_factory=list)
+    assessments: list[WorkflowEvidenceAssessmentTrace] = Field(default_factory=list)
+    citation_validations: list[WorkflowCitationValidationTrace] = Field(default_factory=list)
+    supplemental_retrieval_attempts: int = 0
+    citation_repair_attempts: int = 0
 
 
 class AnswerHistoryItem(BaseModel):

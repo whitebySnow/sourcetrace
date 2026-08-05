@@ -46,8 +46,11 @@ class AnswerRepository:
             citation_repair_prompt_version=citation_repair_prompt_version,
             workflow_version=workflow_version,
             workflow_trace={
+                "retrieval_plan_version": None,
                 "retrieval_queries": [],
+                "retrieval_rounds": [],
                 "assessments": [],
+                "citation_validations": [],
                 "supplemental_retrieval_attempts": 0,
                 "citation_repair_attempts": 0,
             },

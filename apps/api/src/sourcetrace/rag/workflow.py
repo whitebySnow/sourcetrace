@@ -2,14 +2,18 @@ import asyncio
 import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal, Protocol, TypedDict, cast
 from uuid import UUID, uuid5
 
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from sourcetrace.modules.retrieval.service import RetrievedEvidence
+from sourcetrace.modules.retrieval.service import (
+    RetrievalPlan,
+    RetrievalResult,
+    RetrievedEvidence,
+)
 from sourcetrace.rag.ports import (
     AnswerGenerator,
     CitationRepairer,
@@ -55,8 +59,72 @@ class CitationValidationTrace:
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievalCandidateTrace:
+    chunk_id: str
+    raw_rank: int
+    raw_cosine_score: float
+
+    def to_payload(self) -> dict[str, str | int | float]:
+        return {
+            "chunk_id": self.chunk_id,
+            "raw_rank": self.raw_rank,
+            "raw_cosine_score": self.raw_cosine_score,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class QueryRetrievalTrace:
+    query: str
+    candidates: tuple[RetrievalCandidateTrace, ...]
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "query": self.query,
+            "candidates": [item.to_payload() for item in self.candidates],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FusedCandidateTrace:
+    chunk_id: str
+    fused_score: float
+    best_raw_cosine_score: float
+    selected_as_primary: bool
+
+    def to_payload(self) -> dict[str, str | float | bool]:
+        return {
+            "chunk_id": self.chunk_id,
+            "fused_score": self.fused_score,
+            "best_raw_cosine_score": self.best_raw_cosine_score,
+            "selected_as_primary": self.selected_as_primary,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalRoundTrace:
+    round_number: int
+    queries: tuple[str, ...]
+    query_results: tuple[QueryRetrievalTrace, ...]
+    fused_candidates: tuple[FusedCandidateTrace, ...]
+    final_evidence_chunk_ids: tuple[str, ...]
+    rrf_rank_constant: int
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "round_number": self.round_number,
+            "queries": list(self.queries),
+            "query_results": [item.to_payload() for item in self.query_results],
+            "fused_candidates": [item.to_payload() for item in self.fused_candidates],
+            "final_evidence_chunk_ids": list(self.final_evidence_chunk_ids),
+            "rrf_rank_constant": self.rrf_rank_constant,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkflowTrace:
+    retrieval_plan_version: str | None = None
     retrieval_queries: tuple[str, ...] = ()
+    retrieval_rounds: tuple[RetrievalRoundTrace, ...] = ()
     assessments: tuple[EvidenceAssessmentTrace, ...] = ()
     citation_validations: tuple[CitationValidationTrace, ...] = ()
     supplemental_retrieval_attempts: int = 0
@@ -64,11 +132,11 @@ class WorkflowTrace:
 
     def to_payload(self) -> dict[str, object]:
         return {
+            "retrieval_plan_version": self.retrieval_plan_version,
             "retrieval_queries": list(self.retrieval_queries),
+            "retrieval_rounds": [item.to_payload() for item in self.retrieval_rounds],
             "assessments": [item.to_payload() for item in self.assessments],
-            "citation_validations": [
-                item.to_payload() for item in self.citation_validations
-            ],
+            "citation_validations": [item.to_payload() for item in self.citation_validations],
             "supplemental_retrieval_attempts": self.supplemental_retrieval_attempts,
             "citation_repair_attempts": self.citation_repair_attempts,
         }
@@ -122,19 +190,19 @@ class _WorkflowCancellation(Exception):
 
 
 class WorkflowRetrieval(Protocol):
-    async def resolve_query(
+    async def resolve_plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str: ...
+    ) -> RetrievalPlan: ...
 
     async def search(
         self,
         *,
         knowledge_base_id: UUID,
-        query: str,
-    ) -> list[RetrievedEvidence]: ...
+        queries: Sequence[str],
+    ) -> RetrievalResult: ...
 
 
 class WorkflowRunControl(Protocol):
@@ -150,7 +218,7 @@ class _WorkflowState(TypedDict, total=False):
     knowledge_base_id: UUID
     question: str
     recent_questions: Sequence[str]
-    retrieval_query: str
+    retrieval_plan: RetrievalPlan
     evidence: list[RetrievedEvidence]
     supplemental_attempts: int
     supplemental_query: str
@@ -246,25 +314,31 @@ class AnswerWorkflow:
     async def _analyze(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="analyzing"))
-        query = await self._retrieval.resolve_query(
+        plan = await self._retrieval.resolve_plan(
             question=state["question"],
             recent_questions=state["recent_questions"],
         )
-        if not await self._run_control.record_retrieval_query(state["run_id"], query):
+        if not await self._run_control.record_retrieval_query(state["run_id"], plan.queries[0]):
             raise _WorkflowCancellation
-        trace = WorkflowTrace(retrieval_queries=(query,))
+        trace = WorkflowTrace(
+            retrieval_plan_version=plan.version,
+            retrieval_queries=plan.queries,
+        )
         await self._record_trace(state["run_id"], trace)
-        return _WorkflowState(retrieval_query=query, workflow_trace=trace)
+        return _WorkflowState(retrieval_plan=plan, workflow_trace=trace)
 
     async def _retrieve(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="retrieving"))
-        evidence = await self._retrieval.search(
+        result = await self._retrieval.search(
             knowledge_base_id=state["knowledge_base_id"],
-            query=state["retrieval_query"],
+            queries=state["retrieval_plan"].queries,
         )
+        trace = self._with_retrieval_round(state["workflow_trace"], result)
+        await self._record_trace(state["run_id"], trace)
         return _WorkflowState(
-            evidence=[item for item in evidence if item.score >= self._minimum_score]
+            evidence=[item for item in result.evidence if item.score >= self._minimum_score],
+            workflow_trace=trace,
         )
 
     async def _assess(self, state: _WorkflowState) -> _WorkflowState:
@@ -273,12 +347,14 @@ class AnswerWorkflow:
         candidates = self._candidates(state["run_id"], state["evidence"])
         decision = await self._assessor.assess(
             question=state["question"],
-            query=state["retrieval_query"],
+            queries=state["retrieval_plan"].queries,
             evidence=candidates,
-            supplemental_allowed=state["supplemental_attempts"] == 0,
+            supplemental_allowed=(
+                state["supplemental_attempts"] == 0 and len(state["retrieval_plan"].queries) < 3
+            ),
         )
-        trace = WorkflowTrace(
-            retrieval_queries=state["workflow_trace"].retrieval_queries,
+        trace = replace(
+            state["workflow_trace"],
             assessments=(
                 *state["workflow_trace"].assessments,
                 EvidenceAssessmentTrace(
@@ -287,11 +363,6 @@ class AnswerWorkflow:
                     supplemental_query=decision.supplemental_query,
                 ),
             ),
-            citation_validations=state["workflow_trace"].citation_validations,
-            supplemental_retrieval_attempts=(
-                state["workflow_trace"].supplemental_retrieval_attempts
-            ),
-            citation_repair_attempts=state["workflow_trace"].citation_repair_attempts,
         )
         await self._record_trace(state["run_id"], trace)
         selected_ids = set(decision.selected_chunk_ids)
@@ -306,9 +377,11 @@ class AnswerWorkflow:
         if decision.sufficient and len(selected) >= self._minimum_evidence:
             return _WorkflowState(selected_evidence=selected, workflow_trace=trace)
         supplemental_query = (decision.supplemental_query or "").strip()
-        if state["supplemental_attempts"] == 0 and supplemental_query:
+        expanded_plan = state["retrieval_plan"].with_additional_query(supplemental_query)
+        if state["supplemental_attempts"] == 0 and expanded_plan is not None:
             return _WorkflowState(
                 supplemental_query=supplemental_query,
+                retrieval_plan=expanded_plan,
                 workflow_trace=trace,
             )
         return self._refusal_state(
@@ -320,28 +393,18 @@ class AnswerWorkflow:
     async def _retrieve_supplemental(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="retrieving"))
-        trace = WorkflowTrace(
-            retrieval_queries=(
-                *state["workflow_trace"].retrieval_queries,
-                state["supplemental_query"],
-            ),
-            assessments=state["workflow_trace"].assessments,
-            citation_validations=state["workflow_trace"].citation_validations,
+        result = await self._retrieval.search(
+            knowledge_base_id=state["knowledge_base_id"],
+            queries=state["retrieval_plan"].queries,
+        )
+        trace = replace(
+            self._with_retrieval_round(state["workflow_trace"], result),
+            retrieval_queries=state["retrieval_plan"].queries,
             supplemental_retrieval_attempts=1,
-            citation_repair_attempts=state["workflow_trace"].citation_repair_attempts,
         )
         await self._record_trace(state["run_id"], trace)
-        supplemental = await self._retrieval.search(
-            knowledge_base_id=state["knowledge_base_id"],
-            query=state["supplemental_query"],
-        )
-        by_chunk_id = {item.chunk_id: item for item in state["evidence"]}
-        by_chunk_id.update(
-            {item.chunk_id: item for item in supplemental if item.score >= self._minimum_score}
-        )
         return _WorkflowState(
-            retrieval_query=state["supplemental_query"],
-            evidence=list(by_chunk_id.values()),
+            evidence=[item for item in result.evidence if item.score >= self._minimum_score],
             supplemental_attempts=1,
             workflow_trace=trace,
         )
@@ -379,17 +442,12 @@ class AnswerWorkflow:
         cited = _CITATION_LABEL.findall(state["answer"])
         issue = self._citation_validation_issue(state["answer"], set(allowed))
         citation_valid = issue == "valid"
-        trace = WorkflowTrace(
-            retrieval_queries=state["workflow_trace"].retrieval_queries,
-            assessments=state["workflow_trace"].assessments,
+        trace = replace(
+            state["workflow_trace"],
             citation_validations=(
                 *state["workflow_trace"].citation_validations,
                 CitationValidationTrace(valid=citation_valid, issue=issue),
             ),
-            supplemental_retrieval_attempts=(
-                state["workflow_trace"].supplemental_retrieval_attempts
-            ),
-            citation_repair_attempts=state["workflow_trace"].citation_repair_attempts,
         )
         await self._record_trace(state["run_id"], trace)
         if not citation_valid and state["repair_attempts"] >= 1:
@@ -411,13 +469,8 @@ class AnswerWorkflow:
     async def _repair_citations(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="repairing"))
-        trace = WorkflowTrace(
-            retrieval_queries=state["workflow_trace"].retrieval_queries,
-            assessments=state["workflow_trace"].assessments,
-            citation_validations=state["workflow_trace"].citation_validations,
-            supplemental_retrieval_attempts=(
-                state["workflow_trace"].supplemental_retrieval_attempts
-            ),
+        trace = replace(
+            state["workflow_trace"],
             citation_repair_attempts=1,
         )
         await self._record_trace(state["run_id"], trace)
@@ -486,6 +539,45 @@ class AnswerWorkflow:
     async def _record_trace(self, run_id: UUID, trace: WorkflowTrace) -> None:
         if not await self._run_control.record_workflow_trace(run_id, trace):
             raise _WorkflowCancellation
+
+    @staticmethod
+    def _with_retrieval_round(
+        trace: WorkflowTrace,
+        result: RetrievalResult,
+    ) -> WorkflowTrace:
+        retrieval_round = RetrievalRoundTrace(
+            round_number=len(trace.retrieval_rounds) + 1,
+            queries=tuple(item.query for item in result.query_results),
+            query_results=tuple(
+                QueryRetrievalTrace(
+                    query=item.query,
+                    candidates=tuple(
+                        RetrievalCandidateTrace(
+                            chunk_id=str(candidate.evidence.chunk_id),
+                            raw_rank=candidate.rank,
+                            raw_cosine_score=candidate.evidence.score,
+                        )
+                        for candidate in item.candidates
+                    ),
+                )
+                for item in result.query_results
+            ),
+            fused_candidates=tuple(
+                FusedCandidateTrace(
+                    chunk_id=str(item.evidence.chunk_id),
+                    fused_score=item.fused_score,
+                    best_raw_cosine_score=item.best_raw_score,
+                    selected_as_primary=item.selected_as_primary,
+                )
+                for item in result.fused_candidates
+            ),
+            final_evidence_chunk_ids=tuple(str(item.chunk_id) for item in result.evidence),
+            rrf_rank_constant=result.rrf_rank_constant,
+        )
+        return replace(
+            trace,
+            retrieval_rounds=(*trace.retrieval_rounds, retrieval_round),
+        )
 
     @staticmethod
     def _citation_validation_issue(

@@ -18,10 +18,9 @@ class EvidenceDecision:
     supplemental_query: str | None
 
 
-class Retriever(Protocol):
-    async def search(
-        self, *, knowledge_base_id: str, query: str
-    ) -> Sequence[RetrievalCandidate]: ...
+@dataclass(frozen=True, slots=True)
+class RetrievalPlanProposal:
+    additional_queries: tuple[str, ...]
 
 
 class AnswerGenerator(Protocol):
@@ -35,7 +34,7 @@ class EvidenceAssessor(Protocol):
         self,
         *,
         question: str,
-        query: str,
+        queries: Sequence[str],
         evidence: Sequence[RetrievalCandidate],
         supplemental_allowed: bool,
     ) -> EvidenceDecision: ...
@@ -51,13 +50,13 @@ class CitationRepairer(Protocol):
     ) -> str: ...
 
 
-class QuestionRewriter(Protocol):
-    async def rewrite(
+class QuestionPlanner(Protocol):
+    async def plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str: ...
+    ) -> RetrievalPlanProposal: ...
 
 
 class EmbeddingProvider(Protocol):

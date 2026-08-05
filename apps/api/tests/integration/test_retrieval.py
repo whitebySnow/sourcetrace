@@ -12,31 +12,42 @@ from sourcetrace.modules.knowledge_bases.repository import KnowledgeBaseReposito
 from sourcetrace.modules.knowledge_bases.service import KnowledgeBaseService
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
 from sourcetrace.modules.retrieval.service import RetrievalService
+from sourcetrace.rag.ports import RetrievalPlanProposal
 
 
 class QueryEmbeddingProvider:
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
-        assert texts == ["How are vectors normalized?"]
+        assert list(texts) == ["How are vectors normalized?"]
         return [_vector(1.0, 0.0)]
 
 
-class RecordingQuestionRewriter:
+class MultiQueryEmbeddingProvider:
+    async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+        assert list(texts) == ["first concept", "second concept"]
+        return [_vector(1.0, 0.0), _vector(0.0, 1.0)]
+
+
+class RecordingQuestionPlanner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str]]] = []
 
-    async def rewrite(
+    async def plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str:
+    ) -> RetrievalPlanProposal:
         self.calls.append((question, list(recent_questions)))
-        return "How does cosine normalization work?"
+        if question == "How does that work?":
+            return RetrievalPlanProposal(
+                additional_queries=("How does cosine normalization work?",)
+            )
+        return RetrievalPlanProposal(additional_queries=())
 
 
-class UnusedQuestionRewriter:
-    async def rewrite(self, **kwargs: object) -> str:
-        raise AssertionError("question rewriting must not start")
+class UnusedQuestionPlanner:
+    async def plan(self, **kwargs: object) -> RetrievalPlanProposal:
+        raise AssertionError("query planning must not start")
 
 
 def _vector(first: float, second: float) -> list[float]:
@@ -185,14 +196,15 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
     service = RetrievalService(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
-        question_rewriter=UnusedQuestionRewriter(),
+        question_planner=UnusedQuestionPlanner(),
         top_k=8,
     )
 
-    evidence = await service.search(
+    result = await service.search(
         knowledge_base_id=research.id,
-        query="How are vectors normalized?",
+        queries=("How are vectors normalized?",),
     )
+    evidence = result.evidence
 
     assert [item.text for item in evidence] == [
         "Current normalization guidance",
@@ -208,29 +220,92 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
     assert evidence[0].score > evidence[1].score
 
 
-async def test_retrieval_service_owns_follow_up_query_resolution(
+async def test_multi_query_rrf_uses_independent_pgvector_rankings_and_stable_ties(
     session: AsyncSession,
 ) -> None:
-    rewriter = RecordingQuestionRewriter()
+    knowledge_bases = KnowledgeBaseService(KnowledgeBaseRepository(session))
+    target = await knowledge_bases.create("Multi-query target")
+    private = await knowledge_bases.create("Multi-query private")
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=target.id,
+        file_name="first.pdf",
+        checksum="5" * 64,
+        text="First concept evidence",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=target.id,
+        file_name="second.pdf",
+        checksum="6" * 64,
+        text="Second concept evidence",
+        page_number=2,
+        embedding=_vector(0.0, 1.0),
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=private.id,
+        file_name="private.pdf",
+        checksum="7" * 64,
+        text="Private evidence",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+    )
+    service = RetrievalService(
+        repository=PgVectorRetrievalRepository(session),
+        embedding_provider=MultiQueryEmbeddingProvider(),
+        question_planner=UnusedQuestionPlanner(),
+        top_k=8,
+        rrf_rank_constant=60,
+    )
+
+    result = await service.search(
+        knowledge_base_id=target.id,
+        queries=("first concept", "second concept"),
+    )
+
+    assert result.query_results[0].candidates[0].evidence.text == ("First concept evidence")
+    assert result.query_results[1].candidates[0].evidence.text == ("Second concept evidence")
+    assert {item.text for item in result.primary_evidence} == {
+        "First concept evidence",
+        "Second concept evidence",
+    }
+    assert all(item.document_name != "private.pdf" for item in result.evidence)
+    assert [item.chunk_id for item in result.primary_evidence] == sorted(
+        (item.chunk_id for item in result.primary_evidence),
+        key=str,
+    )
+
+
+async def test_retrieval_service_owns_bounded_query_plan_resolution(
+    session: AsyncSession,
+) -> None:
+    planner = RecordingQuestionPlanner()
     service = RetrievalService(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
-        question_rewriter=rewriter,
+        question_planner=planner,
         top_k=8,
     )
 
-    direct_query = await service.resolve_query(
+    direct_plan = await service.resolve_plan(
         question="How are vectors normalized?",
         recent_questions=[],
     )
-    follow_up_query = await service.resolve_query(
+    follow_up_plan = await service.resolve_plan(
         question="How does that work?",
         recent_questions=["What is cosine similarity?"],
     )
 
-    assert direct_query == "How are vectors normalized?"
-    assert follow_up_query == "How does cosine normalization work?"
-    assert rewriter.calls == [
+    assert direct_plan.queries == ("How are vectors normalized?",)
+    assert follow_up_plan.queries == (
+        "How does that work?",
+        "How does cosine normalization work?",
+    )
+    assert planner.calls == [
+        ("How are vectors normalized?", []),
         ("How does that work?", ["What is cosine similarity?"]),
     ]
 
@@ -265,14 +340,15 @@ async def test_retrieval_can_be_pinned_to_an_exact_document_version_snapshot(
             document_version_ids=(old_version_id,),
         ),
         embedding_provider=QueryEmbeddingProvider(),
-        question_rewriter=UnusedQuestionRewriter(),
+        question_planner=UnusedQuestionPlanner(),
         top_k=8,
     )
 
-    evidence = await service.search(
+    result = await service.search(
         knowledge_base_id=knowledge_base.id,
-        query="How are vectors normalized?",
+        queries=("How are vectors normalized?",),
     )
+    evidence = result.evidence
 
     assert [item.document_version_id for item in evidence] == [old_version_id]
     assert [item.text for item in evidence] == ["Reviewed snapshot evidence"]
@@ -307,15 +383,16 @@ async def test_retrieval_expands_a_top_ranked_chunk_with_its_page_neighbor(
     service = RetrievalService(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
-        question_rewriter=UnusedQuestionRewriter(),
+        question_planner=UnusedQuestionPlanner(),
         top_k=8,
         page_neighbor_count=1,
     )
 
-    evidence = await service.search(
+    result = await service.search(
         knowledge_base_id=knowledge_base.id,
-        query="How are vectors normalized?",
+        queries=("How are vectors normalized?",),
     )
+    evidence = result.evidence
 
     assert len(evidence) == 9
     assert evidence[0].text == "Top ranked context"
@@ -340,24 +417,22 @@ async def test_retrieval_primary_candidates_prefer_distinct_document_pages(
         page_number=1,
         embedding=_vector(1.0, 0.0),
         additional_page_chunks=tuple(
-            (f"Same-page candidate {index}", _vector(0.99, 0.1))
-            for index in range(7)
+            (f"Same-page candidate {index}", _vector(0.99, 0.1)) for index in range(7)
         ),
-        additional_chunks=(
-            (2, "Relevant evidence on another page", _vector(0.9, 0.435)),
-        ),
+        additional_chunks=((2, "Relevant evidence on another page", _vector(0.9, 0.435)),),
     )
     service = RetrievalService(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
-        question_rewriter=UnusedQuestionRewriter(),
+        question_planner=UnusedQuestionPlanner(),
         top_k=8,
     )
 
-    evidence = await service.search(
+    result = await service.search(
         knowledge_base_id=knowledge_base.id,
-        query="How are vectors normalized?",
+        queries=("How are vectors normalized?",),
     )
+    evidence = result.evidence
 
     assert len(evidence) == 8
     assert [item.page_number for item in evidence[:2]] == [1, 2]

@@ -10,6 +10,26 @@
           "title": "Retrievals",
           "type": "array"
         },
+        "retrieval_plan_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieval Plan Version"
+        },
+        "retrieval_rounds": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObservedRetrievalRoundTrace"
+          },
+          "title": "Retrieval Rounds",
+          "type": "array"
+        },
         "assessments": {
           "items": {
             "$ref": "#/$defs/ObservedEvidenceAssessment"
@@ -197,6 +217,90 @@
       "title": "ObservedEvidenceAssessment",
       "type": "object"
     },
+    "ObservedFusedCandidateTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "fused_score": {
+          "exclusiveMinimum": 0,
+          "title": "Fused Score",
+          "type": "number"
+        },
+        "best_raw_cosine_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Best Raw Cosine Score",
+          "type": "number"
+        },
+        "selected_as_primary": {
+          "title": "Selected As Primary",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "fused_score",
+        "best_raw_cosine_score",
+        "selected_as_primary"
+      ],
+      "title": "ObservedFusedCandidateTrace",
+      "type": "object"
+    },
+    "ObservedQueryCandidateTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "raw_rank": {
+          "exclusiveMinimum": 0,
+          "title": "Raw Rank",
+          "type": "integer"
+        },
+        "raw_cosine_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Raw Cosine Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "raw_rank",
+        "raw_cosine_score"
+      ],
+      "title": "ObservedQueryCandidateTrace",
+      "type": "object"
+    },
+    "ObservedQueryRetrievalTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/ObservedQueryCandidateTrace"
+          },
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "candidates"
+      ],
+      "title": "ObservedQueryRetrievalTrace",
+      "type": "object"
+    },
     "ObservedRetrieval": {
       "additionalProperties": false,
       "properties": {
@@ -243,6 +347,19 @@
           "minimum": -1,
           "title": "Score",
           "type": "number"
+        },
+        "raw_rank": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Rank"
         }
       },
       "required": [
@@ -252,6 +369,63 @@
         "score"
       ],
       "title": "ObservedRetrievalCandidate",
+      "type": "object"
+    },
+    "ObservedRetrievalRoundTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "round_number": {
+          "exclusiveMinimum": 0,
+          "maximum": 2,
+          "title": "Round Number",
+          "type": "integer"
+        },
+        "queries": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Queries",
+          "type": "array"
+        },
+        "query_results": {
+          "items": {
+            "$ref": "#/$defs/ObservedQueryRetrievalTrace"
+          },
+          "title": "Query Results",
+          "type": "array"
+        },
+        "fused_candidates": {
+          "items": {
+            "$ref": "#/$defs/ObservedFusedCandidateTrace"
+          },
+          "title": "Fused Candidates",
+          "type": "array"
+        },
+        "final_evidence_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Final Evidence Chunk Ids",
+          "type": "array"
+        },
+        "rrf_rank_constant": {
+          "exclusiveMinimum": 0,
+          "title": "Rrf Rank Constant",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "round_number",
+        "queries",
+        "query_results",
+        "fused_candidates",
+        "final_evidence_chunk_ids",
+        "rrf_rank_constant"
+      ],
+      "title": "ObservedRetrievalRoundTrace",
       "type": "object"
     }
   },
