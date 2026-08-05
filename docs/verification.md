@@ -207,6 +207,19 @@ report SHA-256 为 `70bdb2f3d9b92a10e6150bace7873cd33c3009c261bf2986484582cc8c5f
 泛化为产品准确率，也不能单独证明 DeepSeek 优于其他模型。当前仍有 8 个应回答样本未通过
 检索召回，另有已生成回答未满足版本化预期证据覆盖，后续应继续按失败类型分别诊断。
 
+### Issue #37 页多样性候选选择
+
+2026-08-05 使用提交 `434e84f`、同一 `agentic-rag-foundations-v1` 数据集、数据库快照和本地
+BGE-M3，对原始 DeepSeek 报告中已记录的初始与补充检索查询执行纯检索 A/B 重放。旧
+`pgvector-cosine-page-context-v2` 路径得到 19 passed、8 failed、3 not applicable，精确复现
+原报告的检索维度；新 `pgvector-cosine-page-diverse-v3` 路径得到 21 passed、6 failed、
+3 not applicable。只有 `ARF-006` 和 `ARF-015` 从 failed 变为 passed，其余 case 的检索状态
+不变。
+
+该重放固定使用既有报告中的查询，不调用 LLM，也不重新执行证据判断、生成、引用校验或拒答
+流程。因此它只证明页多样性候选选择在该固定查询集合上消除了两次同页候选挤占，没有证明
+端到端效果提升，也不能替代下一次真实供应商评测或用于更新简历指标。
+
 ## 6. 后续评测工作
 
 1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
