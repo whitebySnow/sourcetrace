@@ -7,6 +7,7 @@ from sourcetrace.rag.ports import EmbeddingProvider, QuestionRewriter
 
 _PAGE_DIVERSITY_POOL_MULTIPLIER = 4
 _MAX_CANDIDATE_POOL_SIZE = 100
+_MAX_PRIMARY_CANDIDATES = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,8 @@ class RetrievalService:
     ) -> None:
         if top_k <= 0:
             raise ValueError("retrieval top_k must be positive")
+        if top_k > _MAX_PRIMARY_CANDIDATES:
+            raise ValueError("retrieval top_k must be at most 8")
         if page_neighbor_count < 0:
             raise ValueError("retrieval page neighbor count must not be negative")
         self._repository = repository
