@@ -558,6 +558,37 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     assert "[citation_id]" in payload["messages"][0]["content"]
 
 
+async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"answer":"Vectors are normalized [citation-1]"}'
+                                "\n\nThe citation has been repaired."
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+
+        answer = await repairer.repair(
+            question="How are vectors stored?",
+            answer="Vectors are normalized.",
+            evidence=_evidence(),
+        )
+
+    assert answer == "Vectors are normalized [citation-1]"
+
+
 async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
