@@ -398,9 +398,14 @@ async def _structured_completion(
 
 def _load_structured_json(content: str) -> Any:
     try:
-        return json.loads(content)
+        return _decode_first_json_value(content)
     except json.JSONDecodeError:
-        return json.loads(_escape_invalid_json_string_backslashes(content))
+        return _decode_first_json_value(_escape_invalid_json_string_backslashes(content))
+
+
+def _decode_first_json_value(content: str) -> Any:
+    value, _ = json.JSONDecoder().raw_decode(content.lstrip())
+    return value
 
 
 def _escape_invalid_json_string_backslashes(content: str) -> str:

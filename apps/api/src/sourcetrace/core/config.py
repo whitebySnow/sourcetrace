@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     llm_provider: str = "openai-compatible"
     llm_base_url: str = "https://api.example.com/v1"
     llm_api_key: SecretStr | None = None
-    llm_model: str = "gpt-5.6-luna"
+    llm_model: str = "deepseek-v4-flash"
     llm_timeout_seconds: float = Field(default=60, gt=0)
     llm_structured_output_mode: Literal["text", "json_object"] = "text"
     llm_structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"

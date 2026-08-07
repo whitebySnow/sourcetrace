@@ -49,7 +49,7 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-openai-compatible}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.example.com/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gpt-5.6-luna}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-sentence-transformers}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL_CONTAINER:-BAAI/bge-m3}
       EMBEDDING_MODEL_REVISION: ${EMBEDDING_MODEL_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
