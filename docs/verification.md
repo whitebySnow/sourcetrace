@@ -246,6 +246,33 @@ smoke 当作检索质量评测。
 本轮没有重新调用远程 LLM，也没有生成新的端到端 reviewed report。23/30 仍是固定候选离线检索
 结果，不得表述为线上回答准确率；生产接入后的完整 30 题真实供应商评测应作为后续独立任务。
 
+### Issue #46 生产 reranker 真实供应商评测
+
+2026-08-07 使用提交 `b87c635`、同一版本化数据集、本地 BGE-M3、生产
+`BAAI/bge-reranker-v2-m3` 和 `deepseek-v4-flash` 完成 30 题真实供应商评测。原始报告
+SHA-256 为 `f7737b7c5c11bb887bce644e71c15f1cecca780105f054cd948a5e0e28ec9b66`。
+报告记录 35 个检索轮次和 1192 个融合候选；每个轮次均包含固定 reranker identity，所有候选
+均包含 reranker score 和 reranked rank。生产检索结果与 Issue #41 的固定候选 reranked 结果
+一致，没有新增检索通过项或退化项。
+
+用户逐条审核全部 9 个待审样本 `ARF-002`、`ARF-003`、`ARF-005`、`ARF-007`、`ARF-010`、
+`ARF-011`、`ARF-014`、`ARF-018` 和 `ARF-019`，均判定通过。版本化 judgment 位于
+`evals/judgments/agentic-rag-foundations-v1-b87c635-deepseek-v4-flash-production-reranker.json`；
+绑定后的 reviewed report SHA-256 为
+`a6a19a9df04665af646993b587726272c582b8eba5eded973010885f304dcc7e`。
+
+| 维度 | 结果 |
+|---|---|
+| 检索 | 23 passed，4 failed，3 not applicable |
+| 引用 | 9 passed，18 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 12 passed，18 failed，0 pending review |
+
+本轮同时改变了生产检索排序、回答模型和结构化响应兼容处理，不是与旧报告的单变量 A/B
+对照。它验证了离线 reranker 结果可以在生产回答链路中重放，但 4 个应回答样本仍未通过检索，
+另有多项在引用或回答阶段失败。因此该结果不能泛化为产品准确率，也不能证明 Flash 优于 Pro。
+原始和 reviewed case 级报告继续保留在被 Git 忽略的 `output/evals/`，不提交论文摘录或模型输出。
+
 1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
 2. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
 3. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。

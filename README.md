@@ -101,8 +101,8 @@ data/uploads/     本地开发上传目录，不提交用户文件
 仓库同时提供版本化评测数据契约、确定性离线重放和必须显式确认的真实供应商评测入口，
 分别输出检索、引用、拒答和端到端结果。`evals/datasets/agentic-rag-foundations-v1.json`
 包含首个由用户逐条审核的 30 条正式评测样本。该数据集已在多个固定代码和模型配置上完成
-真实供应商评测及回答结果的二次人工审核；最新正式记录使用提交 `285a06d`、
-`deepseek-v4-pro` 与本地 BGE-M3，详见 `docs/verification.md`。业务功能按 `docs/roadmap.md`
+真实供应商评测及回答结果的二次人工审核；最新正式记录使用提交 `b87c635`、
+`deepseek-v4-flash`、本地 BGE-M3 与生产 BGE reranker，详见 `docs/verification.md`。业务功能按 `docs/roadmap.md`
 分阶段实现，效果数字必须同时注明数据集、提交和配置，不能把单次评测泛化为产品准确率。
 大模型或自动化代理开始修改前必须阅读
 [`AGENTS.md`](AGENTS.md)。
