@@ -13,7 +13,7 @@ def corpus_provenance() -> CorpusProvenance:
         chunk_overlap=80,
         chunking_version="token-window-v1",
         embedding_provider="sentence-transformers",
-        embedding_model="/models/huggingface/modelscope/BAAI/bge-m3",
+        embedding_model="/models/huggingface/BAAI/bge-m3",
         embedding_revision="test-revision",
         embedding_dimension=1024,
         embedding_version="bge-m3-dense-v1",
@@ -22,7 +22,7 @@ def corpus_provenance() -> CorpusProvenance:
 
 def test_embedding_replay_uses_current_runtime_path_for_the_same_model() -> None:
     settings = Settings(
-        embedding_model=r"D:\DevelopEnvironment\huggingface\modelscope\BAAI\bge-m3",
+        embedding_model=r"D:\DevelopEnvironment\huggingface\BAAI\bge-m3",
         embedding_model_revision="test-revision",
         embedding_dimension=1024,
         embedding_config_version="bge-m3-dense-v1",
@@ -35,7 +35,7 @@ def test_embedding_replay_uses_current_runtime_path_for_the_same_model() -> None
 
 def test_embedding_replay_rejects_a_different_runtime_revision() -> None:
     settings = Settings(
-        embedding_model=r"D:\DevelopEnvironment\huggingface\modelscope\BAAI\bge-m3",
+        embedding_model=r"D:\DevelopEnvironment\huggingface\BAAI\bge-m3",
         embedding_model_revision="different-revision",
         embedding_dimension=1024,
         embedding_config_version="bge-m3-dense-v1",

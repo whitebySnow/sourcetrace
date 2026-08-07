@@ -44,7 +44,7 @@ Hugging Face repository ID。
 容器。缓存挂载正确，但模型配置没有区分宿主机与容器命名空间。
 
 **修复**：增加 Compose 专用 `EMBEDDING_MODEL_CONTAINER`。默认使用 `BAAI/bge-m3`；复用
-ModelScope 完整目录时使用 `/models/huggingface/modelscope/BAAI/bge-m3`。宿主机仍使用
+ModelScope 完整目录时使用 `/models/huggingface/BAAI/bge-m3`。宿主机仍使用
 `EMBEDDING_MODEL`。
 
 **验证**：容器从挂载目录加载 BGE-M3，完成 embedding 并激活可检索版本，没有重新下载或把

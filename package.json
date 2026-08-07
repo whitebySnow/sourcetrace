@@ -13,6 +13,7 @@
     "generate:eval": "uv run --project apps/api --extra cpu python apps/api/scripts/export_evaluation_schemas.py",
     "eval:fake": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli fake --dataset evals/fixtures/dataset-v1.json --observations evals/fixtures/observations-v1.json --metadata evals/fixtures/metadata-v1.json --output output/evals/fixture-report.json",
     "eval:real": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli real",
+    "eval:rerank": "uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli rerank",
     "eval:review": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli review",
     "format": "uv run --project apps/api --extra cpu ruff format apps/api && pnpm --dir apps/web format",
     "check:cpu-deps": "python apps/api/scripts/verify_cpu_dependencies.py",

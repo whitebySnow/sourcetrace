@@ -5,7 +5,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sourcetrace.modules.documents.models import Chunk, DocumentVersion, IngestionRun
+from sourcetrace.modules.documents.models import Chunk, Document, DocumentVersion, IngestionRun
+from sourcetrace.modules.retrieval.service import RetrievedEvidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,3 +92,55 @@ class EvaluationCorpusRepository:
         if len(configurations) != 1:
             raise ValueError("evaluation snapshot must use the same ingestion configuration")
         return next(iter(configurations))
+
+    async def get_chunks(
+        self,
+        knowledge_base_id: UUID,
+        document_version_ids: Sequence[UUID],
+        chunk_ids: Sequence[UUID],
+    ) -> dict[UUID, RetrievedEvidence]:
+        requested_ids = set(chunk_ids)
+        if not requested_ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                select(
+                    Chunk.id.label("chunk_id"),
+                    Document.id.label("document_id"),
+                    DocumentVersion.id.label("document_version_id"),
+                    Document.name.label("document_name"),
+                    DocumentVersion.storage_key,
+                    Chunk.page_number,
+                    Chunk.text,
+                    Chunk.page_chunk_index,
+                )
+                .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
+                .join(Document, Document.id == DocumentVersion.document_id)
+                .where(
+                    Chunk.id.in_(requested_ids),
+                    DocumentVersion.id.in_(tuple(document_version_ids)),
+                    DocumentVersion.knowledge_base_id == knowledge_base_id,
+                    DocumentVersion.status == "completed",
+                    DocumentVersion.storage_key.is_not(None),
+                )
+            )
+        ).all()
+        chunks = {
+            row.chunk_id: RetrievedEvidence(
+                chunk_id=row.chunk_id,
+                document_id=row.document_id,
+                document_version_id=row.document_version_id,
+                document_name=row.document_name,
+                storage_key=row.storage_key,
+                page_number=row.page_number,
+                text=row.text,
+                score=0.0,
+                page_chunk_index=row.page_chunk_index,
+            )
+            for row in rows
+        }
+        if set(chunks) != requested_ids:
+            raise ValueError(
+                "every recorded reranker candidate must belong to the dataset snapshot"
+            )
+        return chunks

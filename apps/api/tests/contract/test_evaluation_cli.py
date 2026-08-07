@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from sourcetrace.evaluation.cli import main
+from sourcetrace.evaluation.models import RerankerEvaluationReport
 
 
 def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path) -> None:
@@ -193,6 +194,40 @@ def test_real_cli_requires_explicit_provider_confirmation() -> None:
         )
 
     assert error.value.code == 2
+
+
+def test_rerank_cli_requires_explicit_local_model_confirmation() -> None:
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "rerank",
+                "--dataset",
+                "reviewed-dataset.json",
+                "--report",
+                "baseline-report.json",
+                "--model",
+                "local-reranker",
+                "--model-revision",
+                "revision",
+                "--model-weight-sha256",
+                "a" * 64,
+                "--code-commit",
+                "abc123",
+                "--output",
+                "reranker-report.json",
+            ]
+        )
+
+    assert error.value.code == 2
+
+
+def test_repository_reranker_report_schema_matches_model() -> None:
+    root = Path(__file__).resolve().parents[4]
+    schema = json.loads(
+        (root / "evals/schema/reranker-report-v1.schema.json").read_text(encoding="utf-8")
+    )
+
+    assert schema == RerankerEvaluationReport.model_json_schema()
 
 
 def test_repository_fixture_replays_all_four_categories(tmp_path) -> None:

@@ -1,0 +1,340 @@
+{
+  "$defs": {
+    "EvaluationStatus": {
+      "enum": [
+        "passed",
+        "failed",
+        "pending_review",
+        "not_applicable"
+      ],
+      "type": "string"
+    },
+    "RerankedCandidateTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "baseline_rank": {
+          "exclusiveMinimum": 0,
+          "title": "Baseline Rank",
+          "type": "integer"
+        },
+        "reranked_rank": {
+          "exclusiveMinimum": 0,
+          "title": "Reranked Rank",
+          "type": "integer"
+        },
+        "baseline_selected": {
+          "title": "Baseline Selected",
+          "type": "boolean"
+        },
+        "reranked_selected": {
+          "title": "Reranked Selected",
+          "type": "boolean"
+        },
+        "fused_score": {
+          "exclusiveMinimum": 0,
+          "title": "Fused Score",
+          "type": "number"
+        },
+        "best_raw_cosine_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Best Raw Cosine Score",
+          "type": "number"
+        },
+        "reranker_score": {
+          "title": "Reranker Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "document_version_id",
+        "page_number",
+        "baseline_rank",
+        "reranked_rank",
+        "baseline_selected",
+        "reranked_selected",
+        "fused_score",
+        "best_raw_cosine_score",
+        "reranker_score"
+      ],
+      "title": "RerankedCandidateTrace",
+      "type": "object"
+    },
+    "RerankerCaseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "baseline_retrieval": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "reranked_retrieval": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "rerank_ms": {
+          "minimum": 0,
+          "title": "Rerank Ms",
+          "type": "number"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/RerankedCandidateTrace"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "selected_primary_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Selected Primary Chunk Ids",
+          "type": "array"
+        },
+        "expanded_evidence_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Expanded Evidence Chunk Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "case_id",
+        "baseline_retrieval",
+        "reranked_retrieval",
+        "rerank_ms",
+        "candidates",
+        "selected_primary_chunk_ids",
+        "expanded_evidence_chunk_ids"
+      ],
+      "title": "RerankerCaseResult",
+      "type": "object"
+    },
+    "RerankerEvaluationSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_passed": {
+          "minimum": 0,
+          "title": "Baseline Passed",
+          "type": "integer"
+        },
+        "reranked_passed": {
+          "minimum": 0,
+          "title": "Reranked Passed",
+          "type": "integer"
+        },
+        "not_applicable": {
+          "minimum": 0,
+          "title": "Not Applicable",
+          "type": "integer"
+        },
+        "improvements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Improvements",
+          "type": "array"
+        },
+        "regressions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Regressions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "baseline_passed",
+        "reranked_passed",
+        "not_applicable",
+        "improvements",
+        "regressions"
+      ],
+      "title": "RerankerEvaluationSummary",
+      "type": "object"
+    },
+    "RerankerRunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "code_commit": {
+          "minLength": 1,
+          "title": "Code Commit",
+          "type": "string"
+        },
+        "source_report_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Report Sha256",
+          "type": "string"
+        },
+        "dataset_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Dataset Sha256",
+          "type": "string"
+        },
+        "model_name": {
+          "minLength": 1,
+          "title": "Model Name",
+          "type": "string"
+        },
+        "model_revision": {
+          "minLength": 1,
+          "title": "Model Revision",
+          "type": "string"
+        },
+        "model_weight_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Weight Sha256",
+          "type": "string"
+        },
+        "device": {
+          "minLength": 1,
+          "title": "Device",
+          "type": "string"
+        },
+        "device_name": {
+          "minLength": 1,
+          "title": "Device Name",
+          "type": "string"
+        },
+        "torch_version": {
+          "minLength": 1,
+          "title": "Torch Version",
+          "type": "string"
+        },
+        "batch_size": {
+          "exclusiveMinimum": 0,
+          "title": "Batch Size",
+          "type": "integer"
+        },
+        "candidate_pool_version": {
+          "const": "final-fused-candidates-v1",
+          "default": "final-fused-candidates-v1",
+          "title": "Candidate Pool Version",
+          "type": "string"
+        },
+        "selection_version": {
+          "const": "cross-encoder-page-diverse-v1",
+          "default": "cross-encoder-page-diverse-v1",
+          "title": "Selection Version",
+          "type": "string"
+        },
+        "model_load_ms": {
+          "minimum": 0,
+          "title": "Model Load Ms",
+          "type": "number"
+        },
+        "total_rerank_ms": {
+          "minimum": 0,
+          "title": "Total Rerank Ms",
+          "type": "number"
+        },
+        "peak_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Peak Vram Mib"
+        }
+      },
+      "required": [
+        "code_commit",
+        "source_report_sha256",
+        "dataset_sha256",
+        "model_name",
+        "model_revision",
+        "model_weight_sha256",
+        "device",
+        "device_name",
+        "torch_version",
+        "batch_size",
+        "model_load_ms",
+        "total_rerank_ms"
+      ],
+      "title": "RerankerRunMetadata",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "knowledge_base_id": {
+      "format": "uuid",
+      "title": "Knowledge Base Id",
+      "type": "string"
+    },
+    "document_version_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Document Version Ids",
+      "type": "array"
+    },
+    "metadata": {
+      "$ref": "#/$defs/RerankerRunMetadata"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/RerankerCaseResult"
+      },
+      "title": "Cases",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/RerankerEvaluationSummary"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "knowledge_base_id",
+    "document_version_ids",
+    "metadata",
+    "cases",
+    "summary"
+  ],
+  "title": "RerankerEvaluationReport",
+  "type": "object"
+}
