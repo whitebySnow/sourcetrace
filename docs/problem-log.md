@@ -263,3 +263,20 @@ schema、证据白名单和引用确定性校验。首个 JSON 无效时仍执�
 `BAAI/bge-reranker-v2-m3` 和 `deepseek-v4-flash` 上连续运行两次 30 题规划与检索，两次均为
 24 passed、3 failed、3 not applicable；23 个基线通过项零回退，`ARF-030` 改善为通过。
 `ARF-023`、`ARF-024` 和 `ARF-026` 仍失败，后续不能靠放宽 Top 8、阈值或证据门禁处理。
+
+## 17. Dense 候选池无法召回 ARF-023 的精确反例证据
+
+**症状**：`bounded-counterexample-v3` 已把 30 题检索稳定到 24 passed，但 `ARF-023` 的目标
+第 11 页 chunk 在原问题和有界补充查询的 dense Top 32 中都不存在。生产 reranker 只能重排
+已有候选，因此无法恢复该证据。
+
+**离线处理**：新增只用于评测的 PostgreSQL `english` 全文检索通道。检索词和连续短语窗口
+只由版本化问题与补充查询生成；lexical 与 dense 各自保持 Top 32，再以确定性 RRF 融合并复用
+生产 reranker、页面多样性、最终 Top 8、最低 cosine 阈值和邻居扩展。实验不接入在线
+`RetrievalService`，不创建索引，也不调用远程 LLM。
+
+**验证**：固定目标 chunk 从 dense 未命中变为 lexical 第 13、融合第 26、reranker 第 4并进入
+主证据。全量检索从 24 passed、3 failed、3 not applicable 变为 25 passed、2 failed、
+3 not applicable；只改善 `ARF-023`，无通过项退化。两次完整报告 SHA-256 均为
+`7ac146d150b9d9413aae577f74471a0b3dbe221044fbc31abd8bca1cc373885c`。这支持另开生产接入
+Issue，但不能表述为线上回答准确率提升；`ARF-024` 和 `ARF-026` 仍需文档范围的多证据规划。
