@@ -184,7 +184,7 @@ class RetrievalService:
             query_results,
             rank_constant=self._rrf_rank_constant,
         )
-        primary = _select_page_diverse(
+        primary = select_page_diverse(
             [item.evidence for item in fused],
             limit=self._top_k,
         )
@@ -269,7 +269,7 @@ def _fuse_ranked_candidates(
     )
 
 
-def _select_page_diverse(
+def select_page_diverse(
     evidence: Sequence[RetrievedEvidence],
     *,
     limit: int,

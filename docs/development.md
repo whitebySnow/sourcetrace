@@ -114,7 +114,7 @@ HF_CACHE_HOST_PATH=D:\DevelopEnvironment\huggingface
 
 ```dotenv
 HF_CACHE_HOST_PATH=D:\DevelopEnvironment\huggingface
-EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
+EMBEDDING_MODEL_CONTAINER=/models/huggingface/BAAI/bge-m3
 ```
 
 默认配置优先使用 `https://hf-mirror.com`。网络环境允许直连 Hugging Face 时，将
@@ -207,6 +207,28 @@ BGE-M3、pgvector 和 `AnswerWorkflow`，但检索只允许数据集声明的不
 禁止把旧结论套到新一轮模型输出。
 基础设施
 错误会终止评测，不能被统计为回答失败。完整参数和数据审核规则见 `evals/README.md`。
+
+离线 reranker 实验只消费既有真实报告最后一轮的融合候选 Chunk ID，并从报告绑定的数据库
+快照读取候选文本和同页邻居。它不重新执行向量检索、不调用 LLM，也不改变线上
+`RetrievalService`。命令必须显式传入 Dataset、基线 Report、模型 revision、权重 SHA-256、
+代码提交和 `--confirm-local-model`：
+
+```powershell
+pnpm eval:rerank -- `
+  --dataset evals/datasets/agentic-rag-foundations-v1.json `
+  --report output/evals/<baseline-report>.json `
+  --model D:\DevelopEnvironment\huggingface\BAAI\bge-reranker-v2-m3 `
+  --model-revision <model-revision> `
+  --model-weight-sha256 <sha256> `
+  --code-commit <git-commit> `
+  --device cuda `
+  --batch-size 8 `
+  --output output/evals/<reranker-report>.json `
+  --confirm-local-model
+```
+
+输出只记录候选 ID、页码、排名和分数，不复制候选正文。实验通过仅说明固定候选池上的排序
+值得继续验证；在同步更新规格、架构和独立 Issue 前，不得把 reranker 接入生产问答链路。
 
 ## API 与错误
 

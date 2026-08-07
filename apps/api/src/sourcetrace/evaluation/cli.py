@@ -41,6 +41,22 @@ def _parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--dataset", type=Path, required=True)
     diagnose.add_argument("--report", type=Path, required=True)
     diagnose.add_argument("--output", type=Path, required=True)
+    rerank = subparsers.add_parser("rerank")
+    rerank.add_argument("--dataset", type=Path, required=True)
+    rerank.add_argument("--report", type=Path, required=True)
+    rerank.add_argument("--model", type=Path, required=True)
+    rerank.add_argument("--model-revision", required=True)
+    rerank.add_argument("--model-weight-sha256", required=True)
+    rerank.add_argument("--code-commit", required=True)
+    rerank.add_argument("--device", default="cuda")
+    rerank.add_argument("--batch-size", type=int, default=8)
+    rerank.add_argument("--output", type=Path, required=True)
+    rerank.add_argument(
+        "--confirm-local-model",
+        action="store_true",
+        required=True,
+        help="confirm that this command may use the database and local reranker model",
+    )
     return parser
 
 
@@ -66,6 +82,30 @@ async def _run_real(args: argparse.Namespace) -> None:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
+async def _run_rerank(args: argparse.Namespace) -> None:
+    from sourcetrace.evaluation.reranker_real import run_real_reranker_evaluation
+
+    dataset_bytes = args.dataset.read_bytes()
+    report_bytes = args.report.read_bytes()
+    reranker_report = await run_real_reranker_evaluation(
+        load_dataset(args.dataset),
+        load_report(args.report),
+        dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(),
+        source_report_sha256=hashlib.sha256(report_bytes).hexdigest(),
+        code_commit=args.code_commit,
+        model=args.model,
+        model_revision=args.model_revision,
+        model_weight_sha256=args.model_weight_sha256,
+        device=args.device,
+        batch_size=args.batch_size,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        reranker_report.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _run_review(args: argparse.Namespace) -> None:
@@ -104,6 +144,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.mode == "diagnose-retrieval":
         _run_diagnose_retrieval(args)
+        return 0
+    if args.mode == "rerank":
+        asyncio.run(_run_rerank(args))
         return 0
     raise AssertionError("unreachable evaluation mode")
 

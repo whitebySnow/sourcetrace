@@ -56,6 +56,7 @@ pnpm build        # 构建前端
 pnpm generate:api # 从 FastAPI 重新生成前端 OpenAPI 类型
 pnpm generate:eval # 重新生成评测 JSON Schema
 pnpm eval:fake    # 离线重放四类确定性评测 fixture
+pnpm eval:rerank  # 对既有真实报告的固定候选池运行本地 reranker 实验
 pnpm eval:review  # 将绑定报告摘要的人工 judgment 应用到既有报告
 ```
 

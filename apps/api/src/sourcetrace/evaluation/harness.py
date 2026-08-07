@@ -30,7 +30,7 @@ class EvaluationHarness:
         results: list[CaseEvaluationResult] = []
         for case in dataset.cases:
             observation = await subject.evaluate(case)
-            retrieval = self._retrieval_status(
+            retrieval = self.retrieval_status(
                 case.expected.evidence,
                 observation.retrieved_evidence,
             )
@@ -81,14 +81,14 @@ class EvaluationHarness:
         )
 
     @staticmethod
-    def _retrieval_status(
+    def retrieval_status(
         expected: list[EvidenceReference],
         observed: tuple[ObservedEvidence, ...],
     ) -> EvaluationStatus:
         if not expected:
             return "not_applicable"
         matches = all(
-            any(EvaluationHarness._matches(reference, actual) for actual in observed)
+            any(EvaluationHarness.matches(reference, actual) for actual in observed)
             for reference in expected
         )
         return "passed" if matches else "failed"
@@ -103,13 +103,13 @@ class EvaluationHarness:
         if not observed:
             return "failed"
         matches = all(
-            any(EvaluationHarness._matches(reference, actual) for actual in observed)
+            any(EvaluationHarness.matches(reference, actual) for actual in observed)
             for reference in expected
         )
         return "passed" if matches else "failed"
 
     @staticmethod
-    def _matches(reference: EvidenceReference, actual: ObservedEvidence) -> bool:
+    def matches(reference: EvidenceReference, actual: ObservedEvidence) -> bool:
         return (
             actual.document_version_id == reference.document_version_id
             and actual.page_number == reference.page_number

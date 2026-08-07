@@ -298,3 +298,63 @@ class RetrievalDiagnosticsReport(StrictModel):
     dataset_version: str = Field(min_length=1)
     report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     cases: tuple[RetrievalCaseDiagnostic, ...]
+
+
+class RerankerRunMetadata(StrictModel):
+    code_commit: str = Field(min_length=1)
+    source_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    model_name: str = Field(min_length=1)
+    model_revision: str = Field(min_length=1)
+    model_weight_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    device: str = Field(min_length=1)
+    device_name: str = Field(min_length=1)
+    torch_version: str = Field(min_length=1)
+    batch_size: int = Field(gt=0)
+    candidate_pool_version: Literal["final-fused-candidates-v1"] = "final-fused-candidates-v1"
+    selection_version: Literal["cross-encoder-page-diverse-v1"] = "cross-encoder-page-diverse-v1"
+    model_load_ms: float = Field(ge=0)
+    total_rerank_ms: float = Field(ge=0)
+    peak_vram_mib: float | None = Field(default=None, ge=0)
+
+
+class RerankedCandidateTrace(StrictModel):
+    chunk_id: UUID
+    document_version_id: UUID
+    page_number: int = Field(ge=1)
+    baseline_rank: int = Field(gt=0)
+    reranked_rank: int = Field(gt=0)
+    baseline_selected: bool
+    reranked_selected: bool
+    fused_score: float = Field(gt=0)
+    best_raw_cosine_score: float = Field(ge=-1, le=1)
+    reranker_score: float
+
+
+class RerankerCaseResult(StrictModel):
+    case_id: str = Field(min_length=1)
+    baseline_retrieval: EvaluationStatus
+    reranked_retrieval: EvaluationStatus
+    rerank_ms: float = Field(ge=0)
+    candidates: tuple[RerankedCandidateTrace, ...]
+    selected_primary_chunk_ids: tuple[UUID, ...]
+    expanded_evidence_chunk_ids: tuple[UUID, ...]
+
+
+class RerankerEvaluationSummary(StrictModel):
+    baseline_passed: int = Field(ge=0)
+    reranked_passed: int = Field(ge=0)
+    not_applicable: int = Field(ge=0)
+    improvements: tuple[str, ...]
+    regressions: tuple[str, ...]
+
+
+class RerankerEvaluationReport(StrictModel):
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    knowledge_base_id: UUID
+    document_version_ids: list[UUID]
+    metadata: RerankerRunMetadata
+    cases: tuple[RerankerCaseResult, ...]
+    summary: RerankerEvaluationSummary
