@@ -16,6 +16,7 @@ from sourcetrace.api.dependencies import (
     get_evidence_assessor,
     get_query_embedding_provider,
     get_question_planner,
+    get_reranker,
 )
 from sourcetrace.core.config import get_settings
 from sourcetrace.db.session import get_session
@@ -32,6 +33,7 @@ from sourcetrace.rag.ports import (
     RetrievalCandidate,
     RetrievalPlanProposal,
 )
+from tests.helpers import PreserveOrderReranker
 
 
 class QueryEmbeddingProvider:
@@ -152,6 +154,7 @@ def _answer_app():
     app.dependency_overrides[get_question_planner] = NoAdditionalQueryPlanner
     app.dependency_overrides[get_evidence_assessor] = SelectingAllEvidenceAssessor
     app.dependency_overrides[get_citation_repairer] = NoOpCitationRepairer
+    app.dependency_overrides[get_reranker] = PreserveOrderReranker
     return app
 
 
