@@ -253,6 +253,11 @@
           "title": "Embedding Version",
           "type": "string"
         },
+        "embedding_device": {
+          "minLength": 1,
+          "title": "Embedding Device",
+          "type": "string"
+        },
         "reranker_provider": {
           "minLength": 1,
           "title": "Reranker Provider",
@@ -276,6 +281,11 @@
         "reranker_version": {
           "minLength": 1,
           "title": "Reranker Version",
+          "type": "string"
+        },
+        "reranker_device": {
+          "minLength": 1,
+          "title": "Reranker Device",
           "type": "string"
         },
         "lexical_version": {
@@ -334,11 +344,13 @@
         "embedding_model",
         "embedding_revision",
         "embedding_version",
+        "embedding_device",
         "reranker_provider",
         "reranker_model",
         "reranker_revision",
         "reranker_weight_sha256",
         "reranker_version",
+        "reranker_device",
         "phrase_weight",
         "channel_rrf_rank_constant",
         "channel_candidate_limit",

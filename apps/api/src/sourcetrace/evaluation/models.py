@@ -337,11 +337,13 @@ class HybridRetrievalRunMetadata(StrictModel):
     embedding_model: str = Field(min_length=1)
     embedding_revision: str = Field(min_length=1)
     embedding_version: str = Field(min_length=1)
+    embedding_device: str = Field(min_length=1)
     reranker_provider: str = Field(min_length=1)
     reranker_model: str = Field(min_length=1)
     reranker_revision: str = Field(min_length=1)
     reranker_weight_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     reranker_version: str = Field(min_length=1)
+    reranker_device: str = Field(min_length=1)
     lexical_version: Literal["postgres-english-or-phrase-v1"] = (
         "postgres-english-or-phrase-v1"
     )
