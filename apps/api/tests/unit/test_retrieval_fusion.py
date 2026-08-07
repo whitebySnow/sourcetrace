@@ -15,15 +15,18 @@ from tests.helpers import PreserveOrderReranker
 class StaticPlanner:
     def __init__(self, *additional_queries: str) -> None:
         self.additional_queries = additional_queries
-        self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.calls: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
 
     async def plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
+        document_titles: Sequence[str],
     ) -> RetrievalPlanProposal:
-        self.calls.append((question, tuple(recent_questions)))
+        self.calls.append(
+            (question, tuple(recent_questions), tuple(document_titles))
+        )
         return RetrievalPlanProposal(additional_queries=self.additional_queries)
 
 
@@ -59,12 +62,38 @@ class RecordingReranker:
         return self.scores
 
 
+class QuerySpecificReranker:
+    identity = RerankerIdentity(
+        provider="test",
+        model="query-specific-reranker",
+        revision="v1",
+        config_version="query-specific-reranker-v1",
+    )
+
+    def __init__(self, scores: dict[str, dict[str, float]]) -> None:
+        self.scores = scores
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+    async def score(
+        self,
+        *,
+        question: str,
+        passages: Sequence[str],
+    ) -> Sequence[float]:
+        self.calls.append((question, tuple(passages)))
+        return tuple(self.scores[question][passage] for passage in passages)
+
+
 class RankedListRepository:
     def __init__(
         self,
         ranked_lists: dict[tuple[float, ...], list[RetrievedEvidence]],
+        *,
+        document_titles: Sequence[str] = (),
     ) -> None:
         self.ranked_lists = ranked_lists
+        self.document_titles = tuple(document_titles)
+        self.title_calls: list[tuple[UUID, int]] = []
         self.search_calls: list[tuple[UUID, tuple[float, ...], int]] = []
 
     async def search(
@@ -77,6 +106,15 @@ class RankedListRepository:
         key = tuple(query_embedding)
         self.search_calls.append((knowledge_base_id, key, limit))
         return self.ranked_lists[key]
+
+    async def list_searchable_document_titles(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        limit: int,
+    ) -> tuple[str, ...]:
+        self.title_calls.append((knowledge_base_id, limit))
+        return self.document_titles[:limit]
 
     async def expand_page_neighbors(
         self,
@@ -108,12 +146,16 @@ def _evidence(
 
 
 async def test_plan_keeps_original_question_and_skips_normalized_duplicates() -> None:
+    knowledge_base_id = UUID("30000000-0000-0000-0000-000000000001")
     planner = StaticPlanner(
         "  What does ReAct combine?  ",
         "ReAct reasoning and acting interaction",
     )
     service = RetrievalService(
-        repository=RankedListRepository({}),
+        repository=RankedListRepository(
+            {},
+            document_titles=("ReAct.pdf", "Self-RAG.pdf"),
+        ),
         embedding_provider=RecordingEmbeddingProvider([]),
         question_planner=planner,
         reranker=PreserveOrderReranker(),
@@ -121,19 +163,24 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
     )
 
     plan = await service.resolve_plan(
+        knowledge_base_id=knowledge_base_id,
         question="What does ReAct combine?",
         recent_questions=("What is ReAct?",),
     )
 
     assert plan == RetrievalPlan(
-        version="bounded-multi-query-v1",
+        version="bounded-counterexample-v3",
         queries=(
             "What does ReAct combine?",
             "ReAct reasoning and acting interaction",
         ),
     )
     assert planner.calls == [
-        ("What does ReAct combine?", ("What is ReAct?",)),
+        (
+            "What does ReAct combine?",
+            ("What is ReAct?",),
+            ("ReAct.pdf", "Self-RAG.pdf"),
+        ),
     ]
 
 
@@ -272,6 +319,14 @@ async def test_reranker_scores_fused_union_before_page_diversity() -> None:
             (first.text, same_page.text, other_page.text),
         )
     ]
+    first_query_candidates = result.query_results[0].candidates
+    assert [item.reranker_score for item in first_query_candidates] == [0.1, 0.8, 0.9]
+    assert [item.reranked_rank for item in first_query_candidates] == [3, 2, 1]
+    assert [item.selected_for_query_coverage for item in first_query_candidates] == [
+        True,
+        True,
+        True,
+    ]
     assert [item.evidence.chunk_id for item in result.fused_candidates] == [
         other_page.chunk_id,
         same_page.chunk_id,
@@ -283,3 +338,140 @@ async def test_reranker_scores_fused_union_before_page_diversity() -> None:
     ]
     assert [item.reranked_rank for item in result.fused_candidates] == [1, 2, 3]
     assert result.reranker_identity == reranker.identity
+
+
+async def test_multi_query_reranking_preserves_evidence_for_each_query() -> None:
+    first_target = _evidence(
+        "00000000-0000-0000-0000-000000000001",
+        score=0.95,
+        page_number=1,
+    )
+    first_distractor = _evidence(
+        "00000000-0000-0000-0000-000000000002",
+        score=0.90,
+        page_number=2,
+    )
+    second_target = _evidence(
+        "00000000-0000-0000-0000-000000000003",
+        score=0.85,
+        page_number=3,
+    )
+    second_distractor = _evidence(
+        "00000000-0000-0000-0000-000000000004",
+        score=0.80,
+        page_number=4,
+    )
+    reranker = QuerySpecificReranker(
+        {
+            "first aspect": {
+                first_target.text: 0.9,
+                first_distractor.text: 0.8,
+                second_target.text: 0.01,
+                second_distractor.text: 0.02,
+            },
+            "second aspect": {
+                second_target.text: 0.9,
+                second_distractor.text: 0.8,
+            },
+        }
+    )
+    service = RetrievalService(
+        repository=RankedListRepository(
+            {
+                (1.0,): [first_target, first_distractor],
+                (2.0,): [second_target, second_distractor],
+            }
+        ),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,))),
+        question_planner=StaticPlanner(),
+        reranker=reranker,
+        top_k=2,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("first aspect", "second aspect"),
+    )
+
+    assert reranker.calls == [
+        ("first aspect", (first_target.text, first_distractor.text)),
+        ("second aspect", (second_target.text, second_distractor.text)),
+    ]
+    assert [item.chunk_id for item in result.primary_evidence] == [
+        first_target.chunk_id,
+        second_target.chunk_id,
+    ]
+
+
+async def test_speculative_query_coverage_cannot_displace_original_evidence() -> None:
+    original_first = _evidence(
+        "00000000-0000-0000-0000-000000000001",
+        score=0.95,
+        page_number=1,
+    )
+    original_second = _evidence(
+        "00000000-0000-0000-0000-000000000002",
+        score=0.90,
+        page_number=2,
+    )
+    expansion_one_first = _evidence(
+        "00000000-0000-0000-0000-000000000003",
+        score=0.85,
+        page_number=3,
+    )
+    expansion_one_second = _evidence(
+        "00000000-0000-0000-0000-000000000004",
+        score=0.80,
+        page_number=4,
+    )
+    expansion_two_first = _evidence(
+        "00000000-0000-0000-0000-000000000005",
+        score=0.75,
+        page_number=5,
+    )
+    expansion_two_second = _evidence(
+        "00000000-0000-0000-0000-000000000006",
+        score=0.70,
+        page_number=6,
+    )
+    reranker = QuerySpecificReranker(
+        {
+            "original": {
+                original_first.text: 0.7,
+                original_second.text: 0.6,
+            },
+            "speculative one": {
+                expansion_one_first.text: 0.99,
+                expansion_one_second.text: 0.98,
+            },
+            "speculative two": {
+                expansion_two_first.text: 0.97,
+                expansion_two_second.text: 0.96,
+            },
+        }
+    )
+    service = RetrievalService(
+        repository=RankedListRepository(
+            {
+                (1.0,): [original_first, original_second],
+                (2.0,): [expansion_one_first, expansion_one_second],
+                (3.0,): [expansion_two_first, expansion_two_second],
+            }
+        ),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,), (3.0,))),
+        question_planner=StaticPlanner(),
+        reranker=reranker,
+        top_k=4,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("original", "speculative one", "speculative two"),
+    )
+
+    assert {item.chunk_id for item in result.primary_evidence} == {
+        original_first.chunk_id,
+        original_second.chunk_id,
+        expansion_one_first.chunk_id,
+        expansion_two_first.chunk_id,
+    }

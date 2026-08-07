@@ -330,18 +330,36 @@ async def test_question_planner_uses_only_recent_user_questions() -> None:
                 "What is BGE-M3 dense retrieval?",
                 "How are its vectors stored?",
             ],
+            document_titles=["BGE-M3.pdf", "Vector Storage Notes.pdf"],
         )
 
     assert proposal.additional_queries == ("Why are BGE-M3 dense vectors normalized?",)
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert payload["stream"] is False
+    assert payload["temperature"] == 0
     messages = payload["messages"]
     assert isinstance(messages, list)
     assert [message["role"] for message in messages] == ["system", "user"]
+    system_prompt = messages[0]["content"]
+    assert "hard limit for initial planning" in system_prompt
+    assert "remaining query budget" in system_prompt
+    assert "not broad bags of keywords" in system_prompt
+    assert "comparisons, attribution, and multi-part questions" in system_prompt
+    assert "empty array" in system_prompt
+    assert "absolute claim or negation" in system_prompt
+    assert "who supports what" in system_prompt
+    assert "English technical terms" in system_prompt
+    assert "prefer concise English queries" in system_prompt
+    assert "only as search hypotheses" in system_prompt
+    assert "Do not invent bibliographic titles" in system_prompt
+    assert "maps to []" in system_prompt
+    assert "outputs not fully supported by sources" in system_prompt
     serialized = json.dumps(messages)
     assert "What is BGE-M3 dense retrieval?" in serialized
     assert "How are its vectors stored?" in serialized
+    assert "BGE-M3.pdf" in serialized
+    assert "Vector Storage Notes.pdf" in serialized
     assert "UNSUPPORTED PRIOR ANSWER" not in serialized
 
 
@@ -361,8 +379,12 @@ async def test_question_planner_rejects_an_invalid_response_shape() -> None:
     assert error.value.code == "LLM_INVALID_RESPONSE"
 
 
-async def test_question_planner_rejects_more_than_two_additional_queries() -> None:
+async def test_question_planner_rejects_more_than_one_initial_query() -> None:
+    attempts = 0
+
     async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
         return httpx.Response(
             200,
             json={
@@ -392,6 +414,46 @@ async def test_question_planner_rejects_more_than_two_additional_queries() -> No
             await planner.plan(question="Question", recent_questions=[])
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert attempts == 2
+
+
+async def test_question_planner_corrects_one_invalid_response() -> None:
+    attempts = 0
+    payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        payloads.append(json.loads(request.content))
+        queries = (
+            ["first", "second", "forbidden third"]
+            if attempts == 1
+            else ["grouped first"]
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"additional_queries": queries})
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(question="Question", recent_questions=[])
+
+    assert attempts == 2
+    assert proposal.additional_queries == ("grouped first",)
+    retry_messages = payloads[1]["messages"]
+    assert isinstance(retry_messages, list)
+    assert "previous response violated" in retry_messages[-1]["content"]
 
 
 async def test_question_planner_retries_one_transient_disconnect() -> None:

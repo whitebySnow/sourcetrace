@@ -30,15 +30,18 @@ class MultiQueryEmbeddingProvider:
 
 class RecordingQuestionPlanner:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, list[str]]] = []
+        self.calls: list[tuple[str, list[str], list[str]]] = []
 
     async def plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
+        document_titles: Sequence[str],
     ) -> RetrievalPlanProposal:
-        self.calls.append((question, list(recent_questions)))
+        self.calls.append(
+            (question, list(recent_questions), list(document_titles))
+        )
         if question == "How does that work?":
             return RetrievalPlanProposal(
                 additional_queries=("How does cosine normalization work?",)
@@ -194,8 +197,9 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
         page_number=9,
         embedding=_vector(1.0, 0.0),
     )
+    repository = PgVectorRetrievalRepository(session)
     service = RetrievalService(
-        repository=PgVectorRetrievalRepository(session),
+        repository=repository,
         embedding_provider=QueryEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
         reranker=PreserveOrderReranker(),
@@ -220,6 +224,10 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
     ]
     assert [item.page_number for item in evidence] == [3, 7]
     assert evidence[0].score > evidence[1].score
+    assert await repository.list_searchable_document_titles(
+        research.id,
+        limit=50,
+    ) == ("distance.pdf", "vectors.pdf")
 
 
 async def test_multi_query_rrf_uses_independent_pgvector_rankings_and_stable_ties(
@@ -285,6 +293,18 @@ async def test_multi_query_rrf_uses_independent_pgvector_rankings_and_stable_tie
 async def test_retrieval_service_owns_bounded_query_plan_resolution(
     session: AsyncSession,
 ) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Planning metadata"
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="BGE-M3.pdf",
+        checksum="f" * 64,
+        text="Embedding evidence",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+    )
     planner = RecordingQuestionPlanner()
     service = RetrievalService(
         repository=PgVectorRetrievalRepository(session),
@@ -295,10 +315,12 @@ async def test_retrieval_service_owns_bounded_query_plan_resolution(
     )
 
     direct_plan = await service.resolve_plan(
+        knowledge_base_id=knowledge_base.id,
         question="How are vectors normalized?",
         recent_questions=[],
     )
     follow_up_plan = await service.resolve_plan(
+        knowledge_base_id=knowledge_base.id,
         question="How does that work?",
         recent_questions=["What is cosine similarity?"],
     )
@@ -309,8 +331,8 @@ async def test_retrieval_service_owns_bounded_query_plan_resolution(
         "How does cosine normalization work?",
     )
     assert planner.calls == [
-        ("How are vectors normalized?", []),
-        ("How does that work?", ["What is cosine similarity?"]),
+        ("How are vectors normalized?", [], ["BGE-M3.pdf"]),
+        ("How does that work?", ["What is cosine similarity?"], ["BGE-M3.pdf"]),
     ]
 
 

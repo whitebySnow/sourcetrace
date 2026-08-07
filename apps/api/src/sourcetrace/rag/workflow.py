@@ -63,12 +63,18 @@ class RetrievalCandidateTrace:
     chunk_id: str
     raw_rank: int
     raw_cosine_score: float
+    reranker_score: float
+    reranked_rank: int
+    selected_for_query_coverage: bool
 
-    def to_payload(self) -> dict[str, str | int | float]:
+    def to_payload(self) -> dict[str, str | int | float | bool]:
         return {
             "chunk_id": self.chunk_id,
             "raw_rank": self.raw_rank,
             "raw_cosine_score": self.raw_cosine_score,
+            "reranker_score": self.reranker_score,
+            "reranked_rank": self.reranked_rank,
+            "selected_for_query_coverage": self.selected_for_query_coverage,
         }
 
 
@@ -215,6 +221,7 @@ class WorkflowRetrieval(Protocol):
     async def resolve_plan(
         self,
         *,
+        knowledge_base_id: UUID,
         question: str,
         recent_questions: Sequence[str],
     ) -> RetrievalPlan: ...
@@ -337,6 +344,7 @@ class AnswerWorkflow:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="analyzing"))
         plan = await self._retrieval.resolve_plan(
+            knowledge_base_id=state["knowledge_base_id"],
             question=state["question"],
             recent_questions=state["recent_questions"],
         )
@@ -578,6 +586,11 @@ class AnswerWorkflow:
                             chunk_id=str(candidate.evidence.chunk_id),
                             raw_rank=candidate.rank,
                             raw_cosine_score=candidate.evidence.score,
+                            reranker_score=cast(float, candidate.reranker_score),
+                            reranked_rank=cast(int, candidate.reranked_rank),
+                            selected_for_query_coverage=(
+                                candidate.selected_for_query_coverage
+                            ),
                         )
                         for candidate in item.candidates
                     ),

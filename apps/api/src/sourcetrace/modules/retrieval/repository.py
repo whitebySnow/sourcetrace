@@ -22,6 +22,56 @@ class PgVectorRetrievalRepository:
         if self._document_version_ids is not None and not self._document_version_ids:
             raise ValueError("document version snapshot must not be empty")
 
+    async def list_searchable_document_titles(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        limit: int,
+    ) -> tuple[str, ...]:
+        if limit <= 0:
+            raise ValueError("document title limit must be positive")
+        latest_completed = (
+            select(
+                DocumentVersion.document_id,
+                func.max(DocumentVersion.version_number).label("version_number"),
+            )
+            .where(
+                DocumentVersion.knowledge_base_id == knowledge_base_id,
+                DocumentVersion.status == "completed",
+            )
+            .group_by(DocumentVersion.document_id)
+            .subquery()
+        )
+        statement = (
+            select(Document.name)
+            .join(DocumentVersion, DocumentVersion.document_id == Document.id)
+            .join(Chunk, Chunk.document_version_id == DocumentVersion.id)
+        )
+        if self._document_version_ids is None:
+            statement = statement.join(
+                latest_completed,
+                and_(
+                    latest_completed.c.document_id == DocumentVersion.document_id,
+                    latest_completed.c.version_number == DocumentVersion.version_number,
+                ),
+            )
+        else:
+            statement = statement.where(
+                DocumentVersion.id.in_(self._document_version_ids),
+            )
+        statement = (
+            statement.where(
+                DocumentVersion.knowledge_base_id == knowledge_base_id,
+                DocumentVersion.status == "completed",
+                Chunk.embedding.is_not(None),
+                DocumentVersion.storage_key.is_not(None),
+            )
+            .group_by(Document.name)
+            .order_by(func.lower(Document.name), Document.name)
+            .limit(limit)
+        )
+        return tuple((await self._session.scalars(statement)).all())
+
     async def search(
         self,
         knowledge_base_id: UUID,

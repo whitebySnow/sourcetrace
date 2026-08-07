@@ -129,6 +129,9 @@ class ObservedQueryCandidateTrace(StrictModel):
     chunk_id: UUID
     raw_rank: int = Field(gt=0)
     raw_cosine_score: float = Field(ge=-1, le=1)
+    reranker_score: float | None = None
+    reranked_rank: int | None = Field(default=None, gt=0)
+    selected_for_query_coverage: bool = False
 
 
 class ObservedQueryRetrievalTrace(StrictModel):

@@ -273,6 +273,22 @@ SHA-256 为 `f7737b7c5c11bb887bce644e71c15f1cecca780105f054cd948a5e0e28ec9b66`�
 另有多项在引用或回答阶段失败。因此该结果不能泛化为产品准确率，也不能证明 Flash 优于 Pro。
 原始和 reviewed case 级报告继续保留在被 Git 忽略的 `output/evals/`，不提交论文摘录或模型输出。
 
+### Issue #48 保守反例规划与逐查询重排
+
+2026-08-07 使用 `agentic-rag-foundations-v1`、Issue #46 的同一数据库文档版本快照、本地
+BGE-M3、固定 `BAAI/bge-reranker-v2-m3` 和 `deepseek-v4-flash` 验证
+`bounded-counterexample-v3`。规划器只接收问题、空会话历史和三个可检索文档标题，不接收
+参考答案、预期证据或 PDF 正文；结构化调用固定 `temperature=0`。
+
+同一配置连续运行两次，结果均为 24 passed、3 failed、3 not applicable。Issue #46 的
+23 个 retrieval passed 样本全部保持通过，`ARF-030` 从 failed 变为 passed；`ARF-023`、
+`ARF-024` 和 `ARF-026` 仍为 failed。一次包含两个初始推测查询的否决实验得到 21 passed、
+6 failed、3 not applicable，并使 `ARF-015`、`ARF-025` 回退，因此未采用该策略。
+
+该结果只验证规划与检索维度，不重新执行证据判断、答案生成、引用校验或人工审核，不能表述为
+端到端准确率。候选池、最终 Top 8、最低 cosine 阈值、证据充分性和引用门禁均未放宽；剩余
+三个失败项应由后续独立的文档范围查询或混合召回 A/B 处理。
+
 1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
 2. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
 3. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。

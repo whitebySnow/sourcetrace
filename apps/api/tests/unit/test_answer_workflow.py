@@ -68,6 +68,7 @@ class RecordingRetrieval:
     async def resolve_plan(
         self,
         *,
+        knowledge_base_id: UUID,
         question: str,
         recent_questions: Sequence[str],
     ) -> RetrievalPlan:
