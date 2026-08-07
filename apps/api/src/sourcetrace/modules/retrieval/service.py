@@ -12,7 +12,10 @@ _PAGE_DIVERSITY_POOL_MULTIPLIER = 4
 _MAX_CANDIDATE_POOL_SIZE = 100
 _MAX_PRIMARY_CANDIDATES = 8
 _MAX_ADDITIONAL_QUERIES = 2
-_RETRIEVAL_PLAN_VERSION = "bounded-multi-query-v1"
+_ORIGINAL_QUERY_COVERAGE_CANDIDATES = 4
+_ADDITIONAL_QUERY_COVERAGE_CANDIDATES = 1
+_PLANNER_DOCUMENT_TITLE_LIMIT = 50
+_RETRIEVAL_PLAN_VERSION = "bounded-counterexample-v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +55,9 @@ class RetrievalPlan:
 class RankedRetrievalCandidate:
     rank: int
     evidence: RetrievedEvidence
+    reranker_score: float | None = None
+    reranked_rank: int | None = None
+    selected_for_query_coverage: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +87,13 @@ class RetrievalResult:
 
 
 class RetrievalRepositoryPort(Protocol):
+    async def list_searchable_document_titles(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        limit: int,
+    ) -> tuple[str, ...]: ...
+
     async def search(
         self,
         knowledge_base_id: UUID,
@@ -129,15 +142,21 @@ class RetrievalService:
     async def resolve_plan(
         self,
         *,
+        knowledge_base_id: UUID,
         question: str,
         recent_questions: Sequence[str],
     ) -> RetrievalPlan:
         original_query = question.strip()
         if not original_query:
             raise ValueError("retrieval question must not be blank")
+        document_titles = await self._repository.list_searchable_document_titles(
+            knowledge_base_id,
+            limit=_PLANNER_DOCUMENT_TITLE_LIMIT,
+        )
         proposal = await self._question_planner.plan(
             question=question,
             recent_questions=recent_questions,
+            document_titles=document_titles,
         )
         queries = [original_query]
         normalized = {_normalize_query(original_query)}
@@ -190,17 +209,79 @@ class RetrievalService:
             query_results,
             rank_constant=self._rrf_rank_constant,
         )
-        scores = tuple(
-            float(score)
-            for score in await self._reranker.score(
-                question=unique_queries[0],
-                passages=tuple(item.evidence.text for item in fused),
+        scores_by_chunk: dict[UUID, float] = {}
+        coverage_ids: set[UUID] = set()
+        reranked_query_results: list[QueryRetrievalResult] = []
+        for query_index, query_result in enumerate(query_results):
+            ranked_candidates = query_result.candidates
+            if not ranked_candidates:
+                reranked_query_results.append(query_result)
+                continue
+            scores = tuple(
+                float(score)
+                for score in await self._reranker.score(
+                    question=query_result.query,
+                    passages=tuple(item.evidence.text for item in ranked_candidates),
+                )
             )
-        )
-        if len(scores) != len(fused) or not all(isfinite(score) for score in scores):
-            raise ValueError("reranker scores must be finite and match the candidate count")
+            if len(scores) != len(ranked_candidates) or not all(
+                isfinite(score) for score in scores
+            ):
+                raise ValueError("reranker scores must be finite and match the candidate count")
+            scored_candidates = list(zip(ranked_candidates, scores, strict=True))
+            scored_candidates.sort(
+                key=lambda item: (
+                    -item[1],
+                    item[0].rank,
+                    str(item[0].evidence.chunk_id),
+                )
+            )
+            ranks_by_chunk = {
+                candidate.evidence.chunk_id: rank
+                for rank, (candidate, _score) in enumerate(
+                    scored_candidates,
+                    start=1,
+                )
+            }
+            scores_for_query = {
+                candidate.evidence.chunk_id: score
+                for candidate, score in scored_candidates
+            }
+            coverage_limit = (
+                _ORIGINAL_QUERY_COVERAGE_CANDIDATES
+                if query_index == 0
+                else _ADDITIONAL_QUERY_COVERAGE_CANDIDATES
+            )
+            query_coverage_ids = {
+                candidate.evidence.chunk_id
+                for candidate, _score in scored_candidates[:coverage_limit]
+            }
+            coverage_ids.update(query_coverage_ids)
+            reranked_query_results.append(
+                replace(
+                    query_result,
+                    candidates=tuple(
+                        replace(
+                            candidate,
+                            reranker_score=scores_for_query[candidate.evidence.chunk_id],
+                            reranked_rank=ranks_by_chunk[candidate.evidence.chunk_id],
+                            selected_for_query_coverage=(
+                                candidate.evidence.chunk_id in query_coverage_ids
+                            ),
+                        )
+                        for candidate in ranked_candidates
+                    ),
+                )
+            )
+            for candidate, score in scored_candidates:
+                chunk_id = candidate.evidence.chunk_id
+                scores_by_chunk[chunk_id] = max(
+                    scores_by_chunk.get(chunk_id, float("-inf")),
+                    score,
+                )
         fused = [
-            replace(item, reranker_score=score) for item, score in zip(fused, scores, strict=True)
+            replace(item, reranker_score=scores_by_chunk[item.evidence.chunk_id])
+            for item in fused
         ]
         fused.sort(
             key=lambda item: (
@@ -210,6 +291,9 @@ class RetrievalService:
                 str(item.evidence.chunk_id),
             )
         )
+        fused = [item for item in fused if item.evidence.chunk_id in coverage_ids] + [
+            item for item in fused if item.evidence.chunk_id not in coverage_ids
+        ]
         fused = [replace(item, reranked_rank=rank) for rank, item in enumerate(fused, start=1)]
         primary = select_page_diverse(
             [item.evidence for item in fused],
@@ -235,7 +319,7 @@ class RetrievalService:
         return RetrievalResult(
             evidence=tuple(all_evidence),
             primary_evidence=tuple(primary),
-            query_results=tuple(query_results),
+            query_results=tuple(reranked_query_results),
             fused_candidates=tuple(fused),
             rrf_rank_constant=self._rrf_rank_constant,
             reranker_identity=self._reranker.identity,

@@ -23,6 +23,7 @@ class StaticRetrieval:
     async def resolve_plan(
         self,
         *,
+        knowledge_base_id: UUID,
         question: str,
         recent_questions: Sequence[str],
     ) -> RetrievalPlan:
@@ -37,7 +38,15 @@ class StaticRetrieval:
         query_results = tuple(
             QueryRetrievalResult(
                 query=query,
-                candidates=(RankedRetrievalCandidate(rank=1, evidence=self.evidence),),
+                candidates=(
+                    RankedRetrievalCandidate(
+                        rank=1,
+                        evidence=self.evidence,
+                        reranker_score=1.0,
+                        reranked_rank=1,
+                        selected_for_query_coverage=True,
+                    ),
+                ),
             )
             for query in queries
         )
@@ -210,6 +219,14 @@ async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence
     assert retrieval_round.round_number == 1
     assert retrieval_round.queries == (case.question,)
     assert retrieval_round.query_results[0].candidates[0].raw_rank == 1
+    assert retrieval_round.query_results[0].candidates[0].reranker_score == 1.0
+    assert retrieval_round.query_results[0].candidates[0].reranked_rank == 1
+    assert (
+        retrieval_round.query_results[0]
+        .candidates[0]
+        .selected_for_query_coverage
+        is True
+    )
     assert retrieval_round.fused_candidates[0].chunk_id == evidence.chunk_id
     assert retrieval_round.fused_candidates[0].selected_as_primary is True
     assert retrieval_round.fused_candidates[0].reranker_score == 1.0

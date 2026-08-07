@@ -76,6 +76,7 @@ class QuestionPlanner(Protocol):
         *,
         question: str,
         recent_questions: Sequence[str],
+        document_titles: Sequence[str] = (),
     ) -> RetrievalPlanProposal: ...
 
 

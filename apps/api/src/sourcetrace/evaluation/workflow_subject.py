@@ -38,6 +38,7 @@ class WorkflowRetrieval(Protocol):
     async def resolve_plan(
         self,
         *,
+        knowledge_base_id: UUID,
         question: str,
         recent_questions: Sequence[str],
     ) -> RetrievalPlan: ...
@@ -81,10 +82,12 @@ class RecordingWorkflowRetrieval:
     async def resolve_plan(
         self,
         *,
+        knowledge_base_id: UUID,
         question: str,
         recent_questions: Sequence[str],
     ) -> RetrievalPlan:
         return await self._retrieval.resolve_plan(
+            knowledge_base_id=knowledge_base_id,
             question=question,
             recent_questions=recent_questions,
         )
@@ -228,6 +231,11 @@ class WorkflowEvaluationSubject:
                                     chunk_id=UUID(candidate.chunk_id),
                                     raw_rank=candidate.raw_rank,
                                     raw_cosine_score=candidate.raw_cosine_score,
+                                    reranker_score=candidate.reranker_score,
+                                    reranked_rank=candidate.reranked_rank,
+                                    selected_for_query_coverage=(
+                                        candidate.selected_for_query_coverage
+                                    ),
                                 )
                                 for candidate in query_result.candidates
                             ),

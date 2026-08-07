@@ -67,17 +67,41 @@ def _grounded_prompt(
 def _retrieval_plan_prompt(
     question: str,
     recent_questions: Sequence[str],
+    document_titles: Sequence[str],
 ) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
             "content": (
                 "Plan bounded dense retrieval for the current user question. The application "
-                "always executes the original question, so return only zero, one, or two "
-                "additional standalone retrieval queries that may improve evidence recall. "
-                "Use recent user questions only to resolve references. Do not answer the "
-                "question, add facts, or use outside knowledge. Keep the current question's "
-                "language. Return JSON with exactly one array field named additional_queries."
+                "always executes the original question. Return JSON with exactly one array field "
+                "named additional_queries. Follow every rule: "
+                "1. Return zero or one additional standalone query. One is a hard limit for "
+                "initial planning because a later evidence assessment owns the remaining query "
+                "budget. "
+                "2. Write concise source-like propositions, not broad bags of keywords. Preserve "
+                "logical polarity, subject, object, and who supports what. "
+                "3. Return an additional query only for an absolute claim or negation that needs "
+                "a counterstatement to search for an omitted limitation or failure mode. For "
+                "simple facts, comparisons, attribution, and multi-part questions, return an "
+                "empty array and let the original question establish the retrieval baseline. "
+                "4. The counterstatement must preserve the failure mode and use qualifiers such "
+                "as 'can still' or 'not fully'. "
+                "5. Preserve named entities and English technical terms. When an otherwise "
+                "non-English question names English methods, prefer concise English queries "
+                "using likely source-paper terminology. You may use model knowledge for "
+                "well-known method aliases or framework associations only as search hypotheses. "
+                "Use the supplied searchable document titles to constrain framework and paper "
+                "associations. Titles are retrieval hints, not answer evidence. "
+                "Do not invent bibliographic titles or assign concepts to unrelated frameworks. "
+                "Pattern example for comparison: 'How do Method A and Method B schedule "
+                "retrieval?' maps to []. Pattern example for claim checking: "
+                "'Method X "
+                "completely solved outputs lacking source support' maps to ['Method X can still "
+                "produce outputs not fully supported by sources']; preserve what is unsupported "
+                "and "
+                "what provides support. "
+                "Use recent questions only to resolve references. Do not answer or add conclusions."
             ),
         },
         {
@@ -85,6 +109,7 @@ def _retrieval_plan_prompt(
             "content": json.dumps(
                 {
                     "recent_user_questions": list(recent_questions),
+                    "searchable_document_titles": list(document_titles),
                     "current_question": question,
                 },
                 ensure_ascii=False,
@@ -300,27 +325,50 @@ class OpenAICompatibleQuestionPlanner:
         *,
         question: str,
         recent_questions: Sequence[str],
+        document_titles: Sequence[str] = (),
     ) -> RetrievalPlanProposal:
         try:
-            parsed = await _structured_completion(
-                self.config,
-                self._client,
-                _retrieval_plan_prompt(question, recent_questions),
+            messages = _retrieval_plan_prompt(
+                question,
+                recent_questions,
+                document_titles,
             )
-            if set(parsed) != {"additional_queries"}:
-                raise ValueError
-            additional_queries = parsed["additional_queries"]
-            if (
-                not isinstance(additional_queries, list)
-                or len(additional_queries) > 2
-                or any(
-                    not isinstance(query, str) or not query.strip() for query in additional_queries
+            for attempt in range(2):
+                parsed = await _structured_completion(
+                    self.config,
+                    self._client,
+                    messages,
+                    temperature=0,
                 )
-            ):
-                raise ValueError
-            return RetrievalPlanProposal(
-                additional_queries=tuple(query.strip() for query in additional_queries)
-            )
+                additional_queries = parsed.get("additional_queries")
+                if (
+                    set(parsed) == {"additional_queries"}
+                    and isinstance(additional_queries, list)
+                    and len(additional_queries) <= 1
+                    and all(
+                        isinstance(query, str) and query.strip()
+                        for query in additional_queries
+                    )
+                ):
+                    return RetrievalPlanProposal(
+                        additional_queries=tuple(
+                            query.strip() for query in additional_queries
+                        )
+                    )
+                if attempt == 0:
+                    messages = [
+                        *messages,
+                        {
+                            "role": "system",
+                            "content": (
+                                "The previous response violated the JSON contract. Retry once with "
+                                "exactly one additional_queries array containing at most one "
+                                "non-empty counterstatement query, or an empty array. Return no "
+                                "other fields."
+                            ),
+                        },
+                    ]
+            raise ValueError
         except (TypeError, ValueError) as error:
             raise LlmProviderError(
                 "LLM_INVALID_RESPONSE",
@@ -332,6 +380,8 @@ async def _structured_completion(
     config: OpenAICompatibleConfig,
     client: httpx.AsyncClient,
     messages: list[dict[str, str]],
+    *,
+    temperature: float | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     try:
@@ -342,6 +392,8 @@ async def _structured_completion(
                     "messages": messages,
                     "stream": False,
                 }
+                if temperature is not None:
+                    request["temperature"] = temperature
                 if config.structured_output_mode == "json_object":
                     request["response_format"] = {"type": "json_object"}
                 if config.structured_output_thinking != "default":

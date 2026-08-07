@@ -510,6 +510,31 @@
           "title": "Best Raw Cosine Score",
           "type": "number"
         },
+        "reranker_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reranker Score"
+        },
+        "reranked_rank": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reranked Rank"
+        },
         "selected_as_primary": {
           "title": "Selected As Primary",
           "type": "boolean"
@@ -542,6 +567,36 @@
           "minimum": -1,
           "title": "Raw Cosine Score",
           "type": "number"
+        },
+        "reranker_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reranker Score"
+        },
+        "reranked_rank": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reranked Rank"
+        },
+        "selected_for_query_coverage": {
+          "default": false,
+          "title": "Selected For Query Coverage",
+          "type": "boolean"
         }
       },
       "required": [
@@ -573,6 +628,39 @@
         "candidates"
       ],
       "title": "ObservedQueryRetrievalTrace",
+      "type": "object"
+    },
+    "ObservedRerankerTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "config_version": {
+          "minLength": 1,
+          "title": "Config Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "revision",
+        "config_version"
+      ],
+      "title": "ObservedRerankerTrace",
       "type": "object"
     },
     "ObservedRetrieval": {
@@ -689,6 +777,17 @@
           "exclusiveMinimum": 0,
           "title": "Rrf Rank Constant",
           "type": "integer"
+        },
+        "reranker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObservedRerankerTrace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

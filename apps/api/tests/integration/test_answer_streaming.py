@@ -171,6 +171,7 @@ class RecordingQuestionPlanner:
         *,
         question: str,
         recent_questions: Sequence[str],
+        document_titles: Sequence[str],
     ) -> RetrievalPlanProposal:
         self.calls.append((question, list(recent_questions)))
         return RetrievalPlanProposal(additional_queries=(self.retrieval_query,))
@@ -399,7 +400,7 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v2"
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
-        assert trace["retrieval_plan_version"] == "bounded-multi-query-v1"
+        assert trace["retrieval_plan_version"] == "bounded-counterexample-v3"
         assert len(trace["retrieval_rounds"]) == 1
         assert trace["supplemental_retrieval_attempts"] == 0
         assert trace["citation_repair_attempts"] == 0
@@ -480,7 +481,7 @@ async def test_follow_up_uses_bounded_questions_for_fresh_retrieval(
     ]
     persisted = history_response.json()["items"][0]
     assert persisted["retrieval_query"] == "Why is it normalized?"
-    assert persisted["query_rewrite_version"] == "bounded-multi-query-v1"
+    assert persisted["query_rewrite_version"] == "bounded-counterexample-v3"
 
 
 async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
