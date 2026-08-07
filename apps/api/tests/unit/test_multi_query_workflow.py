@@ -11,6 +11,7 @@ from sourcetrace.modules.retrieval.service import (
 )
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowRequest, WorkflowTrace
+from tests.helpers import PreserveOrderReranker
 
 
 def _evidence() -> RetrievedEvidence:
@@ -43,10 +44,13 @@ def _result(queries: Sequence[str], evidence: RetrievedEvidence) -> RetrievalRes
                 evidence=evidence,
                 fused_score=sum(1 / 61 for _query in queries),
                 best_raw_score=evidence.score,
+                reranker_score=1.0,
+                reranked_rank=1,
                 selected_as_primary=True,
             ),
         ),
         rrf_rank_constant=60,
+        reranker_identity=PreserveOrderReranker.identity,
     )
 
 

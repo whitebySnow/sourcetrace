@@ -38,7 +38,8 @@ pnpm dev
 
 API 默认运行在 `http://localhost:8000`，Web 默认运行在 `http://localhost:5173`。健康检查为 `GET /health`，依赖就绪检查为 `GET /ready`，OpenAPI 文档为 `/docs`。
 
-首次处理文档时，Worker 会通过配置的 Hugging Face 镜像下载 BGE-M3。完整 Compose 默认将
+首次处理文档时，Worker 会通过配置的 Hugging Face 镜像下载 BGE-M3；回答检索使用固定
+revision 的 `BAAI/bge-reranker-v2-m3` 对 RRF 候选池重排。完整 Compose 默认将
 宿主机 `./data/huggingface` 挂载到容器 `/models/huggingface`；已有缓存可通过
 `HF_CACHE_HOST_PATH` 复用。模型缓存不进入 Git 或 Docker 镜像；CPU、NVIDIA GPU、镜像切换
 和本地模型目录配置见 [开发约定](docs/development.md)。

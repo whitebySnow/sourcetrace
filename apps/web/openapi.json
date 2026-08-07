@@ -2578,6 +2578,28 @@
             "type": "number",
             "title": "Best Raw Cosine Score"
           },
+          "reranker_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reranker Score"
+          },
+          "reranked_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reranked Rank"
+          },
           "selected_as_primary": {
             "type": "boolean",
             "title": "Selected As Primary"
@@ -2612,6 +2634,34 @@
           "candidates"
         ],
         "title": "WorkflowQueryRetrievalTrace"
+      },
+      "WorkflowRerankerTrace": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "config_version": {
+            "type": "string",
+            "title": "Config Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "revision",
+          "config_version"
+        ],
+        "title": "WorkflowRerankerTrace"
       },
       "WorkflowRetrievalCandidateTrace": {
         "properties": {
@@ -2673,6 +2723,16 @@
           "rrf_rank_constant": {
             "type": "integer",
             "title": "Rrf Rank Constant"
+          },
+          "reranker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRerankerTrace"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

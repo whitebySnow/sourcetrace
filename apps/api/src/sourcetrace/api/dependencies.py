@@ -1,4 +1,6 @@
 from collections.abc import AsyncIterator
+from functools import lru_cache
+from threading import Lock
 from typing import Annotated
 
 import httpx
@@ -36,7 +38,9 @@ from sourcetrace.rag.ports import (
     EmbeddingProvider,
     EvidenceAssessor,
     QuestionPlanner,
+    Reranker,
 )
+from sourcetrace.rag.rerankers import BgeCrossEncoderReranker, RerankerConfig
 from sourcetrace.rag.workflow import AnswerWorkflow
 
 
@@ -112,6 +116,33 @@ def get_query_embedding_provider() -> EmbeddingProvider:
     )
 
 
+_reranker_dependency_lock = Lock()
+
+
+def get_reranker() -> Reranker:
+    with _reranker_dependency_lock:
+        return _get_cached_reranker()
+
+
+@lru_cache
+def _get_cached_reranker() -> Reranker:
+    settings = get_settings()
+    if settings.reranker_provider != "sentence-transformers":
+        raise RuntimeError(f"unsupported reranker provider: {settings.reranker_provider}")
+    return BgeCrossEncoderReranker(
+        RerankerConfig(
+            provider=settings.reranker_provider,
+            model=settings.reranker_model,
+            revision=settings.reranker_model_revision,
+            weight_sha256=settings.reranker_model_weight_sha256,
+            cache_dir=settings.reranker_cache_dir,
+            device=settings.reranker_device,
+            batch_size=settings.reranker_batch_size,
+            version=settings.reranker_config_version,
+        )
+    )
+
+
 async def get_answer_generator() -> AsyncIterator[AnswerGenerator]:
     settings = get_settings()
     async with httpx.AsyncClient() as client:
@@ -160,6 +191,7 @@ def get_answer_service(
         EmbeddingProvider,
         Depends(get_query_embedding_provider),
     ],
+    reranker: Annotated[Reranker, Depends(get_reranker)],
     generator: Annotated[AnswerGenerator, Depends(get_answer_generator)],
     question_planner: Annotated[QuestionPlanner, Depends(get_question_planner)],
     evidence_assessor: Annotated[EvidenceAssessor, Depends(get_evidence_assessor)],
@@ -171,6 +203,7 @@ def get_answer_service(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=embedding_provider,
         question_planner=question_planner,
+        reranker=reranker,
         top_k=settings.retrieval_top_k,
         page_neighbor_count=settings.retrieval_page_neighbor_count,
         rrf_rank_constant=settings.retrieval_rrf_rank_constant,

@@ -786,6 +786,10 @@ export interface components {
             fused_score: number;
             /** Best Raw Cosine Score */
             best_raw_cosine_score: number;
+            /** Reranker Score */
+            reranker_score?: number | null;
+            /** Reranked Rank */
+            reranked_rank?: number | null;
             /** Selected As Primary */
             selected_as_primary: boolean;
         };
@@ -795,6 +799,17 @@ export interface components {
             query: string;
             /** Candidates */
             candidates: components["schemas"]["WorkflowRetrievalCandidateTrace"][];
+        };
+        /** WorkflowRerankerTrace */
+        WorkflowRerankerTrace: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Revision */
+            revision: string;
+            /** Config Version */
+            config_version: string;
         };
         /** WorkflowRetrievalCandidateTrace */
         WorkflowRetrievalCandidateTrace: {
@@ -819,6 +834,7 @@ export interface components {
             final_evidence_chunk_ids: string[];
             /** Rrf Rank Constant */
             rrf_rank_constant: number;
+            reranker?: components["schemas"]["WorkflowRerankerTrace"] | null;
         };
     };
     responses: never;

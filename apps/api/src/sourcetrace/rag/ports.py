@@ -23,6 +23,26 @@ class RetrievalPlanProposal:
     additional_queries: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class RerankerIdentity:
+    provider: str
+    model: str
+    revision: str
+    config_version: str
+
+
+class Reranker(Protocol):
+    @property
+    def identity(self) -> RerankerIdentity: ...
+
+    async def score(
+        self,
+        *,
+        question: str,
+        passages: Sequence[str],
+    ) -> Sequence[float]: ...
+
+
 class AnswerGenerator(Protocol):
     def stream_answer(
         self, *, question: str, evidence: Sequence[RetrievalCandidate]

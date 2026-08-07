@@ -43,6 +43,10 @@ def test_answer_stream_history_and_source_are_exposed_in_openapi() -> None:
         "citation_repair_prompt_version",
         "workflow_trace",
     } <= history_required
+    retrieval_round = document["components"]["schemas"]["WorkflowRetrievalRoundTrace"]
+    assert {"reranker", "fused_candidates"} <= set(retrieval_round["properties"])
+    fused_candidate = document["components"]["schemas"]["WorkflowFusedCandidateTrace"]
+    assert {"reranker_score", "reranked_rank"} <= set(fused_candidate["properties"])
     assert set(document["components"]["schemas"]["CitationResponse"]["required"]) >= {
         "id",
         "document_id",

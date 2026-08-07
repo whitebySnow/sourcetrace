@@ -1,4 +1,22 @@
 services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        TORCH_RUNTIME: cu130
+    image: sourcetrace-api:gpu
+    environment:
+      EMBEDDING_DEVICE: cuda
+      RERANKER_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   worker:
     build:
       context: .

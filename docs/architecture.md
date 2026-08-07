@@ -115,11 +115,15 @@ BGE-M3 通过 `EmbeddingProvider` 端口接入，适配器负责批处理、1024
 
 Dense 检索为每条查询分别读取有界候选池，并保留逐查询原始 cosine 相似度与排名。存在多条
 查询时，`retrieval` Service 使用版本化配置中的 Reciprocal Rank Fusion（RRF）参数合并候选，
-以融合分数、候选最佳原始 cosine 相似度和 chunk UUID 依次稳定排序。融合发生在页面多样性
-选择之前，融合分数使用独立字段，不能覆盖原始 cosine 相似度。最终主候选数量仍受 `top_k`
-限制；同页相邻 chunk 只在主候选确定后补入，并继承触发候选的检索分数。该顺序避免单页重复
-chunk 挤占全部主候选，同时保持知识库和文档版本范围不变。单查询入口委托给相同管线，避免
-维护两套候选选择规则。
+然后通过 `Reranker` 端口把原始用户问题与完整融合候选池交给 BGE cross-encoder 适配器统一
+评分。适配器隐藏模型加载、设备和批处理细节，模型在进程内懒加载并复用；同步推理在线程中
+执行，避免阻塞 API 事件循环。生产适配器与可控测试适配器共用同一端口。
+
+排序依次使用 reranker 分数、RRF 融合分数、候选最佳原始 cosine 相似度和 chunk UUID。
+reranker、融合和原始 cosine 分数分别保存，不能相互覆盖。重排发生在页面多样性选择之前，
+最终主候选数量仍受 `top_k` 限制；同页相邻 chunk 只在主候选确定后补入，并继承触发候选的
+原始检索分数。该顺序避免单页重复 chunk 挤占全部主候选，同时保持知识库和文档版本范围、
+候选池上限与证据门禁不变。单查询入口委托给相同管线，避免维护两套候选选择规则。
 
 会话创建时显式写入知识库 ID，此后不能变更作用域。问题通过会话 ID 与知识库 ID 的复合
 外键归属会话，跨知识库查询始终返回未找到。会话列表按创建时间和 UUID 倒序分页，问题
@@ -150,8 +154,9 @@ Conversation 绑定的 Knowledge Base；生成器只能接收证据判断选中�
 `answers` Service 继续拥有 Answer Run 生命周期、事务和 SSE 映射，LangGraph 不直接完成回答
 或拒答持久化。工作流通过窄运行控制接口记录初始 Retrieval Query、有界决策轨迹并读取取消
 状态。决策轨迹包含 Retrieval Plan 版本、实际执行查询及其轮次、每条查询的候选 Chunk 原始
-排名与 cosine 相似度、RRF 配置与融合分数、页面多样性选择结果、每次结构化证据判断及所选
-Chunk ID、补充检索次数和引用修复次数，使规划、融合、补充检索与修复路径可以重放和评测。
+排名与 cosine 相似度、RRF 配置与融合分数、reranker 的模型身份、revision、配置版本、候选
+分数与重排排名、页面多样性选择结果、每次结构化证据判断及所选 Chunk ID、补充检索次数和
+引用修复次数，使规划、融合、重排、补充检索与修复路径可以重放和评测。
 工作流在每个节点边界及等待模型分片期间检查取消；图流、节点任务和上游模型流按层级显式
 关闭，避免断连后遗留数据库或供应商任务。
 
@@ -168,6 +173,10 @@ PostgreSQL 部分唯一索引保证同一 Conversation 在 `pending`、`running`
 当前部署契约是单 API 进程。进程启动时会把上次进程遗留的活动 Answer Run 标记为
 `failed`，防止会话被活动运行唯一索引永久阻塞；未知的工作流异常也会回滚当前事务并将运行
 安全地终态化。未来若引入多个 API 副本，必须先用租约或实例所有权替代该启动恢复策略。
+
+查询时 reranker 与 API 位于同一进程，不为模型推理拆分独立微服务。基础 Compose 使用 CPU
+运行并保留功能兼容性；GPU overlay 将 API 与摄取 Worker 都构建为 CUDA runtime，并显式授予
+设备访问。模型目录通过缓存挂载提供，镜像和仓库不包含模型权重。
 
 评测作为进程外工具复用公开应用接缝，不进入在线 Router 或 Answer Run 生命周期。版本化
 Dataset 保存完整不可变文档版本快照，以及预期回答或拒答、页码和证据摘录；Harness 分别计算检索召回、
@@ -212,10 +221,11 @@ API 进程存活，`/ready` 实际探测 PostgreSQL 与 Redis，任一依赖不�
 PostgreSQL、Redis 和上传文件使用独立持久卷，普通停止或重建容器不会删除数据。
 
 基础 Compose 将 API 与 Worker 的 PyTorch 运行时固定为 CPU，不安装 CUDA 运行库，也不假设
-宿主机存在 GPU。`compose.gpu.yaml` 为 Worker 构建独立的 CUDA PyTorch 镜像，并覆盖运行设备
-与 NVIDIA 资源请求；API 和迁移容器继续复用 CPU 镜像。Embedding 权重始终位于宿主机缓存并挂载到
-`/models/huggingface`，不写入镜像；API 与 Worker 共享上传卷，确保异步摄取能读取 API 保存
-的原文件。日常开发可以只在 Compose 中运行 PostgreSQL 与 Redis，其余进程在宿主机热更新。
+宿主机存在 GPU。`compose.gpu.yaml` 为 API 与 Worker 构建 CUDA PyTorch 镜像，并覆盖运行设备
+与 NVIDIA 资源请求；迁移容器继续复用 CPU 镜像。Embedding 与 reranker 权重始终位于宿主机
+缓存并挂载到 `/models/huggingface`，不写入镜像；API 与 Worker 共享上传卷，确保异步摄取能
+读取 API 保存的原文件。日常开发可以只在 Compose 中运行 PostgreSQL 与 Redis，其余进程在
+宿主机热更新。
 
 ## 10. 何时拆分服务
 

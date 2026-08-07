@@ -140,7 +140,16 @@ class ObservedFusedCandidateTrace(StrictModel):
     chunk_id: UUID
     fused_score: float = Field(gt=0)
     best_raw_cosine_score: float = Field(ge=-1, le=1)
+    reranker_score: float | None = None
+    reranked_rank: int | None = Field(default=None, gt=0)
     selected_as_primary: bool
+
+
+class ObservedRerankerTrace(StrictModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    revision: str = Field(min_length=1)
+    config_version: str = Field(min_length=1)
 
 
 class ObservedRetrievalRoundTrace(StrictModel):
@@ -150,6 +159,7 @@ class ObservedRetrievalRoundTrace(StrictModel):
     fused_candidates: tuple[ObservedFusedCandidateTrace, ...]
     final_evidence_chunk_ids: tuple[UUID, ...]
     rrf_rank_constant: int = Field(gt=0)
+    reranker: ObservedRerankerTrace | None = None
 
 
 class EvaluationDecisionTrace(StrictModel):

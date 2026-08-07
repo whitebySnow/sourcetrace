@@ -25,15 +25,17 @@ Invoke-WebRequest http://localhost:8000/ready
 Invoke-WebRequest http://localhost:5173/web-health
 ```
 
-使用 NVIDIA GPU 运行 Worker 时，需要宿主机已安装可供 Docker 使用的 NVIDIA 驱动和
+使用 NVIDIA GPU 运行 API 查询模型和 Worker embedding 时，需要宿主机已安装可供 Docker
+使用的 NVIDIA 驱动和
 Container Toolkit，然后叠加 GPU override：
 
 ```powershell
 docker compose -f compose.yaml -f compose.gpu.yaml up --build -d
 ```
 
-GPU override 只把 Worker 的 `EMBEDDING_DEVICE` 改为 `cuda` 并请求 GPU；API 和迁移仍使用
-基础配置。停止服务使用 `docker compose down`。该命令保留数据库和上传卷；只有确认要删除
+GPU override 把 API 的 `EMBEDDING_DEVICE`、`RERANKER_DEVICE` 和 Worker 的
+`EMBEDDING_DEVICE` 改为 `cuda` 并请求 GPU；迁移仍使用基础 CPU 配置。停止服务使用
+`docker compose down`。该命令保留数据库和上传卷；只有确认要删除
 所有本地数据时才使用 `docker compose down -v`。
 
 ### 混合开发
@@ -92,9 +94,9 @@ uv run --project apps/api --extra cpu alembic -c apps/api/alembic.ini upgrade he
 uv run --project apps/api --extra cpu alembic -c apps/api/alembic.ini downgrade -1
 ```
 
-## 本地嵌入模型
+## 本地检索模型
 
-默认模型为固定 revision 的 `BAAI/bge-m3`，只使用 1024 维 dense embedding。Worker 首次
+Embedding 模型为固定 revision 的 `BAAI/bge-m3`，只使用 1024 维 dense embedding。Worker 首次
 执行 embedding 时才加载模型。混合开发由 `EMBEDDING_CACHE_DIR` 指定宿主机缓存；完整
 Compose 默认使用仓库下被忽略的 `./data/huggingface`，并挂载到容器固定路径
 `/models/huggingface`。例如本机已有 `D:\DevelopEnvironment\huggingface` 缓存时，在 `.env`
@@ -106,6 +108,18 @@ HF_CACHE_HOST_PATH=D:\DevelopEnvironment\huggingface
 
 这样容器直接复用已有文件，不会把权重复制到镜像。仓库、上传目录和 Docker 镜像均不保存
 模型权重。
+
+查询时 reranker 固定为 `BAAI/bge-reranker-v2-m3`，目录层次与 embedding 模型并列：
+
+```text
+D:\DevelopEnvironment\huggingface\
+    BAAI\
+        bge-m3\
+        bge-reranker-v2-m3\
+```
+
+API 首次重排时才校验 `model.safetensors` 的 SHA-256 并加载模型，之后在进程内复用。模型目录
+缺失、权重校验失败或输出无效都会使本次回答安全失败，不会静默使用未重排候选。
 
 `EMBEDDING_MODEL` 供宿主机进程使用，可能是 Windows 本地路径；完整 Compose 使用独立的
 `EMBEDDING_MODEL_CONTAINER`，避免把宿主机路径原样传入 Linux 容器。默认值
@@ -122,14 +136,15 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/BAAI/bge-m3
 `EMBEDDING_MODEL` 设置为该本地目录。两种方式都应继续把文件放在统一的宿主机缓存根目录，
 不要提交模型文件。
 
-`EMBEDDING_DEVICE=cpu` 是跨机器默认值。混合开发安装匹配的 CUDA 版 PyTorch 后可改为
-`cuda`；完整 Compose 使用 `compose.gpu.yaml`，业务代码和数据库契约均无需变化。
+`EMBEDDING_DEVICE=cpu` 与 `RERANKER_DEVICE=cpu` 是跨机器默认值。混合开发安装匹配的 CUDA
+版 PyTorch 后可同时改为 `cuda`；完整 Compose 使用 `compose.gpu.yaml`，业务代码和数据库
+契约均无需变化。
 `EMBEDDING_BATCH_SIZE` 应根据实际内存或显存 smoke test 调整，不能把未经测量的吞吐量写入
 文档。
 
 基础 Compose 使用 `cpu` optional dependency，并从 PyTorch 官方 CPU 索引安装不含 CUDA
-运行库的 wheel。GPU overlay 只为 Worker 构建独立的 `sourcetrace-worker:gpu` 镜像，使用
-`cu130` optional dependency；API 和迁移容器继续使用 CPU 镜像。两个 extra 互斥，禁止在同一
+运行库的 wheel。GPU overlay 为 API 与 Worker 构建 CUDA 镜像，使用 `cu130` optional
+dependency；迁移容器继续使用 CPU 镜像。两个 extra 互斥，禁止在同一
 环境中同时安装。`python apps/api/scripts/verify_cpu_dependencies.py` 会在同步依赖前检查 CPU
 导出结果，防止基础镜像再次引入 NVIDIA 或 Triton 运行库。
 

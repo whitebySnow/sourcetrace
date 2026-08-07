@@ -222,6 +222,30 @@ BGE-M3，对原始 DeepSeek 报告中已记录的初始与补充检索查询执�
 
 ## 6. 后续评测工作
 
+### Issue #43 生产 BGE reranker 接入
+
+Issue #41 的固定候选实验绑定 30 条版本化数据集、同一数据库快照、模型 revision 和权重
+SHA-256，结果为 baseline 21 passed、reranked 23 passed、3 not applicable，改进样本为
+`ARF-012` 与 `ARF-025`，无退化样本。Issue #43 依据该证据把相同排序规则接入生产检索：RRF
+融合后使用原始问题重排完整候选池，再执行页面多样性和同页邻居扩展；知识库范围、候选上限、
+最低分数、证据充分性和引用门禁均未改变。
+
+2026-08-07 在本地 `D:\DevelopEnvironment\huggingface\BAAI\bge-reranker-v2-m3` 固定权重上完成
+CUDA smoke。环境为 PyTorch `2.13.0+cu130`、CUDA 13.0、RTX 5070；相关段落得分约
+`0.99927`，无关段落约 `0.000016`。本次只验证 adapter、模型完整性和设备路径，不把两段文本
+smoke 当作检索质量评测。
+
+| 检查 | 结果 |
+|---|---|
+| `pnpm check` | 通过；Ruff、mypy strict、Vue typecheck 通过 |
+| `pnpm test` | 通过；后端 187 项、Web 27 项 |
+| `pnpm build` | 通过；Web 生产构建完成 |
+| CPU / GPU Compose config | 两套配置均可解析 |
+| 本地 CUDA adapter smoke | 通过；固定权重实际加载并完成重排 |
+
+本轮没有重新调用远程 LLM，也没有生成新的端到端 reviewed report。23/30 仍是固定候选离线检索
+结果，不得表述为线上回答准确率；生产接入后的完整 30 题真实供应商评测应作为后续独立任务。
+
 1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
 2. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
 3. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。
