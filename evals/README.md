@@ -71,6 +71,8 @@ parser、切分、embedding、四个 prompt、工作流和检索参数/版本；
 改变生产检索路径：
 
 ```powershell
+$env:EMBEDDING_DEVICE = "cuda"
+$env:RERANKER_DEVICE = "cuda"
 uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli hybrid-retrieval `
   --dataset evals/datasets/agentic-rag-foundations-v1.json `
   --query-plan evals/query-plans/agentic-rag-foundations-v1-bounded-counterexample-v3.json `
@@ -80,4 +82,5 @@ uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli hyb
 ```
 
 报告逐题记录 dense、lexical、通道融合和 reranker 排名，但不复制文档正文。任何线上接入、索引
-迁移或阈值调整都必须另开 Issue，并以本实验报告作为决策输入。
+迁移或阈值调整都必须另开 Issue，并以本实验报告作为决策输入。没有可用 NVIDIA GPU 时可移除
+上述两个临时环境变量并改用 `--extra cpu`，但完整 30 题双路径重排会明显更慢。
