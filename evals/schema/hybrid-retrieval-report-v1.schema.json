@@ -1,0 +1,452 @@
+{
+  "$defs": {
+    "EvaluationStatus": {
+      "enum": [
+        "passed",
+        "failed",
+        "pending_review",
+        "not_applicable"
+      ],
+      "type": "string"
+    },
+    "HybridCandidateTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "exclusiveMinimum": 0,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "dense_rank": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dense Rank"
+        },
+        "lexical_rank": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lexical Rank"
+        },
+        "channel_fused_rank": {
+          "exclusiveMinimum": 0,
+          "title": "Channel Fused Rank",
+          "type": "integer"
+        },
+        "cosine_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Cosine Score",
+          "type": "number"
+        },
+        "lexical_score": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lexical Score"
+        },
+        "channel_fused_score": {
+          "exclusiveMinimum": 0,
+          "title": "Channel Fused Score",
+          "type": "number"
+        },
+        "reranker_score": {
+          "title": "Reranker Score",
+          "type": "number"
+        },
+        "reranked_rank": {
+          "exclusiveMinimum": 0,
+          "title": "Reranked Rank",
+          "type": "integer"
+        },
+        "selected_for_query_coverage": {
+          "title": "Selected For Query Coverage",
+          "type": "boolean"
+        },
+        "selected_as_primary": {
+          "title": "Selected As Primary",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "document_version_id",
+        "page_number",
+        "channel_fused_rank",
+        "cosine_score",
+        "channel_fused_score",
+        "reranker_score",
+        "reranked_rank",
+        "selected_for_query_coverage",
+        "selected_as_primary"
+      ],
+      "title": "HybridCandidateTrace",
+      "type": "object"
+    },
+    "HybridQueryTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "lexical_enabled": {
+          "title": "Lexical Enabled",
+          "type": "boolean"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/HybridCandidateTrace"
+          },
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "lexical_enabled",
+        "candidates"
+      ],
+      "title": "HybridQueryTrace",
+      "type": "object"
+    },
+    "HybridRetrievalCaseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "queries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Queries",
+          "type": "array"
+        },
+        "baseline_retrieval": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "hybrid_retrieval": {
+          "$ref": "#/$defs/EvaluationStatus"
+        },
+        "query_traces": {
+          "items": {
+            "$ref": "#/$defs/HybridQueryTrace"
+          },
+          "title": "Query Traces",
+          "type": "array"
+        },
+        "selected_primary_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Selected Primary Chunk Ids",
+          "type": "array"
+        },
+        "expanded_evidence_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Expanded Evidence Chunk Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "case_id",
+        "queries",
+        "baseline_retrieval",
+        "hybrid_retrieval",
+        "query_traces",
+        "selected_primary_chunk_ids",
+        "expanded_evidence_chunk_ids"
+      ],
+      "title": "HybridRetrievalCaseResult",
+      "type": "object"
+    },
+    "HybridRetrievalRunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "code_commit": {
+          "minLength": 1,
+          "title": "Code Commit",
+          "type": "string"
+        },
+        "dataset_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Dataset Sha256",
+          "type": "string"
+        },
+        "query_plan_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Query Plan Sha256",
+          "type": "string"
+        },
+        "planner_version": {
+          "minLength": 1,
+          "title": "Planner Version",
+          "type": "string"
+        },
+        "parser_version": {
+          "minLength": 1,
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "chunking_version": {
+          "minLength": 1,
+          "title": "Chunking Version",
+          "type": "string"
+        },
+        "embedding_provider": {
+          "minLength": 1,
+          "title": "Embedding Provider",
+          "type": "string"
+        },
+        "embedding_model": {
+          "minLength": 1,
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "embedding_revision": {
+          "minLength": 1,
+          "title": "Embedding Revision",
+          "type": "string"
+        },
+        "embedding_version": {
+          "minLength": 1,
+          "title": "Embedding Version",
+          "type": "string"
+        },
+        "reranker_provider": {
+          "minLength": 1,
+          "title": "Reranker Provider",
+          "type": "string"
+        },
+        "reranker_model": {
+          "minLength": 1,
+          "title": "Reranker Model",
+          "type": "string"
+        },
+        "reranker_revision": {
+          "minLength": 1,
+          "title": "Reranker Revision",
+          "type": "string"
+        },
+        "reranker_weight_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reranker Weight Sha256",
+          "type": "string"
+        },
+        "reranker_version": {
+          "minLength": 1,
+          "title": "Reranker Version",
+          "type": "string"
+        },
+        "lexical_version": {
+          "const": "postgres-english-or-phrase-v1",
+          "default": "postgres-english-or-phrase-v1",
+          "title": "Lexical Version",
+          "type": "string"
+        },
+        "text_search_configuration": {
+          "const": "english",
+          "default": "english",
+          "title": "Text Search Configuration",
+          "type": "string"
+        },
+        "phrase_weight": {
+          "minimum": 0,
+          "title": "Phrase Weight",
+          "type": "number"
+        },
+        "channel_rrf_rank_constant": {
+          "exclusiveMinimum": 0,
+          "title": "Channel Rrf Rank Constant",
+          "type": "integer"
+        },
+        "channel_candidate_limit": {
+          "exclusiveMinimum": 0,
+          "title": "Channel Candidate Limit",
+          "type": "integer"
+        },
+        "retrieval_top_k": {
+          "exclusiveMinimum": 0,
+          "maximum": 8,
+          "title": "Retrieval Top K",
+          "type": "integer"
+        },
+        "retrieval_minimum_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Retrieval Minimum Score",
+          "type": "number"
+        },
+        "retrieval_page_neighbor_count": {
+          "minimum": 0,
+          "title": "Retrieval Page Neighbor Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code_commit",
+        "dataset_sha256",
+        "query_plan_sha256",
+        "planner_version",
+        "parser_version",
+        "chunking_version",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_revision",
+        "embedding_version",
+        "reranker_provider",
+        "reranker_model",
+        "reranker_revision",
+        "reranker_weight_sha256",
+        "reranker_version",
+        "phrase_weight",
+        "channel_rrf_rank_constant",
+        "channel_candidate_limit",
+        "retrieval_top_k",
+        "retrieval_minimum_score",
+        "retrieval_page_neighbor_count"
+      ],
+      "title": "HybridRetrievalRunMetadata",
+      "type": "object"
+    },
+    "HybridRetrievalSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_passed": {
+          "minimum": 0,
+          "title": "Baseline Passed",
+          "type": "integer"
+        },
+        "hybrid_passed": {
+          "minimum": 0,
+          "title": "Hybrid Passed",
+          "type": "integer"
+        },
+        "not_applicable": {
+          "minimum": 0,
+          "title": "Not Applicable",
+          "type": "integer"
+        },
+        "improvements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Improvements",
+          "type": "array"
+        },
+        "regressions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Regressions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "baseline_passed",
+        "hybrid_passed",
+        "not_applicable",
+        "improvements",
+        "regressions"
+      ],
+      "title": "HybridRetrievalSummary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "knowledge_base_id": {
+      "format": "uuid",
+      "title": "Knowledge Base Id",
+      "type": "string"
+    },
+    "document_version_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Document Version Ids",
+      "type": "array"
+    },
+    "metadata": {
+      "$ref": "#/$defs/HybridRetrievalRunMetadata"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/HybridRetrievalCaseResult"
+      },
+      "title": "Cases",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/HybridRetrievalSummary"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "knowledge_base_id",
+    "document_version_ids",
+    "metadata",
+    "cases",
+    "summary"
+  ],
+  "title": "HybridRetrievalEvaluationReport",
+  "type": "object"
+}

@@ -6,6 +6,8 @@ from sourcetrace.evaluation.models import (
     EvaluationDataset,
     EvaluationJudgmentSet,
     EvaluationReport,
+    HybridQueryPlanFixture,
+    HybridRetrievalEvaluationReport,
     RerankerEvaluationReport,
     RetrievalDiagnosticsReport,
 )
@@ -17,6 +19,10 @@ def main() -> None:
     schemas = {
         "dataset-v1.schema.json": EvaluationDataset.model_json_schema(),
         "fixture-observations-v1.schema.json": FixtureObservationSet.model_json_schema(),
+        "hybrid-query-plan-v1.schema.json": HybridQueryPlanFixture.model_json_schema(),
+        "hybrid-retrieval-report-v1.schema.json": (
+            HybridRetrievalEvaluationReport.model_json_schema()
+        ),
         "judgments-v1.schema.json": EvaluationJudgmentSet.model_json_schema(),
         "report-v1.schema.json": EvaluationReport.model_json_schema(),
         "reranker-report-v1.schema.json": RerankerEvaluationReport.model_json_schema(),

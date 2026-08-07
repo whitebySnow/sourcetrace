@@ -2,9 +2,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sourcetrace.evaluation.hybrid_retrieval import (
+    LexicalSearchQuery,
+    RankedChannelCandidate,
+)
 from sourcetrace.modules.documents.models import Chunk, Document, DocumentVersion, IngestionRun
 from sourcetrace.modules.retrieval.service import RetrievedEvidence
 
@@ -144,3 +148,80 @@ class EvaluationCorpusRepository:
                 "every recorded reranker candidate must belong to the dataset snapshot"
             )
         return chunks
+
+    async def search_lexical(
+        self,
+        knowledge_base_id: UUID,
+        document_version_ids: Sequence[UUID],
+        *,
+        query: LexicalSearchQuery,
+        query_embedding: Sequence[float],
+        limit: int,
+        phrase_weight: float,
+    ) -> tuple[RankedChannelCandidate, ...]:
+        if not document_version_ids:
+            raise ValueError("evaluation document snapshot must not be empty")
+        if not query_embedding:
+            raise ValueError("lexical search query embedding must not be empty")
+        if limit <= 0:
+            raise ValueError("lexical candidate limit must be positive")
+        if phrase_weight < 0:
+            raise ValueError("lexical phrase weight must not be negative")
+
+        document_vector = func.to_tsvector("english", Chunk.text)
+        term_query = func.websearch_to_tsquery("english", query.disjunction)
+        phrase_query = func.websearch_to_tsquery(
+            "english",
+            query.phrase_disjunction,
+        )
+        lexical_score = (
+            func.ts_rank_cd(document_vector, term_query, 32)
+            + phrase_weight * func.ts_rank_cd(document_vector, phrase_query, 32)
+        ).label("lexical_score")
+        distance = Chunk.embedding.cosine_distance(list(query_embedding)).label("distance")
+        statement = (
+            select(
+                Chunk.id.label("chunk_id"),
+                Document.id.label("document_id"),
+                DocumentVersion.id.label("document_version_id"),
+                Document.name.label("document_name"),
+                DocumentVersion.storage_key,
+                Chunk.page_number,
+                Chunk.text,
+                Chunk.page_chunk_index,
+                distance,
+                lexical_score,
+            )
+            .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
+            .join(Document, Document.id == DocumentVersion.document_id)
+            .where(
+                DocumentVersion.knowledge_base_id == knowledge_base_id,
+                DocumentVersion.id.in_(tuple(document_version_ids)),
+                DocumentVersion.status == "completed",
+                DocumentVersion.storage_key.is_not(None),
+                Chunk.embedding.is_not(None),
+                document_vector.op("@@")(term_query),
+            )
+            .order_by(lexical_score.desc(), Chunk.id)
+            .limit(limit)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return tuple(
+            RankedChannelCandidate(
+                channel="lexical",
+                rank=rank,
+                channel_score=float(row.lexical_score),
+                evidence=RetrievedEvidence(
+                    chunk_id=row.chunk_id,
+                    document_id=row.document_id,
+                    document_version_id=row.document_version_id,
+                    document_name=row.document_name,
+                    storage_key=row.storage_key,
+                    page_number=row.page_number,
+                    text=row.text,
+                    score=1.0 - float(row.distance),
+                    page_chunk_index=row.page_chunk_index,
+                ),
+            )
+            for rank, row in enumerate(rows, start=1)
+        )

@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "dataset_id": "agentic-rag-foundations",
+  "dataset_version": "1.0.0",
+  "planner_version": "bounded-counterexample-v3",
+  "cases": [
+    {
+      "case_id": "ARF-023",
+      "additional_queries": [
+        "Self-RAG can still produce outputs not fully supported by cited sources"
+      ]
+    },
+    {
+      "case_id": "ARF-030",
+      "additional_queries": [
+        "Self-RAG can still produce answers not fully supported by cited sources"
+      ]
+    }
+  ]
+}

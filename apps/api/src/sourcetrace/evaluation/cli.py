@@ -4,7 +4,12 @@ import hashlib
 from collections.abc import Sequence
 from pathlib import Path
 
-from sourcetrace.evaluation.dataset import load_dataset, load_judgments, load_report
+from sourcetrace.evaluation.dataset import (
+    load_dataset,
+    load_hybrid_query_plan,
+    load_judgments,
+    load_report,
+)
 from sourcetrace.evaluation.fixtures import (
     FixtureEvaluationSubject,
     load_fixture_observations,
@@ -57,6 +62,20 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="confirm that this command may use the database and local reranker model",
     )
+    hybrid = subparsers.add_parser("hybrid-retrieval")
+    hybrid.add_argument("--dataset", type=Path, required=True)
+    hybrid.add_argument("--query-plan", type=Path, required=True)
+    hybrid.add_argument("--code-commit", required=True)
+    hybrid.add_argument("--output", type=Path, required=True)
+    hybrid.add_argument(
+        "--confirm-local-model",
+        action="store_true",
+        required=True,
+        help=(
+            "confirm that this command may use PostgreSQL and local embedding and "
+            "reranker models"
+        ),
+    )
     return parser
 
 
@@ -108,6 +127,26 @@ async def _run_rerank(args: argparse.Namespace) -> None:
     )
 
 
+async def _run_hybrid_retrieval(args: argparse.Namespace) -> None:
+    from sourcetrace.core.config import get_settings
+    from sourcetrace.evaluation.hybrid_real import (
+        run_real_hybrid_retrieval_evaluation,
+    )
+
+    dataset_bytes = args.dataset.read_bytes()
+    query_plan_bytes = args.query_plan.read_bytes()
+    report = await run_real_hybrid_retrieval_evaluation(
+        load_dataset(args.dataset),
+        load_hybrid_query_plan(args.query_plan),
+        dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(),
+        query_plan_sha256=hashlib.sha256(query_plan_bytes).hexdigest(),
+        code_commit=args.code_commit,
+        settings=get_settings(),
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
 def _run_review(args: argparse.Namespace) -> None:
     report_bytes = args.report.read_bytes()
     report = load_report(args.report)
@@ -147,6 +186,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.mode == "rerank":
         asyncio.run(_run_rerank(args))
+        return 0
+    if args.mode == "hybrid-retrieval":
+        asyncio.run(_run_hybrid_retrieval(args))
         return 0
     raise AssertionError("unreachable evaluation mode")
 

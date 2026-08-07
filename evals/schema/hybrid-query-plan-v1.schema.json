@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "HybridQueryPlanCase": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "additional_queries": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Additional Queries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "case_id",
+        "additional_queries"
+      ],
+      "title": "HybridQueryPlanCase",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "planner_version": {
+      "minLength": 1,
+      "title": "Planner Version",
+      "type": "string"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/HybridQueryPlanCase"
+      },
+      "title": "Cases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "planner_version",
+    "cases"
+  ],
+  "title": "HybridQueryPlanFixture",
+  "type": "object"
+}

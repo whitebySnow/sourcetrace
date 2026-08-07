@@ -313,6 +313,98 @@ class RetrievalDiagnosticsReport(StrictModel):
     cases: tuple[RetrievalCaseDiagnostic, ...]
 
 
+class HybridQueryPlanCase(StrictModel):
+    case_id: str = Field(min_length=1)
+    additional_queries: tuple[str, ...] = Field(max_length=2)
+
+
+class HybridQueryPlanFixture(StrictModel):
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    planner_version: str = Field(min_length=1)
+    cases: tuple[HybridQueryPlanCase, ...]
+
+
+class HybridRetrievalRunMetadata(StrictModel):
+    code_commit: str = Field(min_length=1)
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    query_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    planner_version: str = Field(min_length=1)
+    parser_version: str = Field(min_length=1)
+    chunking_version: str = Field(min_length=1)
+    embedding_provider: str = Field(min_length=1)
+    embedding_model: str = Field(min_length=1)
+    embedding_revision: str = Field(min_length=1)
+    embedding_version: str = Field(min_length=1)
+    reranker_provider: str = Field(min_length=1)
+    reranker_model: str = Field(min_length=1)
+    reranker_revision: str = Field(min_length=1)
+    reranker_weight_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reranker_version: str = Field(min_length=1)
+    lexical_version: Literal["postgres-english-or-phrase-v1"] = (
+        "postgres-english-or-phrase-v1"
+    )
+    text_search_configuration: Literal["english"] = "english"
+    phrase_weight: float = Field(ge=0)
+    channel_rrf_rank_constant: int = Field(gt=0)
+    channel_candidate_limit: int = Field(gt=0)
+    retrieval_top_k: int = Field(gt=0, le=8)
+    retrieval_minimum_score: float = Field(ge=-1, le=1)
+    retrieval_page_neighbor_count: int = Field(ge=0)
+
+
+class HybridCandidateTrace(StrictModel):
+    chunk_id: UUID
+    document_version_id: UUID
+    page_number: int = Field(gt=0)
+    dense_rank: int | None = Field(default=None, gt=0)
+    lexical_rank: int | None = Field(default=None, gt=0)
+    channel_fused_rank: int = Field(gt=0)
+    cosine_score: float = Field(ge=-1, le=1)
+    lexical_score: float | None = Field(default=None, ge=0)
+    channel_fused_score: float = Field(gt=0)
+    reranker_score: float
+    reranked_rank: int = Field(gt=0)
+    selected_for_query_coverage: bool
+    selected_as_primary: bool
+
+
+class HybridQueryTrace(StrictModel):
+    query: str = Field(min_length=1)
+    lexical_enabled: bool
+    candidates: tuple[HybridCandidateTrace, ...]
+
+
+class HybridRetrievalCaseResult(StrictModel):
+    case_id: str = Field(min_length=1)
+    queries: tuple[str, ...]
+    baseline_retrieval: EvaluationStatus
+    hybrid_retrieval: EvaluationStatus
+    query_traces: tuple[HybridQueryTrace, ...]
+    selected_primary_chunk_ids: tuple[UUID, ...]
+    expanded_evidence_chunk_ids: tuple[UUID, ...]
+
+
+class HybridRetrievalSummary(StrictModel):
+    baseline_passed: int = Field(ge=0)
+    hybrid_passed: int = Field(ge=0)
+    not_applicable: int = Field(ge=0)
+    improvements: tuple[str, ...]
+    regressions: tuple[str, ...]
+
+
+class HybridRetrievalEvaluationReport(StrictModel):
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    knowledge_base_id: UUID
+    document_version_ids: list[UUID]
+    metadata: HybridRetrievalRunMetadata
+    cases: tuple[HybridRetrievalCaseResult, ...]
+    summary: HybridRetrievalSummary
+
+
 class RerankerRunMetadata(StrictModel):
     code_commit: str = Field(min_length=1)
     source_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

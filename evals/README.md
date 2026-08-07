@@ -62,3 +62,22 @@ pnpm eval:review -- `
 不执行该命令，不访问数据库、embedding 模型或 LLM API。报告绑定数据集、代码、模型、
 parser、切分、embedding、四个 prompt、工作流和检索参数/版本；未实际运行
 并完成必要人工审核时，不得把报告数字写入 README、简历或项目说明。
+
+## 离线混合检索实验
+
+`query-plans/` 存放人工版本化的有界查询计划，只能增加由原问题直接派生的检索表达，不能写入
+答案、证据内容或人工不可见的目标词。混合检索实验使用 PostgreSQL 英文全文检索与 dense
+检索做 RRF 融合，然后复用生产 reranker、分页多样性和相邻页扩展。它不调用远程 LLM，也不
+改变生产检索路径：
+
+```powershell
+uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli hybrid-retrieval `
+  --dataset evals/datasets/agentic-rag-foundations-v1.json `
+  --query-plan evals/query-plans/agentic-rag-foundations-v1-bounded-counterexample-v3.json `
+  --code-commit (git rev-parse HEAD) `
+  --output output/evals/hybrid-retrieval-report.json `
+  --confirm-local-model
+```
+
+报告逐题记录 dense、lexical、通道融合和 reranker 排名，但不复制文档正文。任何线上接入、索引
+迁移或阈值调整都必须另开 Issue，并以本实验报告作为决策输入。

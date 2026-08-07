@@ -6,7 +6,11 @@ from uuid import uuid4
 import pytest
 
 from sourcetrace.evaluation.cli import main
-from sourcetrace.evaluation.models import RerankerEvaluationReport
+from sourcetrace.evaluation.models import (
+    HybridQueryPlanFixture,
+    HybridRetrievalEvaluationReport,
+    RerankerEvaluationReport,
+)
 
 
 def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path) -> None:
@@ -221,6 +225,25 @@ def test_rerank_cli_requires_explicit_local_model_confirmation() -> None:
     assert error.value.code == 2
 
 
+def test_hybrid_retrieval_cli_requires_explicit_local_model_confirmation() -> None:
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "hybrid-retrieval",
+                "--dataset",
+                "reviewed-dataset.json",
+                "--query-plan",
+                "query-plan.json",
+                "--code-commit",
+                "abc123",
+                "--output",
+                "hybrid-report.json",
+            ]
+        )
+
+    assert error.value.code == 2
+
+
 def test_repository_reranker_report_schema_matches_model() -> None:
     root = Path(__file__).resolve().parents[4]
     schema = json.loads(
@@ -228,6 +251,23 @@ def test_repository_reranker_report_schema_matches_model() -> None:
     )
 
     assert schema == RerankerEvaluationReport.model_json_schema()
+
+
+@pytest.mark.parametrize(
+    ("filename", "model"),
+    [
+        ("hybrid-query-plan-v1.schema.json", HybridQueryPlanFixture),
+        ("hybrid-retrieval-report-v1.schema.json", HybridRetrievalEvaluationReport),
+    ],
+)
+def test_repository_hybrid_evaluation_schemas_match_models(
+    filename: str,
+    model: type[HybridQueryPlanFixture] | type[HybridRetrievalEvaluationReport],
+) -> None:
+    root = Path(__file__).resolve().parents[4]
+    schema = json.loads((root / "evals/schema" / filename).read_text(encoding="utf-8"))
+
+    assert schema == model.model_json_schema()
 
 
 def test_repository_fixture_replays_all_four_categories(tmp_path) -> None:
