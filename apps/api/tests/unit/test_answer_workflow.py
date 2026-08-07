@@ -1,7 +1,14 @@
 from collections.abc import AsyncIterator, Sequence
 from uuid import UUID, uuid4, uuid5
 
-from sourcetrace.modules.retrieval.service import RetrievedEvidence
+from sourcetrace.modules.retrieval.service import (
+    FusedRetrievalCandidate,
+    QueryRetrievalResult,
+    RankedRetrievalCandidate,
+    RetrievalPlan,
+    RetrievalResult,
+    RetrievedEvidence,
+)
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowRequest, WorkflowTrace
 
@@ -19,28 +26,59 @@ def _evidence(*, score: float = 0.9) -> RetrievedEvidence:
     )
 
 
+def _retrieval_result(
+    queries: Sequence[str],
+    evidence: Sequence[RetrievedEvidence],
+) -> RetrievalResult:
+    return RetrievalResult(
+        evidence=tuple(evidence),
+        primary_evidence=tuple(evidence),
+        query_results=tuple(
+            QueryRetrievalResult(
+                query=query,
+                candidates=tuple(
+                    RankedRetrievalCandidate(rank=rank, evidence=item)
+                    for rank, item in enumerate(evidence, start=1)
+                ),
+            )
+            for query in queries
+        ),
+        fused_candidates=tuple(
+            FusedRetrievalCandidate(
+                evidence=item,
+                fused_score=1 / (60 + rank),
+                best_raw_score=item.score,
+                selected_as_primary=True,
+            )
+            for rank, item in enumerate(evidence, start=1)
+        ),
+        rrf_rank_constant=60,
+    )
+
+
 class RecordingRetrieval:
     def __init__(self, evidence: Sequence[RetrievedEvidence]) -> None:
         self.evidence = list(evidence)
-        self.queries: list[str] = []
+        self.queries: list[tuple[str, ...]] = []
 
-    async def resolve_query(
+    async def resolve_plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str:
+    ) -> RetrievalPlan:
         assert list(recent_questions) == []
-        return question
+        return RetrievalPlan("bounded-multi-query-v1", (question,))
 
     async def search(
         self,
         *,
         knowledge_base_id: UUID,
-        query: str,
-    ) -> list[RetrievedEvidence]:
-        self.queries.append(query)
-        return self.evidence
+        queries: Sequence[str],
+    ) -> RetrievalResult:
+        executed = tuple(queries)
+        self.queries.append(executed)
+        return _retrieval_result(executed, self.evidence)
 
 
 class SelectingAssessor:
@@ -175,10 +213,8 @@ async def test_workflow_answers_from_only_the_assessor_selected_evidence() -> No
     ]
 
     assert control.retrieval_query == "Why must agents be bounded?"
-    assert retrieval.queries == ["Why must agents be bounded?"]
-    assert [candidate.chunk_id for candidate in generator.evidence] == [
-        str(selected.chunk_id)
-    ]
+    assert retrieval.queries == [("Why must agents be bounded?",)]
+    assert [candidate.chunk_id for candidate in generator.evidence] == [str(selected.chunk_id)]
     assert [event.type for event in events] == [
         "status",
         "status",
@@ -205,10 +241,12 @@ async def test_workflow_performs_only_one_supplemental_retrieval() -> None:
             self,
             *,
             knowledge_base_id: UUID,
-            query: str,
-        ) -> list[RetrievedEvidence]:
-            self.queries.append(query)
-            return [initial] if len(self.queries) == 1 else [supplemental]
+            queries: Sequence[str],
+        ) -> RetrievalResult:
+            executed = tuple(queries)
+            self.queries.append(executed)
+            evidence = [initial] if len(self.queries) == 1 else [supplemental]
+            return _retrieval_result(executed, evidence)
 
     retrieval = SupplementalRetrieval([])
     assessor = SequentialAssessor(
@@ -250,26 +288,24 @@ async def test_workflow_performs_only_one_supplemental_retrieval() -> None:
     ]
 
     assert retrieval.queries == [
-        "What is the retry limit?",
-        "bounded agent maximum retrieval attempts",
+        ("What is the retry limit?",),
+        (
+            "What is the retry limit?",
+            "bounded agent maximum retrieval attempts",
+        ),
     ]
     assert assessor.supplemental_allowed == [True, False]
     assert control.traces[-1].retrieval_queries == (
         "What is the retry limit?",
         "bounded agent maximum retrieval attempts",
     )
-    assert [
-        assessment.selected_chunk_ids
-        for assessment in control.traces[-1].assessments
-    ] == [
+    assert [assessment.selected_chunk_ids for assessment in control.traces[-1].assessments] == [
         (),
         (str(supplemental.chunk_id),),
     ]
     assert control.traces[-1].supplemental_retrieval_attempts == 1
     assert control.traces[-1].citation_repair_attempts == 0
-    assert [candidate.chunk_id for candidate in generator.evidence] == [
-        str(supplemental.chunk_id)
-    ]
+    assert [candidate.chunk_id for candidate in generator.evidence] == [str(supplemental.chunk_id)]
     assert events[-1].type == "answered"
 
 
@@ -303,13 +339,9 @@ async def test_workflow_repairs_invalid_citations_once_before_answering() -> Non
     ]
 
     assert repairer.answers == ["Bounded workflows prevent unbounded loops"]
-    assert [event.stage for event in events if event.type == "status"].count(
-        "repairing"
-    ) == 1
+    assert [event.stage for event in events if event.type == "status"].count("repairing") == 1
     assert events[-1].type == "answered"
-    assert events[-1].answer == (
-        f"Bounded workflows prevent unbounded loops [{citation_id}]"
-    )
+    assert events[-1].answer == (f"Bounded workflows prevent unbounded loops [{citation_id}]")
 
 
 async def test_workflow_stops_when_cancellation_is_seen_between_nodes() -> None:
@@ -380,10 +412,12 @@ async def test_workflow_refuses_after_one_unsuccessful_supplemental_retrieval() 
             self,
             *,
             knowledge_base_id: UUID,
-            query: str,
-        ) -> list[RetrievedEvidence]:
-            self.queries.append(query)
-            return [initial] if len(self.queries) == 1 else [supplemental]
+            queries: Sequence[str],
+        ) -> RetrievalResult:
+            executed = tuple(queries)
+            self.queries.append(executed)
+            evidence = [initial] if len(self.queries) == 1 else [supplemental]
+            return _retrieval_result(executed, evidence)
 
     retrieval = TwoResultRetrieval([])
     assessor = SequentialAssessor(
@@ -403,13 +437,13 @@ async def test_workflow_refuses_after_one_unsuccessful_supplemental_retrieval() 
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(uuid4(), uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(uuid4(), uuid4(), "Question", ()))
     ]
 
-    assert retrieval.queries == ["Question", "one supplemental query"]
+    assert retrieval.queries == [
+        ("Question",),
+        ("Question", "one supplemental query"),
+    ]
     assert assessor.supplemental_allowed == [True, False]
     assert events[-1].type == "refused"
     assert events[-1].code == "INSUFFICIENT_EVIDENCE"
@@ -430,10 +464,7 @@ async def test_workflow_refuses_when_the_single_citation_repair_is_still_invalid
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(uuid4(), uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(uuid4(), uuid4(), "Question", ()))
     ]
 
     assert repairer.answers == ["Initial answer without citation"]
@@ -467,10 +498,7 @@ async def test_workflow_rejects_an_assessment_that_selects_unknown_chunks() -> N
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(uuid4(), uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(uuid4(), uuid4(), "Question", ()))
     ]
 
     assert events[-1].type == "refused"
@@ -493,10 +521,7 @@ async def test_workflow_refuses_when_one_claim_has_no_citation() -> None:
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(run_id, uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(run_id, uuid4(), "Question", ()))
     ]
 
     assert events[-1].type == "refused"

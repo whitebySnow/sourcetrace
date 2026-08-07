@@ -439,13 +439,25 @@ export interface components {
         };
         /** AnswerWorkflowTrace */
         AnswerWorkflowTrace: {
+            /** Retrieval Plan Version */
+            retrieval_plan_version?: string | null;
             /** Retrieval Queries */
-            retrieval_queries: string[];
+            retrieval_queries?: string[];
+            /** Retrieval Rounds */
+            retrieval_rounds?: components["schemas"]["WorkflowRetrievalRoundTrace"][];
             /** Assessments */
-            assessments: components["schemas"]["WorkflowEvidenceAssessmentTrace"][];
-            /** Supplemental Retrieval Attempts */
+            assessments?: components["schemas"]["WorkflowEvidenceAssessmentTrace"][];
+            /** Citation Validations */
+            citation_validations?: components["schemas"]["WorkflowCitationValidationTrace"][];
+            /**
+             * Supplemental Retrieval Attempts
+             * @default 0
+             */
             supplemental_retrieval_attempts: number;
-            /** Citation Repair Attempts */
+            /**
+             * Citation Repair Attempts
+             * @default 0
+             */
             citation_repair_attempts: number;
         };
         /** Body_upload_document_api_v1_knowledge_bases__knowledge_base_id__documents_post */
@@ -747,6 +759,16 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** WorkflowCitationValidationTrace */
+        WorkflowCitationValidationTrace: {
+            /** Valid */
+            valid: boolean;
+            /**
+             * Issue
+             * @enum {string}
+             */
+            issue: "empty_answer" | "uncited_claim" | "unknown_label" | "valid";
+        };
         /** WorkflowEvidenceAssessmentTrace */
         WorkflowEvidenceAssessmentTrace: {
             /** Sufficient */
@@ -755,6 +777,48 @@ export interface components {
             selected_chunk_ids: string[];
             /** Supplemental Query */
             supplemental_query: string | null;
+        };
+        /** WorkflowFusedCandidateTrace */
+        WorkflowFusedCandidateTrace: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Fused Score */
+            fused_score: number;
+            /** Best Raw Cosine Score */
+            best_raw_cosine_score: number;
+            /** Selected As Primary */
+            selected_as_primary: boolean;
+        };
+        /** WorkflowQueryRetrievalTrace */
+        WorkflowQueryRetrievalTrace: {
+            /** Query */
+            query: string;
+            /** Candidates */
+            candidates: components["schemas"]["WorkflowRetrievalCandidateTrace"][];
+        };
+        /** WorkflowRetrievalCandidateTrace */
+        WorkflowRetrievalCandidateTrace: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Raw Rank */
+            raw_rank: number;
+            /** Raw Cosine Score */
+            raw_cosine_score: number;
+        };
+        /** WorkflowRetrievalRoundTrace */
+        WorkflowRetrievalRoundTrace: {
+            /** Round Number */
+            round_number: number;
+            /** Queries */
+            queries: string[];
+            /** Query Results */
+            query_results: components["schemas"]["WorkflowQueryRetrievalTrace"][];
+            /** Fused Candidates */
+            fused_candidates: components["schemas"]["WorkflowFusedCandidateTrace"][];
+            /** Final Evidence Chunk Ids */
+            final_evidence_chunk_ids: string[];
+            /** Rrf Rank Constant */
+            rrf_rank_constant: number;
         };
     };
     responses: never;

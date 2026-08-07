@@ -28,14 +28,14 @@ from sourcetrace.rag.llm import (
     OpenAICompatibleCitationRepairer,
     OpenAICompatibleConfig,
     OpenAICompatibleEvidenceAssessor,
-    OpenAICompatibleQuestionRewriter,
+    OpenAICompatibleQuestionPlanner,
 )
 from sourcetrace.rag.ports import (
     AnswerGenerator,
     CitationRepairer,
     EmbeddingProvider,
     EvidenceAssessor,
-    QuestionRewriter,
+    QuestionPlanner,
 )
 from sourcetrace.rag.workflow import AnswerWorkflow
 
@@ -121,13 +121,11 @@ async def get_answer_generator() -> AsyncIterator[AnswerGenerator]:
         )
 
 
-async def get_question_rewriter() -> AsyncIterator[QuestionRewriter]:
+async def get_question_planner() -> AsyncIterator[QuestionPlanner]:
     settings = get_settings()
     async with httpx.AsyncClient() as client:
-        yield OpenAICompatibleQuestionRewriter(
-            _openai_compatible_config(
-                prompt_version=settings.llm_question_rewrite_prompt_version
-            ),
+        yield OpenAICompatibleQuestionPlanner(
+            _openai_compatible_config(prompt_version=settings.llm_retrieval_plan_prompt_version),
             client=client,
         )
 
@@ -147,9 +145,7 @@ async def get_citation_repairer() -> AsyncIterator[CitationRepairer]:
     settings = get_settings()
     async with httpx.AsyncClient() as client:
         yield OpenAICompatibleCitationRepairer(
-            _openai_compatible_config(
-                prompt_version=settings.llm_citation_repair_prompt_version
-            ),
+            _openai_compatible_config(prompt_version=settings.llm_citation_repair_prompt_version),
             client=client,
         )
 
@@ -165,7 +161,7 @@ def get_answer_service(
         Depends(get_query_embedding_provider),
     ],
     generator: Annotated[AnswerGenerator, Depends(get_answer_generator)],
-    question_rewriter: Annotated[QuestionRewriter, Depends(get_question_rewriter)],
+    question_planner: Annotated[QuestionPlanner, Depends(get_question_planner)],
     evidence_assessor: Annotated[EvidenceAssessor, Depends(get_evidence_assessor)],
     citation_repairer: Annotated[CitationRepairer, Depends(get_citation_repairer)],
 ) -> AnswerService:
@@ -174,9 +170,10 @@ def get_answer_service(
     retrieval = RetrievalService(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=embedding_provider,
-        question_rewriter=question_rewriter,
+        question_planner=question_planner,
         top_k=settings.retrieval_top_k,
         page_neighbor_count=settings.retrieval_page_neighbor_count,
+        rrf_rank_constant=settings.retrieval_rrf_rank_constant,
     )
     return AnswerService(
         repository=repository,
@@ -195,13 +192,9 @@ def get_answer_service(
             llm_model=settings.llm_model,
             prompt_version=settings.llm_prompt_version,
             retrieval_version=settings.retrieval_config_version,
-            query_rewrite_version=settings.llm_question_rewrite_prompt_version,
-            evidence_assessment_prompt_version=(
-                settings.llm_evidence_assessment_prompt_version
-            ),
-            citation_repair_prompt_version=(
-                settings.llm_citation_repair_prompt_version
-            ),
+            query_rewrite_version=settings.llm_retrieval_plan_prompt_version,
+            evidence_assessment_prompt_version=(settings.llm_evidence_assessment_prompt_version),
+            citation_repair_prompt_version=(settings.llm_citation_repair_prompt_version),
             workflow_version=settings.answer_workflow_version,
         ),
         context_question_limit=settings.answer_context_question_limit,

@@ -3,7 +3,14 @@ from uuid import UUID, uuid4
 
 from sourcetrace.evaluation.models import EvaluationCase
 from sourcetrace.evaluation.workflow_subject import WorkflowEvaluationSubject
-from sourcetrace.modules.retrieval.service import RetrievedEvidence
+from sourcetrace.modules.retrieval.service import (
+    FusedRetrievalCandidate,
+    QueryRetrievalResult,
+    RankedRetrievalCandidate,
+    RetrievalPlan,
+    RetrievalResult,
+    RetrievedEvidence,
+)
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow
 
@@ -12,21 +19,41 @@ class StaticRetrieval:
     def __init__(self, evidence: RetrievedEvidence) -> None:
         self.evidence = evidence
 
-    async def resolve_query(
+    async def resolve_plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str:
-        return question
+    ) -> RetrievalPlan:
+        return RetrievalPlan("bounded-multi-query-v1", (question,))
 
     async def search(
         self,
         *,
         knowledge_base_id: UUID,
-        query: str,
-    ) -> list[RetrievedEvidence]:
-        return [self.evidence]
+        queries: Sequence[str],
+    ) -> RetrievalResult:
+        query_results = tuple(
+            QueryRetrievalResult(
+                query=query,
+                candidates=(RankedRetrievalCandidate(rank=1, evidence=self.evidence),),
+            )
+            for query in queries
+        )
+        return RetrievalResult(
+            evidence=(self.evidence,),
+            primary_evidence=(self.evidence,),
+            query_results=query_results,
+            fused_candidates=(
+                FusedRetrievalCandidate(
+                    evidence=self.evidence,
+                    fused_score=sum(1 / 61 for _query in queries),
+                    best_raw_score=self.evidence.score,
+                    selected_as_primary=True,
+                ),
+            ),
+            rrf_rank_constant=60,
+        )
 
 
 class SelectingAssessor:
@@ -173,6 +200,16 @@ async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence
     candidate = observation.decision_trace.retrievals[0].candidates[0]
     assert candidate.chunk_id == evidence.chunk_id
     assert candidate.score == 0.9
+    assert candidate.raw_rank == 1
+    assert observation.decision_trace.retrieval_plan_version == ("bounded-multi-query-v1")
+    retrieval_round = observation.decision_trace.retrieval_rounds[0]
+    assert retrieval_round.round_number == 1
+    assert retrieval_round.queries == (case.question,)
+    assert retrieval_round.query_results[0].candidates[0].raw_rank == 1
+    assert retrieval_round.fused_candidates[0].chunk_id == evidence.chunk_id
+    assert retrieval_round.fused_candidates[0].selected_as_primary is True
+    assert retrieval_round.final_evidence_chunk_ids == (evidence.chunk_id,)
+    assert retrieval_round.rrf_rank_constant == 60
     assessment = observation.decision_trace.assessments[0]
     assert assessment.sufficient is False
     assert assessment.selected_chunk_ids == ()

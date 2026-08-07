@@ -6,7 +6,11 @@ from typing import Any, Literal
 
 import httpx
 
-from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
+from sourcetrace.rag.ports import (
+    EvidenceDecision,
+    RetrievalCandidate,
+    RetrievalPlanProposal,
+)
 
 
 class LlmProviderError(Exception):
@@ -41,9 +45,7 @@ def _grounded_prompt(
     question: str,
     evidence: Sequence[RetrievalCandidate],
 ) -> list[dict[str, str]]:
-    evidence_text = "\n\n".join(
-        f"[{item.citation_id}]\n{item.content}" for item in evidence
-    )
+    evidence_text = "\n\n".join(f"[{item.citation_id}]\n{item.content}" for item in evidence)
     return [
         {
             "role": "system",
@@ -62,7 +64,7 @@ def _grounded_prompt(
     ]
 
 
-def _question_rewrite_prompt(
+def _retrieval_plan_prompt(
     question: str,
     recent_questions: Sequence[str],
 ) -> list[dict[str, str]]:
@@ -70,10 +72,12 @@ def _question_rewrite_prompt(
         {
             "role": "system",
             "content": (
-                "Rewrite the current user question into a standalone retrieval query. "
+                "Plan bounded dense retrieval for the current user question. The application "
+                "always executes the original question, so return only zero, one, or two "
+                "additional standalone retrieval queries that may improve evidence recall. "
                 "Use recent user questions only to resolve references. Do not answer the "
                 "question, add facts, or use outside knowledge. Keep the current question's "
-                "language. Return JSON with exactly one string field named retrieval_query."
+                "language. Return JSON with exactly one array field named additional_queries."
             ),
         },
         {
@@ -91,7 +95,7 @@ def _question_rewrite_prompt(
 
 def _evidence_assessment_prompt(
     question: str,
-    query: str,
+    queries: Sequence[str],
     evidence: Sequence[RetrievalCandidate],
     *,
     supplemental_allowed: bool,
@@ -113,7 +117,7 @@ def _evidence_assessment_prompt(
             "content": json.dumps(
                 {
                     "question": question,
-                    "retrieval_query": query,
+                    "retrieval_queries": list(queries),
                     "supplemental_allowed": supplemental_allowed,
                     "candidates": [
                         {
@@ -281,7 +285,7 @@ class OpenAICompatibleAnswerGenerator:
             ) from error
 
 
-class OpenAICompatibleQuestionRewriter:
+class OpenAICompatibleQuestionPlanner:
     def __init__(
         self,
         config: OpenAICompatibleConfig,
@@ -291,24 +295,32 @@ class OpenAICompatibleQuestionRewriter:
         self.config = config
         self._client = client
 
-    async def rewrite(
+    async def plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str:
+    ) -> RetrievalPlanProposal:
         try:
             parsed = await _structured_completion(
                 self.config,
                 self._client,
-                _question_rewrite_prompt(question, recent_questions),
+                _retrieval_plan_prompt(question, recent_questions),
             )
-            if set(parsed) != {"retrieval_query"}:
+            if set(parsed) != {"additional_queries"}:
                 raise ValueError
-            query = parsed["retrieval_query"]
-            if not isinstance(query, str) or not query.strip():
+            additional_queries = parsed["additional_queries"]
+            if (
+                not isinstance(additional_queries, list)
+                or len(additional_queries) > 2
+                or any(
+                    not isinstance(query, str) or not query.strip() for query in additional_queries
+                )
+            ):
                 raise ValueError
-            return query.strip()
+            return RetrievalPlanProposal(
+                additional_queries=tuple(query.strip() for query in additional_queries)
+            )
         except (TypeError, ValueError) as error:
             raise LlmProviderError(
                 "LLM_INVALID_RESPONSE",
@@ -334,12 +346,17 @@ async def _structured_completion(
                     request["response_format"] = {"type": "json_object"}
                 if config.structured_output_thinking != "default":
                     request["thinking"] = {"type": config.structured_output_thinking}
-                response = await client.post(
-                    url,
-                    headers={"Authorization": f"Bearer {config.api_key}"},
-                    json=request,
-                    timeout=config.timeout_seconds,
-                )
+                try:
+                    response = await client.post(
+                        url,
+                        headers={"Authorization": f"Bearer {config.api_key}"},
+                        json=request,
+                        timeout=config.timeout_seconds,
+                    )
+                except (httpx.NetworkError, httpx.ProtocolError):
+                    if attempt == 1:
+                        raise
+                    continue
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict):
@@ -442,7 +459,7 @@ class OpenAICompatibleEvidenceAssessor:
         self,
         *,
         question: str,
-        query: str,
+        queries: Sequence[str],
         evidence: Sequence[RetrievalCandidate],
         supplemental_allowed: bool,
     ) -> EvidenceDecision:
@@ -451,7 +468,7 @@ class OpenAICompatibleEvidenceAssessor:
             self._client,
             _evidence_assessment_prompt(
                 question,
-                query,
+                queries,
                 evidence,
                 supplemental_allowed=supplemental_allowed,
             ),
@@ -484,9 +501,7 @@ class OpenAICompatibleEvidenceAssessor:
                 sufficient=sufficient,
                 selected_chunk_ids=tuple(selected),
                 supplemental_query=(
-                    supplemental_query.strip()
-                    if isinstance(supplemental_query, str)
-                    else None
+                    supplemental_query.strip() if isinstance(supplemental_query, str) else None
                 ),
             )
         except (TypeError, ValueError) as error:

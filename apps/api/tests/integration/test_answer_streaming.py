@@ -15,7 +15,7 @@ from sourcetrace.api.dependencies import (
     get_document_source_storage,
     get_evidence_assessor,
     get_query_embedding_provider,
-    get_question_rewriter,
+    get_question_planner,
 )
 from sourcetrace.core.config import get_settings
 from sourcetrace.db.session import get_session
@@ -27,12 +27,16 @@ from sourcetrace.modules.documents.models import Chunk
 from sourcetrace.modules.documents.repository import DocumentRepository
 from sourcetrace.modules.documents.service import DocumentService
 from sourcetrace.modules.documents.storage import LocalDocumentStorage
-from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
+from sourcetrace.rag.ports import (
+    EvidenceDecision,
+    RetrievalCandidate,
+    RetrievalPlanProposal,
+)
 
 
 class QueryEmbeddingProvider:
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
-        assert texts == ["How are vectors stored?"]
+        assert list(texts) == ["How are vectors stored?"]
         return [[1.0, *([0.0] * 1023)]]
 
 
@@ -119,9 +123,9 @@ class BlockingAnswerGenerator:
             self.closed = True
 
 
-class NeverQuestionRewriter:
-    async def rewrite(self, **kwargs: object) -> str:
-        raise AssertionError("question rewriting must not start without history")
+class NoAdditionalQueryPlanner:
+    async def plan(self, **kwargs: object) -> RetrievalPlanProposal:
+        return RetrievalPlanProposal(additional_queries=())
 
 
 class SelectingAllEvidenceAssessor:
@@ -145,13 +149,13 @@ class NoOpCitationRepairer:
 
 def _answer_app():
     app = create_app()
-    app.dependency_overrides[get_question_rewriter] = NeverQuestionRewriter
+    app.dependency_overrides[get_question_planner] = NoAdditionalQueryPlanner
     app.dependency_overrides[get_evidence_assessor] = SelectingAllEvidenceAssessor
     app.dependency_overrides[get_citation_repairer] = NoOpCitationRepairer
     return app
 
 
-class RecordingQuestionRewriter:
+class RecordingQuestionPlanner:
     def __init__(
         self,
         retrieval_query: str = "Why are BGE-M3 dense vectors normalized before storage?",
@@ -159,14 +163,14 @@ class RecordingQuestionRewriter:
         self.calls: list[tuple[str, list[str]]] = []
         self.retrieval_query = retrieval_query
 
-    async def rewrite(
+    async def plan(
         self,
         *,
         question: str,
         recent_questions: Sequence[str],
-    ) -> str:
+    ) -> RetrievalPlanProposal:
         self.calls.append((question, list(recent_questions)))
-        return self.retrieval_query
+        return RetrievalPlanProposal(additional_queries=(self.retrieval_query,))
 
 
 class RewrittenQueryEmbeddingProvider:
@@ -175,20 +179,32 @@ class RewrittenQueryEmbeddingProvider:
 
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
         self.queries.extend(texts)
-        assert texts == ["Why are BGE-M3 dense vectors normalized before storage?"]
-        return [[1.0, *([0.0] * 1023)]]
+        assert list(texts) == [
+            "Why is it normalized?",
+            "Why are BGE-M3 dense vectors normalized before storage?",
+        ]
+        return [
+            [0.0, 1.0, *([0.0] * 1022)],
+            [1.0, *([0.0] * 1023)],
+        ]
 
 
 class NoMatchingEvidenceEmbeddingProvider:
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
-        assert texts == ["What color is the Moon?"]
-        return [[0.0, 1.0, *([0.0] * 1022)]]
+        assert list(texts) == ["What color is it?", "What color is the Moon?"]
+        return [[0.0, 1.0, *([0.0] * 1022)]] * 2
 
 
 class ChineseRewrittenQueryEmbeddingProvider:
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
-        assert texts == ["BGE-M3 稠密向量为什么要在存储前归一化?"]
-        return [[1.0, *([0.0] * 1023)]]
+        assert list(texts) == [
+            "它为什么需要归一化?",
+            "BGE-M3 稠密向量为什么要在存储前归一化?",
+        ]
+        return [
+            [0.0, 1.0, *([0.0] * 1022)],
+            [1.0, *([0.0] * 1023)],
+        ]
 
 
 class FollowUpAnswerGenerator:
@@ -375,13 +391,13 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["llm_model"] == get_settings().llm_model
         assert persisted["prompt_version"] == "grounded-answer-v2"
         assert persisted["retrieval_version"] == get_settings().retrieval_config_version
-        assert persisted["evidence_assessment_prompt_version"] == (
-            "evidence-assessment-v1"
-        )
+        assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v1")
         assert persisted["citation_repair_prompt_version"] == "citation-repair-v2"
-        assert persisted["workflow_version"] == "langgraph-bounded-v1"
+        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v2"
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
+        assert trace["retrieval_plan_version"] == "bounded-multi-query-v1"
+        assert len(trace["retrieval_rounds"]) == 1
         assert trace["supplemental_retrieval_attempts"] == 0
         assert trace["citation_repair_attempts"] == 0
         assert len(trace["assessments"]) == 1
@@ -397,12 +413,12 @@ async def test_follow_up_uses_bounded_questions_for_fresh_retrieval(
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
-    rewriter = RecordingQuestionRewriter()
+    rewriter = RecordingQuestionPlanner()
     embedding = RewrittenQueryEmbeddingProvider()
     app = _answer_app()
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_query_embedding_provider] = lambda: embedding
-    app.dependency_overrides[get_question_rewriter] = lambda: rewriter
+    app.dependency_overrides[get_question_planner] = lambda: rewriter
     app.dependency_overrides[get_answer_generator] = FollowUpAnswerGenerator
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -435,13 +451,11 @@ async def test_follow_up_uses_bounded_questions_for_fresh_retrieval(
         await _create_searchable_evidence(session, knowledge_base_id)
 
         response = await client.post(
-            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
-            f"{conversation_id}/answers",
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers",
             json={"content": "Why is it normalized?"},
         )
         history_response = await client.get(
-            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
-            f"{conversation_id}/answers"
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers"
         )
 
     assert response.status_code == 200
@@ -458,13 +472,12 @@ async def test_follow_up_uses_bounded_questions_for_fresh_retrieval(
         )
     ]
     assert embedding.queries == [
-        "Why are BGE-M3 dense vectors normalized before storage?"
+        "Why is it normalized?",
+        "Why are BGE-M3 dense vectors normalized before storage?",
     ]
     persisted = history_response.json()["items"][0]
-    assert persisted["retrieval_query"] == (
-        "Why are BGE-M3 dense vectors normalized before storage?"
-    )
-    assert persisted["query_rewrite_version"] == "follow-up-query-v1"
+    assert persisted["retrieval_query"] == "Why is it normalized?"
+    assert persisted["query_rewrite_version"] == "bounded-multi-query-v1"
 
 
 async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
@@ -473,13 +486,11 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
-    rewriter = RecordingQuestionRewriter("What color is the Moon?")
+    rewriter = RecordingQuestionPlanner("What color is the Moon?")
     app = _answer_app()
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_query_embedding_provider] = (
-        NoMatchingEvidenceEmbeddingProvider
-    )
-    app.dependency_overrides[get_question_rewriter] = lambda: rewriter
+    app.dependency_overrides[get_query_embedding_provider] = NoMatchingEvidenceEmbeddingProvider
+    app.dependency_overrides[get_question_planner] = lambda: rewriter
     app.dependency_overrides[get_answer_generator] = NeverAnswerGenerator
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -519,9 +530,7 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
                 retrieval_version="pgvector-cosine-v1",
                 retrieval_query="What is the Moon made of?",
                 query_rewrite_version="legacy-direct-query-v1",
-                evidence_assessment_prompt_version=(
-                    "legacy-no-evidence-assessment"
-                ),
+                evidence_assessment_prompt_version=("legacy-no-evidence-assessment"),
                 citation_repair_prompt_version="legacy-no-citation-repair",
                 workflow_version="linear-grounded-v1",
                 workflow_trace={
@@ -537,21 +546,17 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
         await _create_searchable_evidence(session, knowledge_base_id)
 
         response = await client.post(
-            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
-            f"{conversation_id}/answers",
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers",
             json={"content": "What color is it?"},
         )
         history_response = await client.get(
-            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
-            f"{conversation_id}/answers"
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers"
         )
 
     events = _events(response.text)
     assert events[-1][0] == "refusal"
     assert events[-1][1]["code"] == "INSUFFICIENT_EVIDENCE"
-    assert rewriter.calls == [
-        ("What color is it?", ["What is the Moon made of?"])
-    ]
+    assert rewriter.calls == [("What color is it?", ["What is the Moon made of?"])]
     assert "UNSUPPORTED PRIOR ANSWER" not in json.dumps(rewriter.calls)
     current = next(
         item
@@ -568,15 +573,11 @@ async def test_follow_up_answer_uses_question_language_and_preserves_source_text
     async def override_session() -> AsyncIterator[AsyncSession]:
         yield session
 
-    rewriter = RecordingQuestionRewriter(
-        "BGE-M3 稠密向量为什么要在存储前归一化?"
-    )
+    rewriter = RecordingQuestionPlanner("BGE-M3 稠密向量为什么要在存储前归一化?")
     app = _answer_app()
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_query_embedding_provider] = (
-        ChineseRewrittenQueryEmbeddingProvider
-    )
-    app.dependency_overrides[get_question_rewriter] = lambda: rewriter
+    app.dependency_overrides[get_query_embedding_provider] = ChineseRewrittenQueryEmbeddingProvider
+    app.dependency_overrides[get_question_planner] = lambda: rewriter
     app.dependency_overrides[get_answer_generator] = ChineseFollowUpAnswerGenerator
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -605,8 +606,7 @@ async def test_follow_up_answer_uses_question_language_and_preserves_source_text
         await _create_searchable_evidence(session, knowledge_base_id)
 
         response = await client.post(
-            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/"
-            f"{conversation_id}/answers",
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers",
             json={"content": "它为什么需要归一化?"},
         )
 

@@ -143,26 +143,34 @@ EMBEDDING_MODEL_CONTAINER=/models/huggingface/modelscope/BAAI/bge-m3
 `LLM_API_KEY` 和 `LLM_MODEL` 后，API 进程直接请求供应商；回答模型权重不会下载到本机，
 也不会进入仓库或 Docker 镜像。本项目默认模型名仅是远程供应商路由标识。
 
-`LLM_TIMEOUT_SECONDS` 约束每次供应商请求的完整生命周期，包括流式回答以及问题改写、证据判断
+`LLM_TIMEOUT_SECONDS` 约束每次供应商请求的完整生命周期，包括流式回答以及查询规划、证据判断
 和引用修复的非流式结构化调用。供应商发送的 SSE 或空行 keep-alive 注释可以保持底层连接，但
 不能无限延长回答运行；超时统一映射为 `LLM_TIMEOUT`。
 
 `LLM_STRUCTURED_OUTPUT_MODE=json_object` 只在供应商明确兼容 OpenAI JSON Output 时启用。它会
-为问题改写、证据判断和引用修复发送 `response_format: {"type": "json_object"}`；若供应商成功响应
+为查询规划、证据判断和引用修复发送 `response_format: {"type": "json_object"}`；若供应商成功响应
 但返回空正文，客户端在同一总时限内仅重试一次，随后报告 `LLM_INVALID_RESPONSE`。
+非流式结构化调用遇到连接或协议级瞬时异常时也会在同一总时限内最多重试一次；HTTP 状态错误
+和已收到的无效业务响应不会被当作可无限重放的请求。
 
 `LLM_STRUCTURED_OUTPUT_THINKING` 默认为 `default`，不向供应商发送 thinking 控制参数。仅当供应商
 明确支持该 OpenAI 兼容扩展时，可以设为 `enabled` 或 `disabled`；它只影响格式化的内部决策调用，
 不改变面向用户的流式回答生成。
 
-追问查询改写使用同一供应商，并由 `LLM_QUESTION_REWRITE_PROMPT_VERSION` 记录提示词版本。
+有界查询规划使用同一供应商，并由 `LLM_RETRIEVAL_PLAN_PROMPT_VERSION` 记录提示词版本。
+原始用户问题始终是第一个检索查询，规划器只能给出零到两个附加查询；初始计划和最多一次
+证据不足补检索共享两个附加查询的总预算，规范化后重复的查询不会执行。
 `ANSWER_CONTEXT_QUESTION_LIMIT` 限制可用于指代消解的近期用户问题数量；历史模型回答不会
-发送给改写器，也不会成为后续回答证据。
+发送给规划器，也不会成为后续回答证据。规划器生成的查询只作为检索工具输入，不能充当证据。
+
+每个唯一查询分别执行同一知识库和文档版本范围内的稠密检索。候选在页多样性选择前使用
+Reciprocal Rank Fusion 合并，`RETRIEVAL_RRF_RANK_CONSTANT` 配置融合排名常数。最终排序依次
+比较融合分数、最佳原始余弦分数和 chunk UUID；原始余弦分数仍用于最低证据阈值。
 
 证据判断和引用修复同样使用 OpenAI 兼容供应商，但通过独立端口和严格 JSON 契约接入。
 `LLM_EVIDENCE_ASSESSMENT_PROMPT_VERSION` 与 `LLM_CITATION_REPAIR_PROMPT_VERSION` 分别记录
 两个决策提示词版本。每个 Answer Run 会同时保存这些版本以及
-`ANSWER_WORKFLOW_VERSION=langgraph-bounded-v1`，用于重放时识别完整决策配置。
+`ANSWER_WORKFLOW_VERSION=langgraph-bounded-multi-query-v2`，用于重放时识别完整决策配置。
 
 可使用以下命令做最小连通性检查：
 
