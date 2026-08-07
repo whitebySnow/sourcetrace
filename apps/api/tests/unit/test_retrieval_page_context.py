@@ -5,6 +5,7 @@ import pytest
 
 from sourcetrace.modules.retrieval.service import RetrievalService, RetrievedEvidence
 from sourcetrace.rag.ports import RetrievalPlanProposal
+from tests.helpers import PreserveOrderReranker
 
 
 class StaticEmbeddingProvider:
@@ -72,6 +73,7 @@ async def test_retrieval_adds_only_repository_supplied_same_page_neighbors() -> 
         repository=repository,
         embedding_provider=StaticEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=8,
         page_neighbor_count=1,
     )
@@ -95,6 +97,7 @@ async def test_retrieval_does_not_expand_pages_when_disabled() -> None:
         repository=repository,
         embedding_provider=StaticEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=8,
     )
 
@@ -115,6 +118,7 @@ def test_retrieval_rejects_negative_page_neighbor_count() -> None:
             repository=PageContextRepository(primary, primary),
             embedding_provider=StaticEmbeddingProvider(),
             question_planner=UnusedQuestionPlanner(),
+            reranker=PreserveOrderReranker(),
             top_k=8,
             page_neighbor_count=-1,
         )
@@ -128,5 +132,6 @@ def test_retrieval_rejects_more_than_eight_primary_candidates() -> None:
             repository=PageContextRepository(primary, primary),
             embedding_provider=StaticEmbeddingProvider(),
             question_planner=UnusedQuestionPlanner(),
+            reranker=PreserveOrderReranker(),
             top_k=9,
         )

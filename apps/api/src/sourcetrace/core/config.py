@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     retrieval_rrf_rank_constant: int = Field(default=60, ge=1, le=1000)
     retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)
     retrieval_minimum_evidence: int = Field(default=1, ge=1)
-    retrieval_config_version: str = "pgvector-cosine-multi-query-rrf-v4"
+    retrieval_config_version: str = "pgvector-cosine-multi-query-rrf-bge-reranker-v5"
     answer_workflow_version: str = "langgraph-bounded-multi-query-v2"
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "BAAI/bge-m3"
@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=8, ge=1)
     embedding_dimension: int = Field(default=1024, ge=1)
     embedding_config_version: str = "bge-m3-dense-v1"
+    reranker_provider: str = "sentence-transformers"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_model_revision: str = "e099d4b9cdbd291b1569d416f19aaa6523570bc3"
+    reranker_model_weight_sha256: str = (
+        "d9e3e081faff1eefb84019509b2f5558fd74c1a05a2c7db22f74174fcedb5286"
+    )
+    reranker_cache_dir: Path = Path(r"D:\DevelopEnvironment\huggingface")
+    reranker_device: str = "cpu"
+    reranker_batch_size: int = Field(default=8, ge=1)
+    reranker_config_version: str = "bge-reranker-v2-m3-cross-encoder-v1"
 
 
 @lru_cache

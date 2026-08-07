@@ -29,6 +29,7 @@ from sourcetrace.modules.conversations.service import ConversationService
 from sourcetrace.modules.retrieval.service import RetrievedEvidence
 from sourcetrace.rag.embeddings import EmbeddingProviderError
 from sourcetrace.rag.llm import LlmProviderError
+from sourcetrace.rag.rerankers import RerankerProviderError
 from sourcetrace.rag.workflow import (
     AnswerWorkflow,
     WorkflowAnswered,
@@ -407,7 +408,7 @@ class AnswerService:
                     )
                     return
             raise RuntimeError("answer workflow completed without a terminal event")
-        except (EmbeddingProviderError, LlmProviderError) as error:
+        except (EmbeddingProviderError, LlmProviderError, RerankerProviderError) as error:
             if not await self._fail(run.id, error.code, error.safe_message):
                 yield await self._cancel(run.id)
                 return

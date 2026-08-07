@@ -115,7 +115,16 @@ class WorkflowFusedCandidateTrace(BaseModel):
     chunk_id: str
     fused_score: float
     best_raw_cosine_score: float
+    reranker_score: float | None = None
+    reranked_rank: int | None = None
     selected_as_primary: bool
+
+
+class WorkflowRerankerTrace(BaseModel):
+    provider: str
+    model: str
+    revision: str
+    config_version: str
 
 
 class WorkflowRetrievalRoundTrace(BaseModel):
@@ -125,6 +134,7 @@ class WorkflowRetrievalRoundTrace(BaseModel):
     fused_candidates: list[WorkflowFusedCandidateTrace]
     final_evidence_chunk_ids: list[str]
     rrf_rank_constant: int
+    reranker: WorkflowRerankerTrace | None = None
 
 
 class WorkflowCitationValidationTrace(BaseModel):

@@ -13,6 +13,7 @@ from sourcetrace.modules.knowledge_bases.service import KnowledgeBaseService
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
 from sourcetrace.modules.retrieval.service import RetrievalService
 from sourcetrace.rag.ports import RetrievalPlanProposal
+from tests.helpers import PreserveOrderReranker
 
 
 class QueryEmbeddingProvider:
@@ -197,6 +198,7 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=8,
     )
 
@@ -257,6 +259,7 @@ async def test_multi_query_rrf_uses_independent_pgvector_rankings_and_stable_tie
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=MultiQueryEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=8,
         rrf_rank_constant=60,
     )
@@ -287,6 +290,7 @@ async def test_retrieval_service_owns_bounded_query_plan_resolution(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
         question_planner=planner,
+        reranker=PreserveOrderReranker(),
         top_k=8,
     )
 
@@ -341,6 +345,7 @@ async def test_retrieval_can_be_pinned_to_an_exact_document_version_snapshot(
         ),
         embedding_provider=QueryEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=8,
     )
 
@@ -384,6 +389,7 @@ async def test_retrieval_expands_a_top_ranked_chunk_with_its_page_neighbor(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=8,
         page_neighbor_count=1,
     )
@@ -425,6 +431,7 @@ async def test_retrieval_primary_candidates_prefer_distinct_document_pages(
         repository=PgVectorRetrievalRepository(session),
         embedding_provider=QueryEmbeddingProvider(),
         question_planner=UnusedQuestionPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=8,
     )
 

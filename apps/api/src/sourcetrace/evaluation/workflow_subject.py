@@ -13,6 +13,7 @@ from sourcetrace.evaluation.models import (
     ObservedFusedCandidateTrace,
     ObservedQueryCandidateTrace,
     ObservedQueryRetrievalTrace,
+    ObservedRerankerTrace,
     ObservedRetrieval,
     ObservedRetrievalCandidate,
     ObservedRetrievalRoundTrace,
@@ -238,6 +239,8 @@ class WorkflowEvaluationSubject:
                             chunk_id=UUID(candidate.chunk_id),
                             fused_score=candidate.fused_score,
                             best_raw_cosine_score=(candidate.best_raw_cosine_score),
+                            reranker_score=candidate.reranker_score,
+                            reranked_rank=candidate.reranked_rank,
                             selected_as_primary=candidate.selected_as_primary,
                         )
                         for candidate in retrieval_round.fused_candidates
@@ -246,6 +249,16 @@ class WorkflowEvaluationSubject:
                         UUID(chunk_id) for chunk_id in retrieval_round.final_evidence_chunk_ids
                     ),
                     rrf_rank_constant=retrieval_round.rrf_rank_constant,
+                    reranker=(
+                        ObservedRerankerTrace(
+                            provider=retrieval_round.reranker.provider,
+                            model=retrieval_round.reranker.model,
+                            revision=retrieval_round.reranker.revision,
+                            config_version=retrieval_round.reranker.config_version,
+                        )
+                        if retrieval_round.reranker is not None
+                        else None
+                    ),
                 )
                 for retrieval_round in trace.retrieval_rounds
             ),

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from math import isfinite
 from typing import Protocol
 from uuid import UUID
 
-from sourcetrace.rag.ports import EmbeddingProvider, QuestionPlanner
+from sourcetrace.rag.ports import EmbeddingProvider, QuestionPlanner, Reranker, RerankerIdentity
 
 _PAGE_DIVERSITY_POOL_MULTIPLIER = 4
 _MAX_CANDIDATE_POOL_SIZE = 100
@@ -64,6 +65,8 @@ class FusedRetrievalCandidate:
     evidence: RetrievedEvidence
     fused_score: float
     best_raw_score: float
+    reranker_score: float
+    reranked_rank: int
     selected_as_primary: bool = False
 
 
@@ -74,6 +77,7 @@ class RetrievalResult:
     query_results: tuple[QueryRetrievalResult, ...]
     fused_candidates: tuple[FusedRetrievalCandidate, ...]
     rrf_rank_constant: int
+    reranker_identity: RerankerIdentity
 
 
 class RetrievalRepositoryPort(Protocol):
@@ -101,6 +105,7 @@ class RetrievalService:
         repository: RetrievalRepositoryPort,
         embedding_provider: EmbeddingProvider,
         question_planner: QuestionPlanner,
+        reranker: Reranker,
         top_k: int,
         page_neighbor_count: int = 0,
         rrf_rank_constant: int = 60,
@@ -116,6 +121,7 @@ class RetrievalService:
         self._repository = repository
         self._embedding_provider = embedding_provider
         self._question_planner = question_planner
+        self._reranker = reranker
         self._top_k = top_k
         self._page_neighbor_count = page_neighbor_count
         self._rrf_rank_constant = rrf_rank_constant
@@ -184,6 +190,27 @@ class RetrievalService:
             query_results,
             rank_constant=self._rrf_rank_constant,
         )
+        scores = tuple(
+            float(score)
+            for score in await self._reranker.score(
+                question=unique_queries[0],
+                passages=tuple(item.evidence.text for item in fused),
+            )
+        )
+        if len(scores) != len(fused) or not all(isfinite(score) for score in scores):
+            raise ValueError("reranker scores must be finite and match the candidate count")
+        fused = [
+            replace(item, reranker_score=score) for item, score in zip(fused, scores, strict=True)
+        ]
+        fused.sort(
+            key=lambda item: (
+                -item.reranker_score,
+                -item.fused_score,
+                -item.best_raw_score,
+                str(item.evidence.chunk_id),
+            )
+        )
+        fused = [replace(item, reranked_rank=rank) for rank, item in enumerate(fused, start=1)]
         primary = select_page_diverse(
             [item.evidence for item in fused],
             limit=self._top_k,
@@ -211,6 +238,7 @@ class RetrievalService:
             query_results=tuple(query_results),
             fused_candidates=tuple(fused),
             rrf_rank_constant=self._rrf_rank_constant,
+            reranker_identity=self._reranker.identity,
         )
 
 
@@ -256,6 +284,8 @@ def _fuse_ranked_candidates(
             evidence=evidence,
             fused_score=fused_scores[chunk_id],
             best_raw_score=evidence.score,
+            reranker_score=0.0,
+            reranked_rank=0,
         )
         for chunk_id, evidence in best_evidence.items()
     ]

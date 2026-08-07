@@ -13,6 +13,7 @@ from sourcetrace.modules.retrieval.service import (
 )
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow
+from tests.helpers import PreserveOrderReranker
 
 
 class StaticRetrieval:
@@ -49,10 +50,13 @@ class StaticRetrieval:
                     evidence=self.evidence,
                     fused_score=sum(1 / 61 for _query in queries),
                     best_raw_score=self.evidence.score,
+                    reranker_score=1.0,
+                    reranked_rank=1,
                     selected_as_primary=True,
                 ),
             ),
             rrf_rank_constant=60,
+            reranker_identity=PreserveOrderReranker.identity,
         )
 
 
@@ -208,6 +212,11 @@ async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence
     assert retrieval_round.query_results[0].candidates[0].raw_rank == 1
     assert retrieval_round.fused_candidates[0].chunk_id == evidence.chunk_id
     assert retrieval_round.fused_candidates[0].selected_as_primary is True
+    assert retrieval_round.fused_candidates[0].reranker_score == 1.0
+    assert retrieval_round.fused_candidates[0].reranked_rank == 1
+    assert retrieval_round.reranker is not None
+    assert retrieval_round.reranker.model == "preserve-order"
+    assert retrieval_round.reranker.revision == "v1"
     assert retrieval_round.final_evidence_chunk_ids == (evidence.chunk_id,)
     assert retrieval_round.rrf_rank_constant == 60
     assessment = observation.decision_trace.assessments[0]

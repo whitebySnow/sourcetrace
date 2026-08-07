@@ -20,6 +20,7 @@ from sourcetrace.rag.llm import (
     OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionPlanner,
 )
+from sourcetrace.rag.rerankers import BgeCrossEncoderReranker, RerankerConfig
 from sourcetrace.rag.workflow import AnswerWorkflow
 
 
@@ -99,6 +100,20 @@ async def run_real_evaluation(
             ),
             client=client,
         )
+        if settings.reranker_provider != "sentence-transformers":
+            raise RuntimeError(f"unsupported reranker provider: {settings.reranker_provider}")
+        reranker = BgeCrossEncoderReranker(
+            RerankerConfig(
+                provider=settings.reranker_provider,
+                model=settings.reranker_model,
+                revision=settings.reranker_model_revision,
+                weight_sha256=settings.reranker_model_weight_sha256,
+                cache_dir=settings.reranker_cache_dir,
+                device=settings.reranker_device,
+                batch_size=settings.reranker_batch_size,
+                version=settings.reranker_config_version,
+            )
+        )
         retrieval = RetrievalService(
             repository=PgVectorRetrievalRepository(
                 session,
@@ -106,6 +121,7 @@ async def run_real_evaluation(
             ),
             embedding_provider=embedding,
             question_planner=planner,
+            reranker=reranker,
             top_k=settings.retrieval_top_k,
             page_neighbor_count=settings.retrieval_page_neighbor_count,
             rrf_rank_constant=settings.retrieval_rrf_rank_constant,

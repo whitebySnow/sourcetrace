@@ -8,7 +8,8 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalService,
     RetrievedEvidence,
 )
-from sourcetrace.rag.ports import RetrievalPlanProposal
+from sourcetrace.rag.ports import RerankerIdentity, RetrievalPlanProposal
+from tests.helpers import PreserveOrderReranker
 
 
 class StaticPlanner:
@@ -34,6 +35,28 @@ class RecordingEmbeddingProvider:
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
         self.calls.append(tuple(texts))
         return self.embeddings
+
+
+class RecordingReranker:
+    identity = RerankerIdentity(
+        provider="test",
+        model="recording-reranker",
+        revision="v1",
+        config_version="recording-reranker-v1",
+    )
+
+    def __init__(self, scores: Sequence[float]) -> None:
+        self.scores = scores
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+    async def score(
+        self,
+        *,
+        question: str,
+        passages: Sequence[str],
+    ) -> Sequence[float]:
+        self.calls.append((question, tuple(passages)))
+        return self.scores
 
 
 class RankedListRepository:
@@ -93,6 +116,7 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
         repository=RankedListRepository({}),
         embedding_provider=RecordingEmbeddingProvider([]),
         question_planner=planner,
+        reranker=PreserveOrderReranker(),
         top_k=8,
     )
 
@@ -141,6 +165,7 @@ async def test_multi_query_search_uses_rrf_before_page_diversity() -> None:
         repository=repository,
         embedding_provider=embeddings,
         question_planner=StaticPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=2,
         rrf_rank_constant=60,
     )
@@ -194,6 +219,7 @@ async def test_rrf_ties_use_best_raw_score_then_chunk_uuid() -> None:
         ),
         embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,), (3.0,))),
         question_planner=StaticPlanner(),
+        reranker=PreserveOrderReranker(),
         top_k=3,
         rrf_rank_constant=60,
     )
@@ -208,3 +234,52 @@ async def test_rrf_ties_use_best_raw_score_then_chunk_uuid() -> None:
         higher_uuid.chunk_id,
         lower_score.chunk_id,
     ]
+
+
+async def test_reranker_scores_fused_union_before_page_diversity() -> None:
+    first = _evidence(
+        "00000000-0000-0000-0000-000000000001",
+        score=0.95,
+        page_number=1,
+    )
+    same_page = _evidence(
+        "00000000-0000-0000-0000-000000000002",
+        score=0.90,
+        page_number=1,
+    )
+    other_page = _evidence(
+        "00000000-0000-0000-0000-000000000003",
+        score=0.80,
+        page_number=2,
+    )
+    reranker = RecordingReranker((0.1, 0.8, 0.9))
+    service = RetrievalService(
+        repository=RankedListRepository({(1.0,): [first, same_page, other_page]}),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,),)),
+        question_planner=StaticPlanner(),
+        reranker=reranker,
+        top_k=2,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("original question",),
+    )
+
+    assert reranker.calls == [
+        (
+            "original question",
+            (first.text, same_page.text, other_page.text),
+        )
+    ]
+    assert [item.evidence.chunk_id for item in result.fused_candidates] == [
+        other_page.chunk_id,
+        same_page.chunk_id,
+        first.chunk_id,
+    ]
+    assert [item.chunk_id for item in result.primary_evidence] == [
+        other_page.chunk_id,
+        same_page.chunk_id,
+    ]
+    assert [item.reranked_rank for item in result.fused_candidates] == [1, 2, 3]
+    assert result.reranker_identity == reranker.identity

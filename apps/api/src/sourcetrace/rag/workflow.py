@@ -89,14 +89,34 @@ class FusedCandidateTrace:
     chunk_id: str
     fused_score: float
     best_raw_cosine_score: float
+    reranker_score: float
+    reranked_rank: int
     selected_as_primary: bool
 
-    def to_payload(self) -> dict[str, str | float | bool]:
+    def to_payload(self) -> dict[str, str | int | float | bool]:
         return {
             "chunk_id": self.chunk_id,
             "fused_score": self.fused_score,
             "best_raw_cosine_score": self.best_raw_cosine_score,
+            "reranker_score": self.reranker_score,
+            "reranked_rank": self.reranked_rank,
             "selected_as_primary": self.selected_as_primary,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RerankerTrace:
+    provider: str
+    model: str
+    revision: str
+    config_version: str
+
+    def to_payload(self) -> dict[str, str]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "revision": self.revision,
+            "config_version": self.config_version,
         }
 
 
@@ -108,6 +128,7 @@ class RetrievalRoundTrace:
     fused_candidates: tuple[FusedCandidateTrace, ...]
     final_evidence_chunk_ids: tuple[str, ...]
     rrf_rank_constant: int
+    reranker: RerankerTrace
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -117,6 +138,7 @@ class RetrievalRoundTrace:
             "fused_candidates": [item.to_payload() for item in self.fused_candidates],
             "final_evidence_chunk_ids": list(self.final_evidence_chunk_ids),
             "rrf_rank_constant": self.rrf_rank_constant,
+            "reranker": self.reranker.to_payload(),
         }
 
 
@@ -567,12 +589,20 @@ class AnswerWorkflow:
                     chunk_id=str(item.evidence.chunk_id),
                     fused_score=item.fused_score,
                     best_raw_cosine_score=item.best_raw_score,
+                    reranker_score=item.reranker_score,
+                    reranked_rank=item.reranked_rank,
                     selected_as_primary=item.selected_as_primary,
                 )
                 for item in result.fused_candidates
             ),
             final_evidence_chunk_ids=tuple(str(item.chunk_id) for item in result.evidence),
             rrf_rank_constant=result.rrf_rank_constant,
+            reranker=RerankerTrace(
+                provider=result.reranker_identity.provider,
+                model=result.reranker_identity.model,
+                revision=result.reranker_identity.revision,
+                config_version=result.reranker_identity.config_version,
+            ),
         )
         return replace(
             trace,
