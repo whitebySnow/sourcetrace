@@ -322,6 +322,7 @@ async def run_real_hybrid_retrieval_evaluation(
             code_commit=code_commit,
             dataset_sha256=dataset_sha256.lower(),
             query_plan_sha256=query_plan_sha256.lower(),
+            retrieval_version=settings.retrieval_config_version,
             planner_version=query_plan.planner_version,
             parser_version=provenance.parser_version,
             chunking_version=provenance.chunking_version,
