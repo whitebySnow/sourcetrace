@@ -310,6 +310,35 @@ BGE-M3、固定 `BAAI/bge-reranker-v2-m3` 和 `deepseek-v4-flash` 验证
 证据。实验没有接入在线 `RetrievalService`、创建 GIN 索引、调用 DeepSeek 或改变证据与引用
 门禁；生产接入、性能测量和真实回答评测必须由后续独立 Issue 完成。
 
+### Issue #52 PostgreSQL lexical-hybrid 生产接入
+
+2026-08-08 使用提交 `a34bac1` 将 Issue #50 已验证的有界混合检索接入生产
+`PgVectorRetrievalRepository.search`。dense 与 PostgreSQL `english` lexical 通道各自限制为
+Top 32，先执行确定性 RRF，再复用生产 reranker、页面多样性、最终 Top 8、最低 cosine 阈值
+和同页邻居规则。少于 4 个拉丁或技术词的查询不启用 lexical 通道；回答、证据充分性和引用
+门禁均未放宽。
+
+Alembic revision `a4d1c9e7b205` 使用并发方式创建
+`to_tsvector('english'::regconfig, text)` GIN 表达式索引。真实 PostgreSQL 依次执行
+`upgrade head`、`downgrade -1` 和再次 `upgrade head`，确认索引创建、移除和恢复；集成测试还用
+`EXPLAIN` 验证 lexical 查询可选择该索引。
+
+使用 `agentic-rag-foundations-v1`、固定 `bounded-counterexample-v3` 查询计划、同一不可变
+文档版本快照、本地 BGE-M3、固定 `BAAI/bge-reranker-v2-m3` 和 CUDA 完成两次 30 题生产
+repository 重放。两次均为基线 24 passed、混合检索 25 passed、3 not applicable；唯一改善为
+`ARF-023`，无退化。其第 11 页目标 chunk 的 dense rank 为空，经 lexical 第 13、通道融合
+第 26、reranker 第 4进入最终主证据。
+
+两次报告字节完全相同，SHA-256 均为
+`1439add27519fe48dec2aee3aaa589c72bf08dfdbed533d0b01ad09a47397822`。报告记录生产检索版本
+`pgvector-hybrid-query-aware-bge-reranker-v7`、模型 revision、reranker 权重哈希、设备和全部
+检索参数。case 级报告包含本地论文摘录，继续保留在被 Git 忽略的 `output/evals/`，不提交。
+
+该运行验证的是生产 repository、数据库索引和检索服务所用的同一检索实现，没有调用
+DeepSeek，也没有重新执行回答、引用校验或人工审核。因此 25/30 只能表述为该版本化数据集的
+检索结果，不能表述为端到端回答准确率。`ARF-024` 和 `ARF-026` 仍失败，应由后续独立任务
+处理文档范围的多证据规划。
+
 1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
 2. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
 3. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。

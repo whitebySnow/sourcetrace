@@ -280,3 +280,24 @@ schema、证据白名单和引用确定性校验。首个 JSON 无效时仍执�
 3 not applicable；只改善 `ARF-023`，无通过项退化。两次完整报告 SHA-256 均为
 `7ac146d150b9d9413aae577f74471a0b3dbe221044fbc31abd8bca1cc373885c`。这支持另开生产接入
 Issue，但不能表述为线上回答准确率提升；`ARF-024` 和 `ARF-026` 仍需文档范围的多证据规划。
+
+## 18. 离线 lexical-hybrid 收益尚未进入生产检索
+
+**症状**：Issue #50 已证明 PostgreSQL lexical 通道能召回 `ARF-023` 的精确反例证据，但该
+实现只存在于评测代码。在线 `RetrievalService` 仍只调用 dense 搜索，生产数据库也没有全文
+检索索引，因此真实用户请求无法获得该收益。
+
+**根因**：离线实验刻意隔离了生产 repository、迁移和公开 Answer Run 轨迹，用于先验证收益
+与退化风险。实验查询 SQL 与生产 dense 查询分离，继续复制会造成两个检索实现漂移。
+
+**修复**：生产 `PgVectorRetrievalRepository.search` 现在封装 dense、按查询条件启用的
+PostgreSQL `english` lexical 通道和通道级 RRF；`RetrievalService` 只依赖这一查询级接口。
+评测也直接复用该 repository，dense 基线则显式调用 `search_dense`。新增可回滚的并发 GIN
+迁移；Answer Run 轨迹与公开历史响应记录各通道排名、分数和融合排名。历史记录允许新增字段
+缺省。
+
+**验证**：真实 PostgreSQL 完成迁移 upgrade、downgrade 和恢复，`EXPLAIN` 可选择 GIN 索引。
+两次完整 30 题生产 repository 重放均为基线 24 passed、混合检索 25 passed、3 not
+applicable，只改善 `ARF-023`，无退化；两份报告 SHA-256 同为
+`1439add27519fe48dec2aee3aaa589c72bf08dfdbed533d0b01ad09a47397822`。该结果未调用 DeepSeek，
+不代表端到端回答准确率；`ARF-024` 和 `ARF-026` 仍未解决。
