@@ -218,6 +218,11 @@
           "title": "Query Plan Sha256",
           "type": "string"
         },
+        "retrieval_version": {
+          "minLength": 1,
+          "title": "Retrieval Version",
+          "type": "string"
+        },
         "planner_version": {
           "minLength": 1,
           "title": "Planner Version",
@@ -337,6 +342,7 @@
         "code_commit",
         "dataset_sha256",
         "query_plan_sha256",
+        "retrieval_version",
         "planner_version",
         "parser_version",
         "chunking_version",

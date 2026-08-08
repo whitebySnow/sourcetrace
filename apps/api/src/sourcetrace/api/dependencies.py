@@ -200,7 +200,10 @@ def get_answer_service(
     settings = get_settings()
     repository = AnswerRepository(session)
     retrieval = RetrievalService(
-        repository=PgVectorRetrievalRepository(session),
+        repository=PgVectorRetrievalRepository(
+            session,
+            channel_rrf_rank_constant=settings.retrieval_rrf_rank_constant,
+        ),
         embedding_provider=embedding_provider,
         question_planner=question_planner,
         reranker=reranker,

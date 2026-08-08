@@ -330,6 +330,7 @@ class HybridRetrievalRunMetadata(StrictModel):
     code_commit: str = Field(min_length=1)
     dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     query_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    retrieval_version: str = Field(min_length=1)
     planner_version: str = Field(min_length=1)
     parser_version: str = Field(min_length=1)
     chunking_version: str = Field(min_length=1)

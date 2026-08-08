@@ -402,6 +402,15 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
         assert trace["retrieval_plan_version"] == "bounded-counterexample-v3"
         assert len(trace["retrieval_rounds"]) == 1
+        candidate_trace = trace["retrieval_rounds"][0]["query_results"][0][
+            "candidates"
+        ][0]
+        assert "dense_rank" in candidate_trace
+        assert "lexical_rank" in candidate_trace
+        assert "dense_score" in candidate_trace
+        assert "lexical_score" in candidate_trace
+        assert candidate_trace["channel_fused_rank"] >= 1
+        assert candidate_trace["channel_fused_score"] > 0
         assert trace["supplemental_retrieval_attempts"] == 0
         assert trace["citation_repair_attempts"] == 0
         assert len(trace["assessments"]) == 1

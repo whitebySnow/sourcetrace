@@ -113,9 +113,14 @@ BGE-M3 通过 `EmbeddingProvider` 端口接入，适配器负责批处理、1024
 始终过滤为每个逻辑文档最新的 `completed` 版本，因此部分写入、处理失败和更新中的版本
 不会进入召回范围，历史版本仍可按稳定 ID 访问。
 
-Dense 检索为每条查询分别读取有界候选池，并保留逐查询原始 cosine 相似度与排名。存在多条
-查询时，`retrieval` Service 使用版本化配置中的 Reciprocal Rank Fusion（RRF）参数合并候选，
-并通过 `Reranker` 端口把每条查询及其自己的有界候选池交给 BGE cross-encoder 适配器评分。
+生产 retrieval repository 是查询级深模块：调用者提供 Retrieval Query、对应 dense embedding
+和候选上限，PostgreSQL adapter 在 Active Searchable Version 范围内分别读取有界 dense 与
+`english` lexical 候选，再以版本化 Reciprocal Rank Fusion（RRF）融合并只在融合后截断。
+查询不足四个可用拉丁或技术词项时 lexical 通道关闭。adapter 隐藏全文检索表达式和 GIN
+expression index 细节，并返回可区分的通道排名与分数；融合值不能覆盖原始 cosine。
+
+存在多条查询时，`retrieval` Service 使用版本化 RRF 参数继续合并各查询结果，并通过
+`Reranker` 端口把每条查询及其自己的有界混合候选池交给 BGE cross-encoder 适配器评分。
 `retrieval` Service 为原始问题保留最多 4 个覆盖候选，为每条模型生成的额外查询保留最多 1 个，
 再按候选的最高逐查询 reranker 分数融合排序并补足其余候选。该策略隐藏在
 `RetrievalService` 深模块内；工作流只提供知识库 ID、问题

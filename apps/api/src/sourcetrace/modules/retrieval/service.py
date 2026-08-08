@@ -6,6 +6,7 @@ from math import isfinite
 from typing import Protocol
 from uuid import UUID
 
+from sourcetrace.modules.retrieval.hybrid import FusedChannelCandidate
 from sourcetrace.rag.ports import EmbeddingProvider, QuestionPlanner, Reranker, RerankerIdentity
 
 _PAGE_DIVERSITY_POOL_MULTIPLIER = 4
@@ -55,6 +56,11 @@ class RetrievalPlan:
 class RankedRetrievalCandidate:
     rank: int
     evidence: RetrievedEvidence
+    dense_rank: int | None = None
+    lexical_rank: int | None = None
+    dense_score: float | None = None
+    lexical_score: float | None = None
+    channel_fused_score: float = 0.0
     reranker_score: float | None = None
     reranked_rank: int | None = None
     selected_for_query_coverage: bool = False
@@ -99,8 +105,9 @@ class RetrievalRepositoryPort(Protocol):
         knowledge_base_id: UUID,
         query_embedding: Sequence[float],
         *,
+        query: str,
         limit: int,
-    ) -> list[RetrievedEvidence]: ...
+    ) -> list[FusedChannelCandidate[RetrievedEvidence]]: ...
 
     async def expand_page_neighbors(
         self,
@@ -194,14 +201,23 @@ class RetrievalService:
             candidates = await self._repository.search(
                 knowledge_base_id,
                 embedding,
+                query=query,
                 limit=pool_limit,
             )
             query_results.append(
                 QueryRetrievalResult(
                     query=query,
                     candidates=tuple(
-                        RankedRetrievalCandidate(rank=rank, evidence=evidence)
-                        for rank, evidence in enumerate(candidates, start=1)
+                        RankedRetrievalCandidate(
+                            rank=candidate.channel_fused_rank,
+                            evidence=candidate.evidence,
+                            dense_rank=candidate.dense_rank,
+                            lexical_rank=candidate.lexical_rank,
+                            dense_score=candidate.dense_score,
+                            lexical_score=candidate.lexical_score,
+                            channel_fused_score=candidate.fused_score,
+                        )
+                        for candidate in candidates
                     ),
                 )
             )

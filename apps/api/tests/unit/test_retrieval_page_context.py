@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from sourcetrace.modules.retrieval.hybrid import FusedChannelCandidate
 from sourcetrace.modules.retrieval.service import RetrievalService, RetrievedEvidence
 from sourcetrace.rag.ports import RetrievalPlanProposal
 from tests.helpers import PreserveOrderReranker
@@ -34,10 +35,21 @@ class PageContextRepository:
         knowledge_base_id: UUID,
         query_embedding: Sequence[float],
         *,
+        query: str,
         limit: int,
-    ) -> list[RetrievedEvidence]:
+    ) -> list[FusedChannelCandidate[RetrievedEvidence]]:
         assert query_embedding == [1.0, 0.0]
-        return [self.primary]
+        return [
+            FusedChannelCandidate(
+                evidence=self.primary,
+                fused_score=1 / 61,
+                channel_fused_rank=1,
+                dense_rank=1,
+                lexical_rank=None,
+                dense_score=self.primary.score,
+                lexical_score=None,
+            )
+        ]
 
     async def expand_page_neighbors(
         self,

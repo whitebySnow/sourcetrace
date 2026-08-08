@@ -2,9 +2,9 @@ from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sourcetrace.evaluation.hybrid_retrieval import build_lexical_search_query
 from sourcetrace.evaluation.repository import EvaluationCorpusRepository
 from sourcetrace.modules.documents.models import Chunk
 from sourcetrace.modules.documents.repository import DocumentRepository
@@ -229,6 +229,84 @@ async def test_retrieval_is_scoped_to_latest_searchable_versions_and_ranked(
         research.id,
         limit=50,
     ) == ("distance.pdf", "vectors.pdf")
+
+
+async def test_repository_search_fuses_bounded_dense_and_lexical_candidates(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Hybrid retrieval"
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="hybrid.pdf",
+        checksum="a" * 64,
+        text="Unrelated dense candidate one",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+        additional_chunks=(
+            (
+                2,
+                "Self RAG outputs are not fully supported by cited sources.",
+                _vector(0.0, 1.0),
+            ),
+            (3, "Unrelated dense candidate two", _vector(0.9, 0.1)),
+            (4, "Unrelated dense candidate three", _vector(0.8, 0.2)),
+        ),
+    )
+
+    candidates = await PgVectorRetrievalRepository(session).search(
+        knowledge_base.id,
+        _vector(1.0, 0.0),
+        query="Self-RAG can produce outputs not fully supported by cited sources",
+        limit=3,
+    )
+
+    target = next(item for item in candidates if item.evidence.page_number == 2)
+    assert len(candidates) == 3
+    assert target.dense_rank is None
+    assert target.lexical_rank == 1
+    assert target.channel_fused_rank == 2
+    assert target.lexical_score is not None
+    assert target.evidence.score == pytest.approx(0.0)
+
+
+async def test_chunk_english_text_search_expression_uses_gin_index(
+    session: AsyncSession,
+) -> None:
+    index_definition = await session.scalar(
+        text(
+            """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname = 'ix_chunks_text_search_english'
+            """
+        )
+    )
+
+    assert index_definition is not None
+    assert "USING gin" in index_definition
+    assert "to_tsvector('english'::regconfig, text)" in index_definition
+
+    await session.execute(text("SET LOCAL enable_seqscan = off"))
+    plan_rows = (
+        await session.execute(
+            text(
+                """
+                EXPLAIN (COSTS OFF)
+                SELECT id
+                FROM chunks
+                WHERE to_tsvector('english'::regconfig, text)
+                      @@ websearch_to_tsquery('english'::regconfig, :query)
+                """
+            ),
+            {"query": "bounded lexical retrieval"},
+        )
+    ).scalars()
+
+    assert any("ix_chunks_text_search_english" in row for row in plan_rows)
 
 
 async def test_multi_query_rrf_uses_independent_pgvector_rankings_and_stable_ties(
@@ -502,7 +580,7 @@ async def test_evaluation_snapshot_rejects_mixed_ingestion_provenance(
         )
 
 
-async def test_evaluation_lexical_search_scores_query_phrases_and_keeps_cosine(
+async def test_production_lexical_search_scores_query_phrases_and_keeps_cosine(
     session: AsyncSession,
 ) -> None:
     knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
@@ -524,31 +602,32 @@ async def test_evaluation_lexical_search_scores_query_phrases_and_keeps_cosine(
             ),
         ),
     )
-    lexical_query = build_lexical_search_query(
-        "Self-RAG can still produce outputs not fully supported by cited sources"
-    )
-    assert lexical_query is not None
-
-    repository = EvaluationCorpusRepository(session)
-    unboosted = await repository.search_lexical(
+    query = "Self-RAG can still produce outputs not fully supported by cited sources"
+    unboosted = await PgVectorRetrievalRepository(
+        session,
+        document_version_ids=(version_id,),
+        lexical_phrase_weight=0.0,
+    ).search(
         knowledge_base.id,
-        (version_id,),
-        query=lexical_query,
-        query_embedding=_vector(1.0, 0.0),
+        _vector(1.0, 0.0),
+        query=query,
         limit=2,
-        phrase_weight=0.0,
     )
-    boosted = await repository.search_lexical(
+    boosted = await PgVectorRetrievalRepository(
+        session,
+        document_version_ids=(version_id,),
+        lexical_phrase_weight=2.0,
+    ).search(
         knowledge_base.id,
-        (version_id,),
-        query=lexical_query,
-        query_embedding=_vector(1.0, 0.0),
+        _vector(1.0, 0.0),
+        query=query,
         limit=2,
-        phrase_weight=2.0,
     )
 
     unboosted_by_page = {item.evidence.page_number: item for item in unboosted}
     boosted_by_page = {item.evidence.page_number: item for item in boosted}
-    assert boosted_by_page[2].channel == "lexical"
+    assert boosted_by_page[2].lexical_rank is not None
     assert boosted_by_page[2].evidence.score == pytest.approx(0.6)
-    assert boosted_by_page[2].channel_score > unboosted_by_page[2].channel_score
+    assert boosted_by_page[2].lexical_score is not None
+    assert unboosted_by_page[2].lexical_score is not None
+    assert boosted_by_page[2].lexical_score > unboosted_by_page[2].lexical_score

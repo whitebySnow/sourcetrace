@@ -7,13 +7,7 @@ from uuid import UUID
 from sourcetrace.core.config import Settings
 from sourcetrace.db.session import session_factory
 from sourcetrace.evaluation.harness import EvaluationHarness
-from sourcetrace.evaluation.hybrid_retrieval import (
-    FusedChannelCandidate,
-    RankedChannelCandidate,
-    build_lexical_search_query,
-    fuse_ranked_channels,
-    resolve_query_plans,
-)
+from sourcetrace.evaluation.hybrid_retrieval import resolve_query_plans
 from sourcetrace.evaluation.models import (
     EvaluationDataset,
     HybridCandidateTrace,
@@ -27,6 +21,12 @@ from sourcetrace.evaluation.models import (
 )
 from sourcetrace.evaluation.real import _resolve_embedding_model
 from sourcetrace.evaluation.repository import EvaluationCorpusRepository
+from sourcetrace.modules.retrieval.hybrid import (
+    FusedChannelCandidate,
+    RankedChannelCandidate,
+    build_lexical_search_query,
+    fuse_ranked_channels,
+)
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
 from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
@@ -64,7 +64,7 @@ class _UnusedPlanner:
 class _PrecomputedRepository:
     def __init__(
         self,
-        candidates: Sequence[Sequence[RetrievedEvidence]],
+        candidates: Sequence[Sequence[FusedChannelCandidate[RetrievedEvidence]]],
         *,
         delegate: PgVectorRetrievalRepository,
     ) -> None:
@@ -84,8 +84,9 @@ class _PrecomputedRepository:
         knowledge_base_id: UUID,
         query_embedding: Sequence[float],
         *,
+        query: str,
         limit: int,
-    ) -> list[RetrievedEvidence]:
+    ) -> list[FusedChannelCandidate[RetrievedEvidence]]:
         marker = int(query_embedding[0])
         return list(self._candidates[marker][:limit])
 
@@ -132,6 +133,8 @@ async def run_real_hybrid_retrieval_evaluation(
         dense_repository = PgVectorRetrievalRepository(
             session,
             document_version_ids=dataset.document_version_ids,
+            channel_rrf_rank_constant=settings.retrieval_rrf_rank_constant,
+            lexical_phrase_weight=_LEXICAL_PHRASE_WEIGHT,
         )
         embedding_provider = BgeM3EmbeddingProvider(
             EmbeddingConfig(
@@ -163,19 +166,20 @@ async def run_real_hybrid_retrieval_evaluation(
             embeddings = await embedding_provider.embed(queries)
             if len(embeddings) != len(queries):
                 raise ValueError("query embedding provider returned an invalid result")
-            dense_lists: list[tuple[RetrievedEvidence, ...]] = []
-            hybrid_lists: list[tuple[RetrievedEvidence, ...]] = []
-            channel_fused_by_query: list[tuple[FusedChannelCandidate, ...]] = []
+            dense_lists: list[tuple[FusedChannelCandidate[RetrievedEvidence], ...]] = []
+            hybrid_lists: list[tuple[FusedChannelCandidate[RetrievedEvidence], ...]] = []
+            channel_fused_by_query: list[
+                tuple[FusedChannelCandidate[RetrievedEvidence], ...]
+            ] = []
             lexical_enabled: list[bool] = []
             for query, embedding in zip(queries, embeddings, strict=True):
                 dense = tuple(
-                    await dense_repository.search(
+                    await dense_repository.search_dense(
                         dataset.knowledge_base_id,
                         embedding,
                         limit=pool_limit,
                     )
                 )
-                dense_lists.append(dense)
                 dense_channel = tuple(
                     RankedChannelCandidate(
                         channel="dense",
@@ -185,25 +189,23 @@ async def run_real_hybrid_retrieval_evaluation(
                     )
                     for rank, item in enumerate(dense, start=1)
                 )
-                lexical_query = build_lexical_search_query(query)
-                lexical = (
-                    await corpus.search_lexical(
-                        dataset.knowledge_base_id,
-                        dataset.document_version_ids,
-                        query=lexical_query,
-                        query_embedding=embedding,
+                dense_lists.append(
+                    fuse_ranked_channels(
+                        dense_channel,
+                        rank_constant=settings.retrieval_rrf_rank_constant,
                         limit=pool_limit,
-                        phrase_weight=_LEXICAL_PHRASE_WEIGHT,
                     )
-                    if lexical_query is not None
-                    else ()
                 )
-                channel_fused = fuse_ranked_channels(
-                    (*dense_channel, *lexical),
-                    rank_constant=settings.retrieval_rrf_rank_constant,
-                    limit=pool_limit,
+                lexical_query = build_lexical_search_query(query)
+                channel_fused = tuple(
+                    await dense_repository.search(
+                        dataset.knowledge_base_id,
+                        embedding,
+                        query=query,
+                        limit=pool_limit,
+                    )
                 )
-                hybrid_lists.append(tuple(item.evidence for item in channel_fused))
+                hybrid_lists.append(channel_fused)
                 channel_fused_by_query.append(channel_fused)
                 lexical_enabled.append(lexical_query is not None)
 
@@ -320,6 +322,7 @@ async def run_real_hybrid_retrieval_evaluation(
             code_commit=code_commit,
             dataset_sha256=dataset_sha256.lower(),
             query_plan_sha256=query_plan_sha256.lower(),
+            retrieval_version=settings.retrieval_config_version,
             planner_version=query_plan.planner_version,
             parser_version=provenance.parser_version,
             chunking_version=provenance.chunking_version,
@@ -358,7 +361,7 @@ async def run_real_hybrid_retrieval_evaluation(
 async def _run_precomputed_retrieval(
     knowledge_base_id: UUID,
     queries: Sequence[str],
-    candidates: Sequence[Sequence[RetrievedEvidence]],
+    candidates: Sequence[Sequence[FusedChannelCandidate[RetrievedEvidence]]],
     *,
     dense_repository: PgVectorRetrievalRepository,
     reranker: BgeCrossEncoderReranker,

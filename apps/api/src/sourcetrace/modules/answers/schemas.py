@@ -104,6 +104,15 @@ class WorkflowRetrievalCandidateTrace(BaseModel):
     chunk_id: str
     raw_rank: int
     raw_cosine_score: float
+    dense_rank: int | None = None
+    lexical_rank: int | None = None
+    dense_score: float | None = None
+    lexical_score: float | None = None
+    channel_fused_rank: int | None = None
+    channel_fused_score: float | None = None
+    reranker_score: float | None = None
+    reranked_rank: int | None = None
+    selected_for_query_coverage: bool = False
 
 
 class WorkflowQueryRetrievalTrace(BaseModel):
