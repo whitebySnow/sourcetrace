@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sourcetrace.evaluation.hybrid_retrieval import build_lexical_search_query
 from sourcetrace.evaluation.repository import EvaluationCorpusRepository
 from sourcetrace.modules.documents.models import Chunk
 from sourcetrace.modules.documents.repository import DocumentRepository
@@ -499,3 +500,55 @@ async def test_evaluation_snapshot_rejects_mixed_ingestion_provenance(
             knowledge_base.id,
             (first_version_id, second_version_id),
         )
+
+
+async def test_evaluation_lexical_search_scores_query_phrases_and_keeps_cosine(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Lexical evaluation"
+    )
+    version_id = await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="limitations.pdf",
+        checksum="9" * 64,
+        text="Self RAG output support source output support source",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+        additional_chunks=(
+            (
+                2,
+                "The output is not fully supported by citations.",
+                _vector(0.6, 0.8),
+            ),
+        ),
+    )
+    lexical_query = build_lexical_search_query(
+        "Self-RAG can still produce outputs not fully supported by cited sources"
+    )
+    assert lexical_query is not None
+
+    repository = EvaluationCorpusRepository(session)
+    unboosted = await repository.search_lexical(
+        knowledge_base.id,
+        (version_id,),
+        query=lexical_query,
+        query_embedding=_vector(1.0, 0.0),
+        limit=2,
+        phrase_weight=0.0,
+    )
+    boosted = await repository.search_lexical(
+        knowledge_base.id,
+        (version_id,),
+        query=lexical_query,
+        query_embedding=_vector(1.0, 0.0),
+        limit=2,
+        phrase_weight=2.0,
+    )
+
+    unboosted_by_page = {item.evidence.page_number: item for item in unboosted}
+    boosted_by_page = {item.evidence.page_number: item for item in boosted}
+    assert boosted_by_page[2].channel == "lexical"
+    assert boosted_by_page[2].evidence.score == pytest.approx(0.6)
+    assert boosted_by_page[2].channel_score > unboosted_by_page[2].channel_score

@@ -289,6 +289,27 @@ BGE-M3、固定 `BAAI/bge-reranker-v2-m3` 和 `deepseek-v4-flash` 验证
 端到端准确率。候选池、最终 Top 8、最低 cosine 阈值、证据充分性和引用门禁均未放宽；剩余
 三个失败项应由后续独立的文档范围查询或混合召回 A/B 处理。
 
+### Issue #50 PostgreSQL lexical-hybrid 离线实验
+
+2026-08-07 使用提交 `a57e124`、`agentic-rag-foundations-v1` 的同一不可变文档版本快照、
+本地 BGE-M3、固定 `BAAI/bge-reranker-v2-m3` 和 CUDA 执行受控离线 A/B。查询计划固定为
+`bounded-counterexample-v3-fixture-v1`，不调用远程 LLM；dense 与 PostgreSQL `english`
+全文检索各自限制为 Top 32，先做确定性 RRF，再复用生产逐查询 reranker、页面多样性、
+最终 Top 8、最低 cosine 阈值和相邻页规则。
+
+基线精确复现 24 passed、3 failed、3 not applicable，失败项仍只有 `ARF-023`、`ARF-024`
+和 `ARF-026`。混合路径得到 25 passed、2 failed、3 not applicable；唯一改善为 `ARF-023`，
+原有 24 个通过项零退化，3 个拒答专用样本保持 not applicable。
+
+`ARF-023` 的第 11 页目标 chunk 不在 dense Top 32；同一有界补充查询使它进入 lexical 第 13、
+通道融合第 26，生产 reranker 将其提升到第 4并选入主证据。两次完整 30 题运行生成字节完全
+相同的 JSON 报告，SHA-256 均为
+`7ac146d150b9d9413aae577f74471a0b3dbe221044fbc31abd8bca1cc373885c`。
+
+该结果证明 PostgreSQL 全文检索足以为 `ARF-023` 提供生产方案候选，但仍只是检索维度的离线
+证据。实验没有接入在线 `RetrievalService`、创建 GIN 索引、调用 DeepSeek 或改变证据与引用
+门禁；生产接入、性能测量和真实回答评测必须由后续独立 Issue 完成。
+
 1. 使用 `diagnose-retrieval` 对剩余 embedding 检索弱点逐例分析，独立处理文档切分、查询和召回问题。
 2. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
 3. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。
