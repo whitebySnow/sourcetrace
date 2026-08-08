@@ -1,12 +1,12 @@
 from uuid import UUID
 
-from sourcetrace.evaluation.hybrid_retrieval import (
+from sourcetrace.evaluation.hybrid_retrieval import resolve_query_plans
+from sourcetrace.evaluation.models import HybridQueryPlanCase, HybridQueryPlanFixture
+from sourcetrace.modules.retrieval.hybrid import (
     RankedChannelCandidate,
     build_lexical_search_query,
     fuse_ranked_channels,
-    resolve_query_plans,
 )
-from sourcetrace.evaluation.models import HybridQueryPlanCase, HybridQueryPlanFixture
 from sourcetrace.modules.retrieval.service import RetrievedEvidence
 
 

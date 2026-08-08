@@ -3,6 +3,7 @@ from uuid import UUID
 
 import pytest
 
+from sourcetrace.modules.retrieval.hybrid import FusedChannelCandidate
 from sourcetrace.modules.retrieval.service import (
     RetrievalPlan,
     RetrievalService,
@@ -101,11 +102,23 @@ class RankedListRepository:
         knowledge_base_id: UUID,
         query_embedding: Sequence[float],
         *,
+        query: str,
         limit: int,
-    ) -> list[RetrievedEvidence]:
+    ) -> list[FusedChannelCandidate[RetrievedEvidence]]:
         key = tuple(query_embedding)
         self.search_calls.append((knowledge_base_id, key, limit))
-        return self.ranked_lists[key]
+        return [
+            FusedChannelCandidate(
+                evidence=evidence,
+                fused_score=1 / (60 + rank),
+                channel_fused_rank=rank,
+                dense_rank=rank,
+                lexical_rank=None,
+                dense_score=evidence.score,
+                lexical_score=None,
+            )
+            for rank, evidence in enumerate(self.ranked_lists[key], start=1)
+        ]
 
     async def list_searchable_document_titles(
         self,
@@ -115,6 +128,43 @@ class RankedListRepository:
     ) -> tuple[str, ...]:
         self.title_calls.append((knowledge_base_id, limit))
         return self.document_titles[:limit]
+
+    async def expand_page_neighbors(
+        self,
+        knowledge_base_id: UUID,
+        evidence: Sequence[RetrievedEvidence],
+        *,
+        neighbor_count: int,
+    ) -> list[RetrievedEvidence]:
+        return []
+
+
+class HybridCandidateRepository:
+    def __init__(
+        self,
+        candidates: Sequence[FusedChannelCandidate[RetrievedEvidence]],
+    ) -> None:
+        self.candidates = list(candidates)
+        self.search_queries: list[str] = []
+
+    async def search(
+        self,
+        knowledge_base_id: UUID,
+        query_embedding: Sequence[float],
+        *,
+        query: str,
+        limit: int,
+    ) -> list[FusedChannelCandidate[RetrievedEvidence]]:
+        self.search_queries.append(query)
+        return self.candidates[:limit]
+
+    async def list_searchable_document_titles(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        limit: int,
+    ) -> tuple[str, ...]:
+        return ()
 
     async def expand_page_neighbors(
         self,
@@ -182,6 +232,49 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
             ("ReAct.pdf", "Self-RAG.pdf"),
         ),
     ]
+
+
+async def test_search_preserves_hybrid_channel_diagnostics_through_reranking() -> None:
+    evidence = _evidence(
+        "00000000-0000-0000-0000-000000000001",
+        score=0.42,
+        page_number=11,
+    )
+    repository = HybridCandidateRepository(
+        (
+            FusedChannelCandidate(
+                evidence=evidence,
+                fused_score=1 / 73,
+                channel_fused_rank=1,
+                dense_rank=None,
+                lexical_rank=13,
+                dense_score=None,
+                lexical_score=0.75,
+            ),
+        )
+    )
+    service = RetrievalService(
+        repository=repository,
+        embedding_provider=RecordingEmbeddingProvider(((1.0,),)),
+        question_planner=StaticPlanner(),
+        reranker=RecordingReranker((0.9,)),
+        top_k=1,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("bounded lexical query",),
+    )
+
+    candidate = result.query_results[0].candidates[0]
+    assert repository.search_queries == ["bounded lexical query"]
+    assert candidate.rank == 1
+    assert candidate.dense_rank is None
+    assert candidate.lexical_rank == 13
+    assert candidate.lexical_score == pytest.approx(0.75)
+    assert candidate.channel_fused_score == pytest.approx(1 / 73)
+    assert candidate.reranker_score == pytest.approx(0.9)
+    assert result.primary_evidence == (evidence,)
 
 
 async def test_multi_query_search_uses_rrf_before_page_diversity() -> None:

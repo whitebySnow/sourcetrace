@@ -63,15 +63,27 @@ class RetrievalCandidateTrace:
     chunk_id: str
     raw_rank: int
     raw_cosine_score: float
+    dense_rank: int | None
+    lexical_rank: int | None
+    dense_score: float | None
+    lexical_score: float | None
+    channel_fused_rank: int
+    channel_fused_score: float
     reranker_score: float
     reranked_rank: int
     selected_for_query_coverage: bool
 
-    def to_payload(self) -> dict[str, str | int | float | bool]:
+    def to_payload(self) -> dict[str, str | int | float | bool | None]:
         return {
             "chunk_id": self.chunk_id,
             "raw_rank": self.raw_rank,
             "raw_cosine_score": self.raw_cosine_score,
+            "dense_rank": self.dense_rank,
+            "lexical_rank": self.lexical_rank,
+            "dense_score": self.dense_score,
+            "lexical_score": self.lexical_score,
+            "channel_fused_rank": self.channel_fused_rank,
+            "channel_fused_score": self.channel_fused_score,
             "reranker_score": self.reranker_score,
             "reranked_rank": self.reranked_rank,
             "selected_for_query_coverage": self.selected_for_query_coverage,
@@ -586,6 +598,12 @@ class AnswerWorkflow:
                             chunk_id=str(candidate.evidence.chunk_id),
                             raw_rank=candidate.rank,
                             raw_cosine_score=candidate.evidence.score,
+                            dense_rank=candidate.dense_rank,
+                            lexical_rank=candidate.lexical_rank,
+                            dense_score=candidate.dense_score,
+                            lexical_score=candidate.lexical_score,
+                            channel_fused_rank=candidate.rank,
+                            channel_fused_score=candidate.channel_fused_score,
                             reranker_score=cast(float, candidate.reranker_score),
                             reranked_rank=cast(int, candidate.reranked_rank),
                             selected_for_query_coverage=(

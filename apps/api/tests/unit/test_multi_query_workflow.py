@@ -31,7 +31,20 @@ def _result(queries: Sequence[str], evidence: RetrievedEvidence) -> RetrievalRes
     query_results = tuple(
         QueryRetrievalResult(
             query=query,
-            candidates=(RankedRetrievalCandidate(rank=1, evidence=evidence),),
+            candidates=(
+                RankedRetrievalCandidate(
+                    rank=1,
+                    evidence=evidence,
+                    dense_rank=None,
+                    lexical_rank=13,
+                    dense_score=None,
+                    lexical_score=0.75,
+                    channel_fused_score=1 / 73,
+                    reranker_score=1.0,
+                    reranked_rank=1,
+                    selected_for_query_coverage=True,
+                ),
+            ),
         )
         for query in queries
     )
@@ -157,6 +170,13 @@ async def test_initial_plan_uses_the_shared_extra_query_budget() -> None:
     assert events[-1].type == "refused"
     assert control.traces[-1].retrieval_plan_version == "bounded-multi-query-v1"
     assert len(control.traces[-1].retrieval_rounds) == 1
+    candidate_trace = control.traces[-1].to_payload()["retrieval_rounds"][0][
+        "query_results"
+    ][0]["candidates"][0]
+    assert candidate_trace["dense_rank"] is None
+    assert candidate_trace["lexical_rank"] == 13
+    assert candidate_trace["lexical_score"] == 0.75
+    assert candidate_trace["channel_fused_score"] == 1 / 73
 
 
 async def test_duplicate_supplemental_query_is_not_executed() -> None:

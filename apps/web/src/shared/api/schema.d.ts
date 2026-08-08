@@ -819,6 +819,27 @@ export interface components {
             raw_rank: number;
             /** Raw Cosine Score */
             raw_cosine_score: number;
+            /** Dense Rank */
+            dense_rank?: number | null;
+            /** Lexical Rank */
+            lexical_rank?: number | null;
+            /** Dense Score */
+            dense_score?: number | null;
+            /** Lexical Score */
+            lexical_score?: number | null;
+            /** Channel Fused Rank */
+            channel_fused_rank?: number | null;
+            /** Channel Fused Score */
+            channel_fused_score?: number | null;
+            /** Reranker Score */
+            reranker_score?: number | null;
+            /** Reranked Rank */
+            reranked_rank?: number | null;
+            /**
+             * Selected For Query Coverage
+             * @default false
+             */
+            selected_for_query_coverage: boolean;
         };
         /** WorkflowRetrievalRoundTrace */
         WorkflowRetrievalRoundTrace: {

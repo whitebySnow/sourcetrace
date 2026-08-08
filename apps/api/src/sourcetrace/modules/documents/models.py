@@ -16,6 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
     func,
+    literal_column,
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -203,6 +204,11 @@ class Chunk(UUIDPrimaryKeyMixin, Base):
         CheckConstraint("token_count > 0", name="chunk_token_count_positive"),
         CheckConstraint("length(text) > 0", name="chunk_text_not_empty"),
         Index("ix_chunks_document_version_order", "document_version_id", "chunk_index"),
+        Index(
+            "ix_chunks_text_search_english",
+            func.to_tsvector(literal_column("'english'::regconfig"), text),
+            postgresql_using="gin",
+        ),
         Index(
             "ix_chunks_embedding_cosine",
             "embedding",

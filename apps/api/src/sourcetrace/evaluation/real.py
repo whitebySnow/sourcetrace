@@ -118,6 +118,7 @@ async def run_real_evaluation(
             repository=PgVectorRetrievalRepository(
                 session,
                 document_version_ids=dataset.document_version_ids,
+                channel_rrf_rank_constant=settings.retrieval_rrf_rank_constant,
             ),
             embedding_provider=embedding,
             question_planner=planner,
