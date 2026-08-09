@@ -343,3 +343,30 @@ DeepSeek，也没有重新执行回答、引用校验或人工审核。因此 25
 2. 根据失败 case 分析证据充分性提示词、阈值和选择策略，不删除或弱化现有评测样本。
 3. 每次调整后使用同一版本化数据集重新运行真实评测，并生成绑定新报告 SHA-256 的 judgments。
 4. 简历只能引用 reviewed report 的限定结果，并同时说明发现的问题和后续优化方向。
+
+### Issue #54 两阶段证据槽位规划
+
+2026-08-09 使用 `deepseek-v4-flash` 验证 `two-stage-evidence-slots-v5`。第一阶段只接收
+`ARF-024`、`ARF-026` 的问题文本、空最近问题和三个可检索文档标题；多槽计划的第二阶段只
+增加该槽位的第一阶段查询与文档标题。两个阶段都没有接收 PDF 正文、检索候选、参考答案、
+预期证据、评测结果或标签。第二阶段按槽位独立并发执行，不能改变标题、增加或合并槽位；
+无效细化被丢弃。
+
+单阶段规划为 `ARF-024` 生成的宽泛查询仍使真实检索失败；仅按规划标题限定文档范围也未能
+选中 Self-RAG 第 4 页目标证据，因此两种方案均被否决。两阶段规划最终生成
+`RAG retrieves top-k documents once before decoder generation` 和
+`Self-RAG adaptive retrieval trigger on [RETRIEVE] token during generation`，聚焦回放通过。
+`ARF-026` 的第一阶段计划连续违反唯一文档标题约束，按设计回退为空计划，仍未解决。
+
+正式查询计划为
+`evals/query-plans/agentic-rag-foundations-v1-two-stage-evidence-slots-v5.json`，SHA-256 为
+`f8d92fd36433918dcec39981fa72222b9bc3e8b86241443687459f6e03bb9e2b`。使用同一不可变数据集
+快照、本地 BGE-M3、固定 `BAAI/bge-reranker-v2-m3`、PostgreSQL 生产混合检索和 CUDA 完成
+两次 30 题重放；两次均为 dense baseline 25 passed、hybrid 26 passed、3 not applicable、
+零回归，`ARF-024` 相对 Issue #52 的 25 个 hybrid 通过项新增为通过。两份报告字节完全一致，
+SHA-256 均为 `69036a6750fb533b86664bbd7f5871a9a41e3d0a5e3d887d672a55b69066c424`。
+
+该结果只验证版本化查询计划和检索链路，不重新执行证据判断、回答生成、引用校验或人工审核，
+因此 26/30 不能表述为端到端回答准确率。启动验证环境时还发现现有数据库记录 Alembic revision
+`a4d1c9e7b205`，而当前工作树无法定位该 revision，导致 Compose 的 migrate 容器退出 255；
+PostgreSQL 本身健康且只读重放可完成。该环境一致性问题不属于 Issue #54，必须另行处理。

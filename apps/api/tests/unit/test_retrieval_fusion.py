@@ -25,9 +25,7 @@ class StaticPlanner:
         recent_questions: Sequence[str],
         document_titles: Sequence[str],
     ) -> RetrievalPlanProposal:
-        self.calls.append(
-            (question, tuple(recent_questions), tuple(document_titles))
-        )
+        self.calls.append((question, tuple(recent_questions), tuple(document_titles)))
         return RetrievalPlanProposal(additional_queries=self.additional_queries)
 
 
@@ -219,7 +217,7 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
     )
 
     assert plan == RetrievalPlan(
-        version="bounded-counterexample-v3",
+        version="two-stage-evidence-slots-v5",
         queries=(
             "What does ReAct combine?",
             "ReAct reasoning and acting interaction",
@@ -232,6 +230,37 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
             ("ReAct.pdf", "Self-RAG.pdf"),
         ),
     ]
+
+
+async def test_plan_keeps_at_most_two_unique_evidence_slot_queries() -> None:
+    planner = StaticPlanner(
+        "  Compare RAG, ReAct, and Self-RAG components  ",
+        "ReAct task-specific environment actions",
+        "Self-RAG three types of Critique tokens",
+        "forbidden third slot query",
+    )
+    service = RetrievalService(
+        repository=RankedListRepository({}),
+        embedding_provider=RecordingEmbeddingProvider([]),
+        question_planner=planner,
+        reranker=PreserveOrderReranker(),
+        top_k=8,
+    )
+
+    plan = await service.resolve_plan(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        question="Compare RAG, ReAct, and Self-RAG components",
+        recent_questions=(),
+    )
+
+    assert plan == RetrievalPlan(
+        version="two-stage-evidence-slots-v5",
+        queries=(
+            "Compare RAG, ReAct, and Self-RAG components",
+            "ReAct task-specific environment actions",
+            "Self-RAG three types of Critique tokens",
+        ),
+    )
 
 
 async def test_search_preserves_hybrid_channel_diagnostics_through_reranking() -> None:

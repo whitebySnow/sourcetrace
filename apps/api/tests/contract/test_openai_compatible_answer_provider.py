@@ -309,8 +309,11 @@ async def test_question_planner_uses_only_recent_user_questions() -> None:
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "additional_queries": [
-                                        "Why are BGE-M3 dense vectors normalized?",
+                                    "evidence_groups": [
+                                        {
+                                            "query": "Why are BGE-M3 dense vectors normalized?",
+                                            "document_title": "BGE-M3.pdf",
+                                        },
                                     ]
                                 }
                             )
@@ -342,18 +345,30 @@ async def test_question_planner_uses_only_recent_user_questions() -> None:
     assert isinstance(messages, list)
     assert [message["role"] for message in messages] == ["system", "user"]
     system_prompt = messages[0]["content"]
-    assert "hard limit for initial planning" in system_prompt
-    assert "remaining query budget" in system_prompt
+    assert "zero to three evidence groups" in system_prompt
+    assert "whole-run budget" in system_prompt
     assert "not broad bags of keywords" in system_prompt
-    assert "comparisons, attribution, and multi-part questions" in system_prompt
-    assert "empty array" in system_prompt
+    assert "one named evidence slot" in system_prompt
+    assert "distinctive mechanism, trigger, or data object" in system_prompt
+    assert "merely restate the comparison dimension" in system_prompt
+    assert "comparison, attribution, or multi-part question" in system_prompt
+    assert "original question as the baseline query" in system_prompt
+    assert "different supplied document titles" in system_prompt
+    assert "same supplied title as one evidence group" in system_prompt
+    assert "assigns the first group to the original question" in system_prompt
+    assert "selects the later evidence groups tied to supplied titles" in system_prompt
+    assert "Never create a paper or framework that is absent from the supplied titles" in (
+        system_prompt
+    )
+    assert "A1 and A2 belong to Method A" in system_prompt
+    assert "Do not emit separate groups for A1 and A2" in system_prompt
+    assert "one query for B1 in Method B, and one for C1" in system_prompt
     assert "absolute claim or negation" in system_prompt
     assert "who supports what" in system_prompt
     assert "English technical terms" in system_prompt
     assert "prefer concise English queries" in system_prompt
     assert "only as search hypotheses" in system_prompt
-    assert "Do not invent bibliographic titles" in system_prompt
-    assert "maps to []" in system_prompt
+    assert "Simple fact questions map to []" in system_prompt
     assert "outputs not fully supported by sources" in system_prompt
     serialized = json.dumps(messages)
     assert "What is BGE-M3 dense retrieval?" in serialized
@@ -379,7 +394,177 @@ async def test_question_planner_rejects_an_invalid_response_shape() -> None:
     assert error.value.code == "LLM_INVALID_RESPONSE"
 
 
-async def test_question_planner_rejects_more_than_one_initial_query() -> None:
+async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
+    refinements_started: set[str] = set()
+    all_refinements_started = asyncio.Event()
+    refinement_payloads: dict[str, dict[str, object]] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_input = json.loads(messages[-1]["content"])
+        proposed = user_input.get("proposed_evidence_group")
+        if proposed is not None:
+            title = proposed["document_title"]
+            refinement_payloads[title] = payload
+            refinements_started.add(title)
+            if len(refinements_started) == 2:
+                all_refinements_started.set()
+            await asyncio.wait_for(all_refinements_started.wait(), timeout=1)
+            refined_queries = {
+                "ReAct.pdf": "ReAct task-specific actions interact with environment",
+                "Self-RAG.pdf": "Self-RAG Critique tokens support self-reflection",
+            }
+            content = {
+                "evidence_group": {
+                    "query": refined_queries[title],
+                    "document_title": title,
+                }
+            }
+        else:
+            content = {
+                "evidence_groups": [
+                    {
+                        "query": "ReAct task-specific environment actions",
+                        "document_title": "ReAct.pdf",
+                    },
+                    {
+                        "query": "Self-RAG three types of Critique tokens",
+                        "document_title": "Self-RAG.pdf",
+                    },
+                ]
+            }
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question=(
+                "DPR, BART, environment actions, and critique tokens belong to which "
+                "paper components?"
+            ),
+            recent_questions=[],
+            document_titles=["RAG.pdf", "ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == (
+        "ReAct task-specific actions interact with environment",
+        "Self-RAG Critique tokens support self-reflection",
+    )
+    assert set(refinement_payloads) == {"ReAct.pdf", "Self-RAG.pdf"}
+    react_payload = json.dumps(refinement_payloads["ReAct.pdf"])
+    self_rag_payload = json.dumps(refinement_payloads["Self-RAG.pdf"])
+    assert "Self-RAG three types of Critique tokens" not in react_payload
+    assert "ReAct task-specific environment actions" not in self_rag_payload
+    assert "retrieved chunks" in react_payload
+    assert "expected answers" in react_payload
+    assert "must differ from the proposed query" in react_payload
+    assert "do not satisfy refinement" in react_payload
+
+
+async def test_question_planner_discards_refinement_that_changes_document() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_input = json.loads(messages[-1]["content"])
+        proposed = user_input.get("proposed_evidence_group")
+        content = (
+            {
+                "evidence_groups": [
+                    {"query": "ReAct actions", "document_title": "ReAct.pdf"},
+                    {
+                        "query": "Self-RAG critique tokens",
+                        "document_title": "Self-RAG.pdf",
+                    },
+                ]
+            }
+            if proposed is None
+            else {
+                "evidence_group": {
+                    "query": f"refined {proposed['query']}",
+                    "document_title": "Self-RAG.pdf",
+                }
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Compare ReAct and Self-RAG components",
+            recent_questions=[],
+            document_titles=["ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == ("refined Self-RAG critique tokens",)
+
+
+async def test_question_planner_discards_unchanged_refinement() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_input = json.loads(messages[-1]["content"])
+        proposed = user_input.get("proposed_evidence_group")
+        content = (
+            {
+                "evidence_groups": [
+                    {"query": "ReAct actions", "document_title": "ReAct.pdf"},
+                    {
+                        "query": "Self-RAG critique tokens",
+                        "document_title": "Self-RAG.pdf",
+                    },
+                ]
+            }
+            if proposed is None
+            else {"evidence_group": proposed}
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Compare ReAct and Self-RAG components",
+            recent_questions=[],
+            document_titles=["ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == ()
+
+
+async def test_question_planner_rejects_more_than_three_evidence_groups() -> None:
     attempts = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -393,10 +578,23 @@ async def test_question_planner_rejects_more_than_one_initial_query() -> None:
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "additional_queries": [
-                                        "first expansion",
-                                        "second expansion",
-                                        "forbidden third expansion",
+                                    "evidence_groups": [
+                                        {
+                                            "query": "first expansion",
+                                            "document_title": "First.pdf",
+                                        },
+                                        {
+                                            "query": "second expansion",
+                                            "document_title": "Second.pdf",
+                                        },
+                                        {
+                                            "query": "third expansion",
+                                            "document_title": "Third.pdf",
+                                        },
+                                        {
+                                            "query": "forbidden fourth expansion",
+                                            "document_title": "Fourth.pdf",
+                                        },
                                     ]
                                 }
                             )
@@ -411,10 +609,197 @@ async def test_question_planner_rejects_more_than_one_initial_query() -> None:
         planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
         with pytest.raises(LlmProviderError) as error:
-            await planner.plan(question="Question", recent_questions=[])
+            await planner.plan(
+                question="Question",
+                recent_questions=[],
+                document_titles=[
+                    "First.pdf",
+                    "Second.pdf",
+                    "Third.pdf",
+                    "Fourth.pdf",
+                ],
+            )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
     assert attempts == 2
+
+
+async def test_question_planner_corrects_duplicate_document_groups() -> None:
+    initial_attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal initial_attempts
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_message = next(message for message in reversed(messages) if message["role"] == "user")
+        user_input = json.loads(user_message["content"])
+        proposed = user_input.get("proposed_evidence_group")
+        if proposed is not None:
+            content = {
+                "evidence_group": {
+                    "query": f"refined {proposed['query']}",
+                    "document_title": proposed["document_title"],
+                }
+            }
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": json.dumps(content)},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
+            )
+        initial_attempts += 1
+        queries = (
+            [
+                {"query": "DPR component", "document_title": "RAG.pdf"},
+                {"query": "BART component", "document_title": "RAG.pdf"},
+            ]
+            if initial_attempts == 1
+            else [
+                {
+                    "query": "ReAct task-specific environment actions",
+                    "document_title": "ReAct.pdf",
+                },
+                {
+                    "query": "Self-RAG three types of Critique tokens",
+                    "document_title": "Self-RAG.pdf",
+                },
+            ]
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps({"evidence_groups": queries})},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Which components belong to RAG, ReAct, and Self-RAG?",
+            recent_questions=[],
+            document_titles=["RAG.pdf", "ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert initial_attempts == 2
+    assert proposal.additional_queries == (
+        "refined ReAct task-specific environment actions",
+        "refined Self-RAG three types of Critique tokens",
+    )
+
+
+async def test_question_planner_discards_persistently_duplicate_document_groups() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "evidence_groups": [
+                                        {
+                                            "query": "DPR component",
+                                            "document_title": "RAG.pdf",
+                                        },
+                                        {
+                                            "query": "BART component",
+                                            "document_title": "RAG.pdf",
+                                        },
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Which components belong to the available papers?",
+            recent_questions=[],
+            document_titles=["RAG.pdf", "ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert attempts == 2
+    assert proposal.additional_queries == ()
+
+
+async def test_question_planner_uses_original_for_first_of_three_evidence_groups() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_input = json.loads(messages[-1]["content"])
+        proposed = user_input.get("proposed_evidence_group")
+        content = (
+            {
+                "evidence_group": {
+                    "query": f"refined {proposed['query']}",
+                    "document_title": proposed["document_title"],
+                }
+            }
+            if proposed is not None
+            else {
+                "evidence_groups": [
+                    {
+                        "query": "RAG DPR retriever and BART generator",
+                        "document_title": "RAG.pdf",
+                    },
+                    {
+                        "query": "ReAct task-specific environment actions",
+                        "document_title": "ReAct.pdf",
+                    },
+                    {
+                        "query": "Self-RAG three types of Critique tokens",
+                        "document_title": "Self-RAG.pdf",
+                    },
+                ]
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Which components belong to RAG, ReAct, and Self-RAG?",
+            recent_questions=[],
+            document_titles=["RAG.pdf", "ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == (
+        "refined ReAct task-specific environment actions",
+        "refined Self-RAG three types of Critique tokens",
+    )
 
 
 async def test_question_planner_corrects_one_invalid_response() -> None:
@@ -426,18 +811,21 @@ async def test_question_planner_corrects_one_invalid_response() -> None:
         attempts += 1
         payloads.append(json.loads(request.content))
         queries = (
-            ["first", "second", "forbidden third"]
+            [
+                {"query": "first", "document_title": "First.pdf"},
+                {"query": "second", "document_title": "Second.pdf"},
+                {"query": "third", "document_title": "Third.pdf"},
+                {"query": "forbidden fourth", "document_title": "Fourth.pdf"},
+            ]
             if attempts == 1
-            else ["grouped first"]
+            else [{"query": "grouped first", "document_title": "First.pdf"}]
         )
         return httpx.Response(
             200,
             json={
                 "choices": [
                     {
-                        "message": {
-                            "content": json.dumps({"additional_queries": queries})
-                        },
+                        "message": {"content": json.dumps({"evidence_groups": queries})},
                         "finish_reason": "stop",
                     }
                 ]
@@ -447,7 +835,11 @@ async def test_question_planner_corrects_one_invalid_response() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
-        proposal = await planner.plan(question="Question", recent_questions=[])
+        proposal = await planner.plan(
+            question="Question",
+            recent_questions=[],
+            document_titles=["First.pdf", "Second.pdf", "Third.pdf", "Fourth.pdf"],
+        )
 
     assert attempts == 2
     assert proposal.additional_queries == ("grouped first",)
@@ -470,7 +862,16 @@ async def test_question_planner_retries_one_transient_disconnect() -> None:
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps({"additional_queries": ["standalone expansion"]})
+                            "content": json.dumps(
+                                {
+                                    "evidence_groups": [
+                                        {
+                                            "query": "standalone expansion",
+                                            "document_title": "Paper.pdf",
+                                        }
+                                    ]
+                                }
+                            )
                         },
                         "finish_reason": "stop",
                     }
@@ -481,7 +882,11 @@ async def test_question_planner_retries_one_transient_disconnect() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
-        proposal = await planner.plan(question="Question", recent_questions=[])
+        proposal = await planner.plan(
+            question="Question",
+            recent_questions=[],
+            document_titles=["Paper.pdf"],
+        )
 
     assert attempts == 2
     assert proposal.additional_queries == ("standalone expansion",)

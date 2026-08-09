@@ -161,10 +161,12 @@ def _answer_app():
 class RecordingQuestionPlanner:
     def __init__(
         self,
-        retrieval_query: str = "Why are BGE-M3 dense vectors normalized before storage?",
+        *retrieval_queries: str,
     ) -> None:
         self.calls: list[tuple[str, list[str]]] = []
-        self.retrieval_query = retrieval_query
+        self.retrieval_queries = retrieval_queries or (
+            "Why are BGE-M3 dense vectors normalized before storage?",
+        )
 
     async def plan(
         self,
@@ -174,7 +176,7 @@ class RecordingQuestionPlanner:
         document_titles: Sequence[str],
     ) -> RetrievalPlanProposal:
         self.calls.append((question, list(recent_questions)))
-        return RetrievalPlanProposal(additional_queries=(self.retrieval_query,))
+        return RetrievalPlanProposal(additional_queries=self.retrieval_queries)
 
 
 class RewrittenQueryEmbeddingProvider:
@@ -191,6 +193,33 @@ class RewrittenQueryEmbeddingProvider:
             [0.0, 1.0, *([0.0] * 1022)],
             [1.0, *([0.0] * 1023)],
         ]
+
+
+class EvidenceSlotEmbeddingProvider:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+        self.queries.extend(texts)
+        return [[1.0, *([0.0] * 1023)] for _text in texts]
+
+
+class RecordingInsufficientEvidenceAssessor:
+    def __init__(self) -> None:
+        self.supplemental_allowed: list[bool] = []
+
+    async def assess(
+        self,
+        *,
+        supplemental_allowed: bool,
+        **kwargs: object,
+    ) -> EvidenceDecision:
+        self.supplemental_allowed.append(supplemental_allowed)
+        return EvidenceDecision(
+            sufficient=False,
+            selected_chunk_ids=(),
+            supplemental_query="forbidden fourth retrieval query",
+        )
 
 
 class NoMatchingEvidenceEmbeddingProvider:
@@ -400,11 +429,9 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v2"
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
-        assert trace["retrieval_plan_version"] == "bounded-counterexample-v3"
+        assert trace["retrieval_plan_version"] == "two-stage-evidence-slots-v5"
         assert len(trace["retrieval_rounds"]) == 1
-        candidate_trace = trace["retrieval_rounds"][0]["query_results"][0][
-            "candidates"
-        ][0]
+        candidate_trace = trace["retrieval_rounds"][0]["query_results"][0]["candidates"][0]
         assert "dense_rank" in candidate_trace
         assert "lexical_rank" in candidate_trace
         assert "dense_score" in candidate_trace
@@ -490,7 +517,73 @@ async def test_follow_up_uses_bounded_questions_for_fresh_retrieval(
     ]
     persisted = history_response.json()["items"][0]
     assert persisted["retrieval_query"] == "Why is it normalized?"
-    assert persisted["query_rewrite_version"] == "bounded-counterexample-v3"
+    assert persisted["query_rewrite_version"] == "two-stage-evidence-slots-v5"
+
+
+async def test_two_initial_slot_queries_exhaust_supplemental_budget_and_are_traced(
+    session: AsyncSession,
+) -> None:
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    planner = RecordingQuestionPlanner(
+        "ReAct task-specific environment actions",
+        "Self-RAG three types of Critique tokens",
+    )
+    embedding = EvidenceSlotEmbeddingProvider()
+    assessor = RecordingInsufficientEvidenceAssessor()
+    app = _answer_app()
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_query_embedding_provider] = lambda: embedding
+    app.dependency_overrides[get_question_planner] = lambda: planner
+    app.dependency_overrides[get_evidence_assessor] = lambda: assessor
+    app.dependency_overrides[get_answer_generator] = NeverAnswerGenerator
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        knowledge_base_response = await client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "Evidence slot planning"},
+        )
+        knowledge_base_id = UUID(knowledge_base_response.json()["id"])
+        conversation_response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations",
+            json={"title": "Bounded slot queries"},
+        )
+        conversation_id = UUID(conversation_response.json()["id"])
+        await _create_searchable_evidence(session, knowledge_base_id)
+
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers",
+            json={
+                "content": (
+                    "DPR, BART, environment actions, and critique tokens belong to which "
+                    "paper components?"
+                )
+            },
+        )
+        history_response = await client.get(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers"
+        )
+
+    queries = [
+        "DPR, BART, environment actions, and critique tokens belong to which paper components?",
+        "ReAct task-specific environment actions",
+        "Self-RAG three types of Critique tokens",
+    ]
+    assert response.status_code == 200
+    assert _events(response.text)[-1][0] == "refusal"
+    assert embedding.queries == queries
+    assert assessor.supplemental_allowed == [False]
+    persisted = history_response.json()["items"][0]
+    assert persisted["outcome"] == "refused"
+    trace = persisted["workflow_trace"]
+    assert trace["retrieval_plan_version"] == "two-stage-evidence-slots-v5"
+    assert trace["retrieval_queries"] == queries
+    assert trace["supplemental_retrieval_attempts"] == 0
+    assert len(trace["retrieval_rounds"]) == 1
+    assert [item["query"] for item in trace["retrieval_rounds"][0]["query_results"]] == queries
 
 
 async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(

@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     llm_structured_output_mode: Literal["text", "json_object"] = "text"
     llm_structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
     llm_prompt_version: str = "grounded-answer-v2"
-    llm_retrieval_plan_prompt_version: str = "bounded-counterexample-v3"
+    llm_retrieval_plan_prompt_version: str = "two-stage-evidence-slots-v5"
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v1"
     llm_citation_repair_prompt_version: str = "citation-repair-v2"
     answer_context_question_limit: int = Field(default=4, ge=1, le=20)

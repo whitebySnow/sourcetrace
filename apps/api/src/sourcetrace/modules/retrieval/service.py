@@ -16,7 +16,7 @@ _MAX_ADDITIONAL_QUERIES = 2
 _ORIGINAL_QUERY_COVERAGE_CANDIDATES = 4
 _ADDITIONAL_QUERY_COVERAGE_CANDIDATES = 1
 _PLANNER_DOCUMENT_TITLE_LIMIT = 50
-_RETRIEVAL_PLAN_VERSION = "bounded-counterexample-v3"
+_RETRIEVAL_PLAN_VERSION = "two-stage-evidence-slots-v5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,8 +260,7 @@ class RetrievalService:
                 )
             }
             scores_for_query = {
-                candidate.evidence.chunk_id: score
-                for candidate, score in scored_candidates
+                candidate.evidence.chunk_id: score for candidate, score in scored_candidates
             }
             coverage_limit = (
                 _ORIGINAL_QUERY_COVERAGE_CANDIDATES
@@ -296,8 +295,7 @@ class RetrievalService:
                     score,
                 )
         fused = [
-            replace(item, reranker_score=scores_by_chunk[item.evidence.chunk_id])
-            for item in fused
+            replace(item, reranker_score=scores_by_chunk[item.evidence.chunk_id]) for item in fused
         ]
         fused.sort(
             key=lambda item: (
