@@ -75,7 +75,7 @@ $env:EMBEDDING_DEVICE = "cuda"
 $env:RERANKER_DEVICE = "cuda"
 uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli hybrid-retrieval `
   --dataset evals/datasets/agentic-rag-foundations-v1.json `
-  --query-plan evals/query-plans/agentic-rag-foundations-v1-bounded-counterexample-v3.json `
+  --query-plan evals/query-plans/agentic-rag-foundations-v1-two-stage-evidence-slots-v5.json `
   --code-commit (git rev-parse HEAD) `
   --output output/evals/hybrid-retrieval-report.json `
   --confirm-local-model

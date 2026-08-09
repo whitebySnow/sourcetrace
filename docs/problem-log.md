@@ -301,3 +301,26 @@ PostgreSQL `english` lexical 通道和通道级 RRF；`RetrievalService` 只依�
 applicable，只改善 `ARF-023`，无退化；两份报告 SHA-256 同为
 `1439add27519fe48dec2aee3aaa589c72bf08dfdbed533d0b01ad09a47397822`。该结果未调用 DeepSeek，
 不代表端到端回答准确率；`ARF-024` 和 `ARF-026` 仍未解决。
+
+## 19. 单阶段证据槽位查询缺少论文特有机制词
+
+**症状**：Issue #52 的生产混合检索已有 25 个通过项，但 `ARF-024` 和 `ARF-026` 需要多个
+文档或组件的证据。手工证据槽查询可使两题通过，真实 DeepSeek 单阶段规划却只生成“生成前
+检索”和“生成中按需检索”等宽泛复述，完整 30 题仍为 25 个 hybrid 通过项。
+
+**根因**：单次结构化响应同时承担槽位识别、论文归属和源术语改写。Flash 模型能识别 RAG 与
+Self-RAG 两个槽位，但在同一上下文中不会稳定补出 `top-k documents`、`[RETRIEVE] token`
+等论文特有检索对象。仅把每个查询限定到对应文档仍未选中 Self-RAG 的目标页，说明标题路由
+不能代替查询细化。继续加入题目专用示例会造成评测过拟合。
+
+**修复**：`two-stage-evidence-slots-v5` 先用结构化 `evidence_groups` 识别最多三个有序槽位，
+再按总预算选择最多两个附加槽。多槽计划随后对每个选中槽独立并发细化；每次只看到原规划输入
+和自身第一阶段槽位，不读取其他槽位结果、PDF、检索候选或评测答案。细化必须产生不同查询并
+保持原文档标题；改标题、原样返回、损坏结构或供应商错误都会丢弃该槽。简单事实和单槽反例
+计划不增加调用，`RetrievalService` 继续强制整个 Answer Run 最多两条附加查询。
+
+**验证**：真实 DeepSeek v5 为 `ARF-024` 生成包含 `top-k documents` 与 `[RETRIEVE] token`
+的两条查询，聚焦检索由失败变为通过。固定 v5 查询计划的两次完整 30 题生产 repository 重放
+均为 baseline 25 passed、hybrid 26 passed、3 not applicable、零回归；报告 SHA-256 均为
+`69036a6750fb533b86664bbd7f5871a9a41e3d0a5e3d887d672a55b69066c424`。`ARF-026` 因第一阶段
+重复文档归属而安全回退，仍是后续独立问题；本结果不代表端到端回答准确率。

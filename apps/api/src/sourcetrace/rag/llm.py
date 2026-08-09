@@ -41,6 +41,12 @@ class OpenAICompatibleConfig:
             raise ValueError("LLM timeout must be positive")
 
 
+@dataclass(frozen=True, slots=True)
+class _PlannedEvidenceGroup:
+    query: str
+    document_title: str
+
+
 def _grounded_prompt(
     question: str,
     evidence: Sequence[RetrievalCandidate],
@@ -75,33 +81,60 @@ def _retrieval_plan_prompt(
             "content": (
                 "Plan bounded dense retrieval for the current user question. The application "
                 "always executes the original question. Return JSON with exactly one array field "
-                "named additional_queries. Follow every rule: "
-                "1. Return zero or one additional standalone query. One is a hard limit for "
-                "initial planning because a later evidence assessment owns the remaining query "
-                "budget. "
-                "2. Write concise source-like propositions, not broad bags of keywords. Preserve "
-                "logical polarity, subject, object, and who supports what. "
-                "3. Return an additional query only for an absolute claim or negation that needs "
-                "a counterstatement to search for an omitted limitation or failure mode. For "
-                "simple facts, comparisons, attribution, and multi-part questions, return an "
-                "empty array and let the original question establish the retrieval baseline. "
-                "4. The counterstatement must preserve the failure mode and use qualifiers such "
-                "as 'can still' or 'not fully'. "
+                "named evidence_groups. Return at most three groups in the order their methods "
+                "or entities first appear in the question. Each array item must be an object with "
+                "exactly two "
+                "string fields: query and document_title. Copy document_title exactly from "
+                "searchable_document_titles; each title may appear at most once. Follow every "
+                "rule: "
+                "1. Return zero to three evidence groups, not a final query budget. Treat the "
+                "original question as the baseline query. If three groups are returned, the "
+                "application assigns the first group to the original question and executes only "
+                "the second and third group queries, preserving the two-query whole-run budget. "
+                "Do not fill unused groups. "
+                "2. Write concise source-like propositions, not broad bags of keywords. Each "
+                "group query must target one named evidence slot while preserving logical "
+                "polarity, subject, object, and who supports what. Include a distinctive "
+                "mechanism, trigger, or data object for the slot when the question names or "
+                "strongly implies one. Do not merely restate the comparison dimension, such as "
+                "saying only that one method retrieves before or during generation. "
+                "3. For an explicit comparison, attribution, or multi-part question involving "
+                "multiple named methods, entities, terms, or components, return one ordered object "
+                "for each distinct evidence group, up to three. Prioritize groups associated with "
+                "different supplied document titles. Treat multiple terms associated with the same "
+                "supplied title as one evidence group. When three evidence groups are named, "
+                "include all three in first-appearance order; the application, not you, assigns "
+                "the first group to the original baseline and selects the later evidence groups "
+                "tied to supplied titles. Terms that the question explicitly assigns to the same "
+                "method or component share one slot. "
+                "4. For an absolute claim or negation, return at most one counterstatement that "
+                "searches for an omitted limitation or failure mode and preserves qualifiers such "
+                "as 'can still' or 'not fully'. Simple fact questions map to []. If stable named "
+                "slots cannot be identified, return []. "
                 "5. Preserve named entities and English technical terms. When an otherwise "
                 "non-English question names English methods, prefer concise English queries "
                 "using likely source-paper terminology. You may use model knowledge for "
                 "well-known method aliases or framework associations only as search hypotheses. "
                 "Use the supplied searchable document titles to constrain framework and paper "
                 "associations. Titles are retrieval hints, not answer evidence. "
-                "Do not invent bibliographic titles or assign concepts to unrelated frameworks. "
+                "Never create a paper or framework that is absent from the supplied titles. Do not "
+                "assign concepts to unrelated frameworks; when an association is uncertain, use "
+                "only names present in the question and supplied titles. "
                 "Pattern example for comparison: 'How do Method A and Method B schedule "
-                "retrieval?' maps to []. Pattern example for claim checking: "
-                "'Method X "
-                "completely solved outputs lacking source support' maps to ['Method X can still "
-                "produce outputs not fully supported by sources']; preserve what is unsupported "
-                "and "
-                "what provides support. "
-                "Use recent questions only to resolve references. Do not answer or add conclusions."
+                "retrieval?' maps to two ordered evidence_groups objects, one source-like query "
+                "for Method A and one for Method B, each with its exact supplied title. "
+                "Budget example: if A1 and A2 belong to Method A and the question also asks "
+                "about B1 in Method B and C1 in Method C, return three ordered objects: one query "
+                "grouping A1 and A2 under Method A, one query for B1 in Method B, and one for C1 "
+                "in Method C. Do not emit separate groups for A1 and A2. The application removes "
+                "the first query to preserve its budget. "
+                "Pattern example for claim checking: 'Method X "
+                "completely solved outputs lacking source support' maps to one evidence_groups "
+                "object whose query says 'Method X can still produce outputs not fully supported "
+                "by sources' and whose document_title exactly matches a supplied title; preserve "
+                "what is unsupported and what provides support. "
+                "Use recent questions only to resolve references. Do not answer, add conclusions, "
+                "or include facts that are not needed to retrieve one slot."
             ),
         },
         {
@@ -111,6 +144,55 @@ def _retrieval_plan_prompt(
                     "recent_user_questions": list(recent_questions),
                     "searchable_document_titles": list(document_titles),
                     "current_question": question,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def _retrieval_slot_refinement_prompt(
+    question: str,
+    recent_questions: Sequence[str],
+    document_titles: Sequence[str],
+    proposed_group: _PlannedEvidenceGroup,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Refine exactly one proposed retrieval evidence group. Return JSON with exactly "
+                "one object field named evidence_group. That object must contain exactly two "
+                "non-empty string fields: query and document_title. Copy document_title from the "
+                "proposal without changing it. Replace a broad paraphrase with a concise, "
+                "source-like search proposition that preserves the current question's entity, "
+                "logical polarity, comparison dimension, and English technical terms while "
+                "adding the distinctive mechanism, trigger, component, control signal, or data "
+                "object likely used by the named method. The refined query must differ from the "
+                "proposed query. Generic phrases such as adaptive retrieval, retrieval trigger, "
+                "retrieves before generation, and retrieves during generation do not satisfy "
+                "refinement. Name a concrete model input or output, token type, search operation, "
+                "retrieved object, or architecture component instead. Silently consider candidate "
+                "source terminology and return the most specific defensible search hypothesis. "
+                "The refined text is only a search "
+                "hypothesis. Do not answer the question, state a conclusion, add or merge slots, "
+                "or invent a different paper association. Use recent questions only to resolve "
+                "references. Searchable titles constrain associations but are not evidence. This "
+                "request contains no retrieved chunks, expected answers, evaluation evidence, or "
+                "labels, and you must not infer that they were supplied."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "recent_user_questions": list(recent_questions),
+                    "searchable_document_titles": list(document_titles),
+                    "current_question": question,
+                    "proposed_evidence_group": {
+                        "query": proposed_group.query,
+                        "document_title": proposed_group.document_title,
+                    },
                 },
                 ensure_ascii=False,
             ),
@@ -333,6 +415,7 @@ class OpenAICompatibleQuestionPlanner:
                 recent_questions,
                 document_titles,
             )
+            semantic_violation_count = 0
             for attempt in range(2):
                 parsed = await _structured_completion(
                     self.config,
@@ -340,21 +423,35 @@ class OpenAICompatibleQuestionPlanner:
                     messages,
                     temperature=0,
                 )
-                additional_queries = parsed.get("additional_queries")
-                if (
-                    set(parsed) == {"additional_queries"}
-                    and isinstance(additional_queries, list)
-                    and len(additional_queries) <= 1
-                    and all(
-                        isinstance(query, str) and query.strip()
-                        for query in additional_queries
+                evidence_groups = parsed.get("evidence_groups")
+                if set(parsed) == {"evidence_groups"} and _has_planned_query_shape(evidence_groups):
+                    validated = _validate_planned_evidence_groups(
+                        evidence_groups,
+                        document_titles=document_titles,
                     )
-                ):
-                    return RetrievalPlanProposal(
-                        additional_queries=tuple(
-                            query.strip() for query in additional_queries
+                    if validated is not None:
+                        selected_groups = validated[-2:] if len(validated) == 3 else validated
+                        if len(selected_groups) < 2:
+                            return RetrievalPlanProposal(
+                                additional_queries=tuple(group.query for group in selected_groups),
+                            )
+                        refined_groups = await asyncio.gather(
+                            *(
+                                self._refine_group(
+                                    question=question,
+                                    recent_questions=recent_questions,
+                                    document_titles=document_titles,
+                                    proposed_group=group,
+                                )
+                                for group in selected_groups
+                            )
                         )
-                    )
+                        return RetrievalPlanProposal(
+                            additional_queries=tuple(
+                                group.query for group in refined_groups if group is not None
+                            ),
+                        )
+                    semantic_violation_count += 1
                 if attempt == 0:
                     messages = [
                         *messages,
@@ -362,18 +459,121 @@ class OpenAICompatibleQuestionPlanner:
                             "role": "system",
                             "content": (
                                 "The previous response violated the JSON contract. Retry once with "
-                                "exactly one additional_queries array containing at most one "
-                                "non-empty counterstatement query, or an empty array. Return no "
+                                "exactly one evidence_groups array containing at most three "
+                                "objects. Each object must contain exactly one non-empty query and "
+                                "one document_title copied exactly from the supplied searchable "
+                                "titles. Order groups by first appearance in the question and use "
+                                "each title at most once, or return an empty array. Return no "
                                 "other fields."
                             ),
                         },
                     ]
+            if semantic_violation_count == 2:
+                return RetrievalPlanProposal(additional_queries=())
             raise ValueError
         except (TypeError, ValueError) as error:
             raise LlmProviderError(
                 "LLM_INVALID_RESPONSE",
                 "Language model returned an invalid response",
             ) from error
+
+    async def _refine_group(
+        self,
+        *,
+        question: str,
+        recent_questions: Sequence[str],
+        document_titles: Sequence[str],
+        proposed_group: _PlannedEvidenceGroup,
+    ) -> _PlannedEvidenceGroup | None:
+        try:
+            parsed = await _structured_completion(
+                self.config,
+                self._client,
+                _retrieval_slot_refinement_prompt(
+                    question,
+                    recent_questions,
+                    document_titles,
+                    proposed_group,
+                ),
+                temperature=0,
+            )
+        except LlmProviderError:
+            return None
+        if set(parsed) != {"evidence_group"}:
+            return None
+        return _validate_refined_evidence_group(
+            parsed["evidence_group"],
+            proposed_group=proposed_group,
+        )
+
+
+def _validate_planned_evidence_groups(
+    value: object,
+    *,
+    document_titles: Sequence[str],
+) -> tuple[_PlannedEvidenceGroup, ...] | None:
+    if not isinstance(value, list) or len(value) > 3:
+        return None
+    allowed_titles = set(document_titles)
+    seen_titles: set[str] = set()
+    groups: list[_PlannedEvidenceGroup] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"query", "document_title"}:
+            return None
+        query = item["query"]
+        document_title = item["document_title"]
+        if (
+            not isinstance(query, str)
+            or not query.strip()
+            or not isinstance(document_title, str)
+            or document_title not in allowed_titles
+            or document_title in seen_titles
+        ):
+            return None
+        groups.append(
+            _PlannedEvidenceGroup(
+                query=query.strip(),
+                document_title=document_title,
+            )
+        )
+        seen_titles.add(document_title)
+    return tuple(groups)
+
+
+def _validate_refined_evidence_group(
+    value: object,
+    *,
+    proposed_group: _PlannedEvidenceGroup,
+) -> _PlannedEvidenceGroup | None:
+    if not isinstance(value, dict) or set(value) != {"query", "document_title"}:
+        return None
+    query = value["query"]
+    document_title = value["document_title"]
+    if (
+        not isinstance(query, str)
+        or not query.strip()
+        or document_title != proposed_group.document_title
+        or query.strip().casefold() == proposed_group.query.casefold()
+    ):
+        return None
+    return _PlannedEvidenceGroup(
+        query=query.strip(),
+        document_title=proposed_group.document_title,
+    )
+
+
+def _has_planned_query_shape(value: object) -> bool:
+    if not isinstance(value, list) or len(value) > 3:
+        return False
+    return all(
+        isinstance(item, dict)
+        and set(item) == {"query", "document_title"}
+        and isinstance(item["query"], str)
+        and bool(item["query"].strip())
+        and isinstance(item["document_title"], str)
+        and bool(item["document_title"].strip())
+        for item in value
+    )
 
 
 async def _structured_completion(
