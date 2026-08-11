@@ -134,6 +134,22 @@
     "ObservedCitationValidation": {
       "additionalProperties": false,
       "properties": {
+        "attempt": {
+          "anyOf": [
+            {
+              "enum": [
+                "initial",
+                "repair"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        },
         "valid": {
           "title": "Valid",
           "type": "boolean"
@@ -147,6 +163,34 @@
           ],
           "title": "Issue",
           "type": "string"
+        },
+        "unit_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unit Count",
+          "type": "integer"
+        },
+        "citation_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Citation Count",
+          "type": "integer"
+        },
+        "uncited_unit_indices": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Uncited Unit Indices",
+          "type": "array"
+        },
+        "unknown_label_unit_indices": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Unknown Label Unit Indices",
+          "type": "array"
         }
       },
       "required": [

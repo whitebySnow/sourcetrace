@@ -147,8 +147,13 @@ class WorkflowRetrievalRoundTrace(BaseModel):
 
 
 class WorkflowCitationValidationTrace(BaseModel):
+    attempt: Literal["initial", "repair"] | None = None
     valid: bool
     issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+    unit_count: int = Field(default=0, ge=0)
+    citation_count: int = Field(default=0, ge=0)
+    uncited_unit_indices: list[int] = Field(default_factory=list)
+    unknown_label_unit_indices: list[int] = Field(default_factory=list)
 
 
 class AnswerWorkflowTrace(BaseModel):

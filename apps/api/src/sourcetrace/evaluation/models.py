@@ -154,8 +154,13 @@ class ObservedEvidenceAssessment(StrictModel):
 
 
 class ObservedCitationValidation(StrictModel):
+    attempt: Literal["initial", "repair"] | None = None
     valid: bool
     issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+    unit_count: int = Field(default=0, ge=0)
+    citation_count: int = Field(default=0, ge=0)
+    uncited_unit_indices: tuple[int, ...] = ()
+    unknown_label_unit_indices: tuple[int, ...] = ()
 
 
 class ObservedQueryCandidateTrace(StrictModel):

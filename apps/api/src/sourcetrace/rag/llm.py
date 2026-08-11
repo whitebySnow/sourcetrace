@@ -7,6 +7,7 @@ from typing import Any, Literal
 import httpx
 
 from sourcetrace.rag.ports import (
+    CitationValidationFeedback,
     EvidenceDecision,
     RetrievalCandidate,
     RetrievalPlanProposal,
@@ -61,7 +62,10 @@ def _grounded_prompt(
                 "or immediately after every sentence or list item that makes a factual claim. "
                 "Every citation must use ASCII square brackets in exactly this form: "
                 "[citation_id]. Replace citation_id with a supplied label copied verbatim. "
-                "Do not use bare IDs, full-width brackets, footnotes, or a sources section. "
+                "Use only plain paragraphs or bullet list items. Do not add standalone headings, "
+                "tables, prefaces, conclusions, or a sources section. Put each citation in the "
+                "same sentence or list item as its claim. Do not use bare IDs, full-width "
+                "brackets, or footnotes. "
                 "Use the same language as the question. Do not use outside knowledge. If the "
                 f"evidence cannot answer the question, say so.\n\n{evidence_text}"
             ),
@@ -256,6 +260,7 @@ def _citation_repair_prompt(
     question: str,
     answer: str,
     evidence: Sequence[RetrievalCandidate],
+    validation_feedback: CitationValidationFeedback,
 ) -> list[dict[str, str]]:
     return [
         {
@@ -266,8 +271,12 @@ def _citation_repair_prompt(
                 "knowledge. Every factual sentence or list item must cite an allowed label with "
                 "ASCII square brackets in exactly this form: [citation_id]. Replace citation_id "
                 "with a supplied label copied verbatim; do not use bare IDs, full-width brackets, "
-                "footnotes, or a sources section. Keep the question's language. Return JSON with "
-                "exactly one string field named answer."
+                "footnotes, or a sources section. Use only plain paragraphs or bullet list items. "
+                "Do not add standalone headings, tables, prefaces, or conclusions. Put each "
+                "citation in the same sentence or list item as its claim. The validation feedback "
+                "contains zero-based indexes of draft units that failed; rewrite the entire draft, "
+                "not only those units. Keep the question's language. Return JSON with exactly one "
+                "string field named answer."
             ),
         },
         {
@@ -276,6 +285,17 @@ def _citation_repair_prompt(
                 {
                     "question": question,
                     "draft_answer": answer,
+                    "validation_feedback": {
+                        "issue": validation_feedback.issue,
+                        "unit_count": validation_feedback.unit_count,
+                        "citation_count": validation_feedback.citation_count,
+                        "uncited_unit_indices": list(
+                            validation_feedback.uncited_unit_indices
+                        ),
+                        "unknown_label_unit_indices": list(
+                            validation_feedback.unknown_label_unit_indices
+                        ),
+                    },
                     "evidence": [
                         {
                             "citation_id": item.citation_id,
@@ -818,11 +838,12 @@ class OpenAICompatibleCitationRepairer:
         question: str,
         answer: str,
         evidence: Sequence[RetrievalCandidate],
+        validation_feedback: CitationValidationFeedback,
     ) -> str:
         parsed = await _structured_completion(
             self.config,
             self._client,
-            _citation_repair_prompt(question, answer, evidence),
+            _citation_repair_prompt(question, answer, evidence, validation_feedback),
         )
         try:
             if set(parsed) != {"answer"}:

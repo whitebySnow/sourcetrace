@@ -14,7 +14,7 @@ from sourcetrace.rag.llm import (
     OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionPlanner,
 )
-from sourcetrace.rag.ports import RetrievalCandidate
+from sourcetrace.rag.ports import CitationValidationFeedback, RetrievalCandidate
 
 
 class RecordingResponseStream(httpx.AsyncByteStream):
@@ -63,6 +63,16 @@ def _evidence() -> list[RetrievalCandidate]:
             citation_id="citation-1",
         )
     ]
+
+
+def _validation_feedback() -> CitationValidationFeedback:
+    return CitationValidationFeedback(
+        issue="uncited_claim",
+        unit_count=1,
+        citation_count=0,
+        uncited_unit_indices=(0,),
+        unknown_label_unit_indices=(),
+    )
 
 
 def _config(
@@ -122,6 +132,7 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
     assert "citation-1" in payload["messages"][0]["content"]
     assert "BGE-M3 dense vectors" in payload["messages"][0]["content"]
     assert "ASCII square brackets" in payload["messages"][0]["content"]
+    assert "standalone headings" in payload["messages"][0]["content"]
     assert "[citation_id]" in payload["messages"][0]["content"]
 
 
@@ -1119,6 +1130,7 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
             question="How are vectors stored?",
             answer="Vectors are normalized.",
             evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
         )
 
     assert answer == "Vectors are normalized [citation-1]"
@@ -1130,6 +1142,9 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     assert "citation-1" in serialized
     assert "ASCII square brackets" in payload["messages"][0]["content"]
     assert "[citation_id]" in payload["messages"][0]["content"]
+    serialized_user_message = payload["messages"][1]["content"]
+    assert '"uncited_unit_indices": [0]' in serialized_user_message
+    assert "standalone headings" in payload["messages"][0]["content"]
 
 
 async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> None:
@@ -1158,6 +1173,7 @@ async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> 
             question="How are vectors stored?",
             answer="Vectors are normalized.",
             evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
         )
 
     assert answer == "Vectors are normalized [citation-1]"
@@ -1186,6 +1202,7 @@ async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() 
             question="What is the objective?",
             answer="The objective is x + y.",
             evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
         )
 
     assert answer == r"The objective is \(x + y\) [citation-1]"
@@ -1322,6 +1339,7 @@ async def test_citation_repairer_maps_timeout_without_leaking_details() -> None:
                 question="Question",
                 answer="Draft",
                 evidence=_evidence(),
+                validation_feedback=_validation_feedback(),
             )
 
     assert error.value.code == "LLM_TIMEOUT"

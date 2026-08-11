@@ -44,10 +44,10 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=60, gt=0)
     llm_structured_output_mode: Literal["text", "json_object"] = "text"
     llm_structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
-    llm_prompt_version: str = "grounded-answer-v2"
+    llm_prompt_version: str = "grounded-answer-v3"
     llm_retrieval_plan_prompt_version: str = "two-stage-evidence-slots-v5"
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v3"
-    llm_citation_repair_prompt_version: str = "citation-repair-v2"
+    llm_citation_repair_prompt_version: str = "citation-repair-v3"
     answer_context_question_limit: int = Field(default=4, ge=1, le=20)
     retrieval_top_k: int = Field(default=8, ge=1, le=8)
     retrieval_page_neighbor_count: int = Field(default=1, ge=0, le=3)

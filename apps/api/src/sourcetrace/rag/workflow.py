@@ -17,6 +17,7 @@ from sourcetrace.modules.retrieval.service import (
 from sourcetrace.rag.ports import (
     AnswerGenerator,
     CitationRepairer,
+    CitationValidationFeedback,
     EvidenceAssessor,
     RetrievalCandidate,
 )
@@ -51,11 +52,24 @@ class EvidenceAssessmentTrace:
 
 @dataclass(frozen=True, slots=True)
 class CitationValidationTrace:
+    attempt: Literal["initial", "repair"]
     valid: bool
     issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+    unit_count: int
+    citation_count: int
+    uncited_unit_indices: tuple[int, ...]
+    unknown_label_unit_indices: tuple[int, ...]
 
-    def to_payload(self) -> dict[str, str | bool]:
-        return {"valid": self.valid, "issue": self.issue}
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "attempt": self.attempt,
+            "valid": self.valid,
+            "issue": self.issue,
+            "unit_count": self.unit_count,
+            "citation_count": self.citation_count,
+            "uncited_unit_indices": list(self.uncited_unit_indices),
+            "unknown_label_unit_indices": list(self.unknown_label_unit_indices),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -485,13 +499,17 @@ class AnswerWorkflow:
             for item in state["selected_evidence"]
         }
         cited = _CITATION_LABEL.findall(state["answer"])
-        issue = self._citation_validation_issue(state["answer"], set(allowed))
-        citation_valid = issue == "valid"
+        validation = self._citation_validation_trace(
+            state["answer"],
+            set(allowed),
+            attempt="repair" if state["repair_attempts"] else "initial",
+        )
+        citation_valid = validation.valid
         trace = replace(
             state["workflow_trace"],
             citation_validations=(
                 *state["workflow_trace"].citation_validations,
-                CitationValidationTrace(valid=citation_valid, issue=issue),
+                validation,
             ),
         )
         await self._record_trace(state["run_id"], trace)
@@ -519,10 +537,20 @@ class AnswerWorkflow:
             citation_repair_attempts=1,
         )
         await self._record_trace(state["run_id"], trace)
+        validation = trace.citation_validations[-1]
+        if validation.issue == "valid":
+            raise RuntimeError("citation repair requires an invalid validation result")
         repaired = await self._citation_repairer.repair(
             question=state["question"],
             answer=state["answer"],
             evidence=self._candidates(state["run_id"], state["selected_evidence"]),
+            validation_feedback=CitationValidationFeedback(
+                issue=validation.issue,
+                unit_count=validation.unit_count,
+                citation_count=validation.citation_count,
+                uncited_unit_indices=validation.uncited_unit_indices,
+                unknown_label_unit_indices=validation.unknown_label_unit_indices,
+            ),
         )
         return _WorkflowState(
             answer=repaired.strip(),
@@ -648,8 +676,29 @@ class AnswerWorkflow:
         answer: str,
         allowed: set[str],
     ) -> Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]:
+        return AnswerWorkflow._citation_validation_trace(
+            answer,
+            allowed,
+            attempt="initial",
+        ).issue
+
+    @staticmethod
+    def _citation_validation_trace(
+        answer: str,
+        allowed: set[str],
+        *,
+        attempt: Literal["initial", "repair"],
+    ) -> CitationValidationTrace:
         if not answer.strip():
-            return "empty_answer"
+            return CitationValidationTrace(
+                attempt=attempt,
+                valid=False,
+                issue="empty_answer",
+                unit_count=0,
+                citation_count=0,
+                uncited_unit_indices=(),
+                unknown_label_unit_indices=(),
+            )
         units = [
             unit.strip()
             for unit in re.split(
@@ -659,11 +708,27 @@ class AnswerWorkflow:
             if unit.strip()
         ]
         if not units:
-            return "empty_answer"
+            return CitationValidationTrace(
+                attempt=attempt,
+                valid=False,
+                issue="empty_answer",
+                unit_count=0,
+                citation_count=0,
+                uncited_unit_indices=(),
+                unknown_label_unit_indices=(),
+            )
+        issue: Literal["uncited_claim", "unknown_label", "valid"] = "valid"
+        citation_count = 0
+        uncited_unit_indices: list[int] = []
+        unknown_label_unit_indices: list[int] = []
         for index, unit in enumerate(units):
             labels = _CITATION_LABEL.findall(unit)
+            citation_count += len(labels)
             if any(label not in allowed for label in labels):
-                return "unknown_label"
+                unknown_label_unit_indices.append(index)
+                if issue == "valid":
+                    issue = "unknown_label"
+                continue
             if AnswerWorkflow._is_citation_only(unit):
                 continue
             if labels:
@@ -671,8 +736,18 @@ class AnswerWorkflow:
             if index + 1 >= len(units) or not AnswerWorkflow._is_citation_only(
                 units[index + 1], allowed
             ):
-                return "uncited_claim"
-        return "valid"
+                uncited_unit_indices.append(index)
+                if issue == "valid":
+                    issue = "uncited_claim"
+        return CitationValidationTrace(
+            attempt=attempt,
+            valid=issue == "valid",
+            issue=issue,
+            unit_count=len(units),
+            citation_count=citation_count,
+            uncited_unit_indices=tuple(uncited_unit_indices),
+            unknown_label_unit_indices=tuple(unknown_label_unit_indices),
+        )
 
     @staticmethod
     def _is_citation_only(unit: str, allowed: set[str] | None = None) -> bool:

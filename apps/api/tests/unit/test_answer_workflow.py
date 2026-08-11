@@ -9,7 +9,11 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
     RetrievedEvidence,
 )
-from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
+from sourcetrace.rag.ports import (
+    CitationValidationFeedback,
+    EvidenceDecision,
+    RetrievalCandidate,
+)
 from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowRequest, WorkflowTrace
 from tests.helpers import PreserveOrderReranker
 
@@ -154,9 +158,13 @@ class RecordingCitationRepairer:
     def __init__(self, repaired_answer: str) -> None:
         self.repaired_answer = repaired_answer
         self.answers: list[str] = []
+        self.validation_feedbacks: list[CitationValidationFeedback] = []
 
     async def repair(self, **kwargs: object) -> str:
         self.answers.append(str(kwargs["answer"]))
+        feedback = kwargs["validation_feedback"]
+        assert isinstance(feedback, CitationValidationFeedback)
+        self.validation_feedbacks.append(feedback)
         return self.repaired_answer
 
 
@@ -479,6 +487,18 @@ async def test_workflow_refuses_when_the_single_citation_repair_is_still_invalid
         "uncited_claim",
         "uncited_claim",
     ]
+    initial, repaired = control.traces[-1].citation_validations
+    assert initial.attempt == "initial"
+    assert repaired.attempt == "repair"
+    assert initial.unit_count == repaired.unit_count == 1
+    assert initial.citation_count == repaired.citation_count == 0
+    assert initial.uncited_unit_indices == repaired.uncited_unit_indices == (0,)
+    assert initial.unknown_label_unit_indices == repaired.unknown_label_unit_indices == ()
+    feedback = repairer.validation_feedbacks[0]
+    assert feedback.issue == "uncited_claim"
+    assert feedback.unit_count == 1
+    assert feedback.uncited_unit_indices == (0,)
+    assert feedback.unknown_label_unit_indices == ()
 
 
 async def test_workflow_rejects_an_assessment_that_selects_unknown_chunks() -> None:
