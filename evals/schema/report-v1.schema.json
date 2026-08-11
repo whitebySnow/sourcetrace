@@ -19,6 +19,22 @@
         "end_to_end": {
           "$ref": "#/$defs/EvaluationStatus"
         },
+        "retrieval_evidence_matches": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EvidenceClaimMatch"
+          },
+          "title": "Retrieval Evidence Matches",
+          "type": "array"
+        },
+        "citation_evidence_matches": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EvidenceClaimMatch"
+          },
+          "title": "Citation Evidence Matches",
+          "type": "array"
+        },
         "observation": {
           "$ref": "#/$defs/EvaluationObservation"
         }
@@ -403,6 +419,71 @@
         "not_applicable"
       ],
       "title": "EvaluationSummary",
+      "type": "object"
+    },
+    "EvidenceClaimMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "match_status": {
+          "$ref": "#/$defs/EvidenceMatchStatus"
+        },
+        "matched_reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidencePassage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "claim_id",
+        "match_status"
+      ],
+      "title": "EvidenceClaimMatch",
+      "type": "object"
+    },
+    "EvidenceMatchStatus": {
+      "enum": [
+        "canonical",
+        "approved_alternative",
+        "not_matched"
+      ],
+      "type": "string"
+    },
+    "EvidencePassage": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number",
+        "text"
+      ],
+      "title": "EvidencePassage",
       "type": "object"
     },
     "ObservedCitationValidation": {

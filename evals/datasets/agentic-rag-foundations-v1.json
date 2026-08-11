@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "dataset_id": "agentic-rag-foundations",
-  "dataset_version": "1.0.0",
+  "dataset_version": "1.1.0",
   "knowledge_base_id": "c5557289-002a-4631-86c2-f53bfec90706",
   "document_version_ids": [
     "c9b7c41e-4716-403f-a115-3cdaa3a86741",
@@ -11,7 +11,7 @@
   "review": {
     "status": "reviewed",
     "reviewed_by": "whitebySnow",
-    "reviewed_at": "2026-07-30T03:31:44.111Z"
+    "reviewed_at": "2026-08-11T11:38:53.761Z"
   },
   "cases": [
     {
@@ -339,10 +339,44 @@
         "outcome": "answered",
         "reference_answer": "DPR 是原始 RAG 的检索器，BART-large 是其生成器；环境动作属于 ReAct 的行动组件；critique token 属于 Self-RAG 的自我评价组件。",
         "evidence": [
-          {"document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741", "page_number": 3, "text": "is based on DPR"},
-          {"document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741", "page_number": 3, "text": "BART-large"},
-          {"document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760", "page_number": 1, "text": "task-speciﬁc actions"},
-          {"document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d", "page_number": 4, "text": "three types of Critique tokens"}
+          {
+            "claim_id": "rag-dpr-retriever",
+            "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+            "page_number": 3,
+            "text": "is based on DPR"
+          },
+          {
+            "claim_id": "rag-bart-generator",
+            "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+            "page_number": 3,
+            "text": "BART-large"
+          },
+          {
+            "claim_id": "react-environment-action",
+            "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+            "page_number": 1,
+            "text": "task-speciﬁc actions",
+            "approved_alternatives": [
+              {
+                "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+                "page_number": 3,
+                "text": "from the environment and takes an action"
+              }
+            ]
+          },
+          {
+            "claim_id": "self-rag-critique-token",
+            "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+            "page_number": 4,
+            "text": "three types of Critique tokens",
+            "approved_alternatives": [
+              {
+                "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+                "page_number": 1,
+                "text": "Reflection tokens are categorized into retrieval and critique tokens"
+              }
+            ]
+          }
         ]
       }
     },
