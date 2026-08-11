@@ -942,6 +942,64 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     assert "retrieval_queries" in serialized
 
 
+async def test_evidence_assessor_does_not_invite_unsupported_query_associations() -> None:
+    captured_system_prompt = ""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_system_prompt
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        captured_system_prompt = messages[0]["content"]
+        has_attribution_guard = (
+            "do not guess a paper, method, framework, component owner, or relationship"
+            in captured_system_prompt
+        )
+        has_query_isolation_guard = (
+            "Each supplemental query must contain only one missing evidence component"
+            in captured_system_prompt
+            and "Do not mix in a different term already supported by the selected candidates"
+            in captured_system_prompt
+        )
+        supplemental_query = (
+            "environment action interaction"
+            if has_attribution_guard and has_query_isolation_guard
+            else "environment action in RAG paper"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": [supplemental_query],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Which paper owns the environment action component?",
+            queries=("Which paper owns the environment action component?",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.supplemental_queries == ("environment action interaction",)
+    assert "use wording from the question without adding an owner" in captured_system_prompt
+    assert "return separate queries, one per component" in captured_system_prompt
+
+
 async def test_evidence_assessor_retries_one_incorrect_top_level_field_set() -> None:
     payloads: list[dict[str, object]] = []
 
