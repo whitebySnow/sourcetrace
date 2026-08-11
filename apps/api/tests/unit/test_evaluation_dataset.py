@@ -17,7 +17,7 @@ def test_reviewed_agentic_rag_dataset_is_versioned_and_complete() -> None:
     )
 
     assert dataset.dataset_id == "agentic-rag-foundations"
-    assert dataset.dataset_version == "1.0.0"
+    assert dataset.dataset_version == "1.1.0"
     assert dataset.review.status == "reviewed"
     assert len(dataset.document_version_ids) == 3
     assert len(dataset.cases) == 30
@@ -30,6 +30,19 @@ def test_reviewed_agentic_rag_dataset_is_versioned_and_complete() -> None:
     refusal_cases = [case for case in dataset.cases if case.expected.outcome == "refused"]
     assert len(refusal_cases) == 3
     assert all(not case.expected.evidence for case in refusal_cases)
+    arf_026 = next(case for case in dataset.cases if case.id == "ARF-026")
+    assert [item.claim_id for item in arf_026.expected.evidence] == [
+        "rag-dpr-retriever",
+        "rag-bart-generator",
+        "react-environment-action",
+        "self-rag-critique-token",
+    ]
+    assert [len(item.approved_alternatives) for item in arf_026.expected.evidence] == [
+        0,
+        0,
+        1,
+        1,
+    ]
 
 
 def test_reviewed_dataset_loads_with_versioned_ground_truth(tmp_path) -> None:
@@ -289,6 +302,54 @@ def test_dataset_rejects_evidence_outside_document_snapshot() -> None:
                 ],
             }
         )
+
+
+def test_dataset_validates_claim_scoped_approved_alternatives() -> None:
+    snapshot_version_id = uuid4()
+    outside_version_id = uuid4()
+    base = {
+        "schema_version": "1",
+        "dataset_id": "alternative-evidence",
+        "dataset_version": "1.1.0",
+        "knowledge_base_id": uuid4(),
+        "document_version_ids": [snapshot_version_id],
+        "review": {"status": "fixture"},
+        "cases": [
+            {
+                "id": "direct-001",
+                "category": "direct",
+                "question": "What does the source say?",
+                "expected": {
+                    "outcome": "answered",
+                    "reference_answer": "A fact.",
+                    "evidence": [
+                        {
+                            "claim_id": "fact",
+                            "document_version_id": snapshot_version_id,
+                            "page_number": 1,
+                            "text": "Canonical fact.",
+                            "approved_alternatives": [
+                                {
+                                    "document_version_id": outside_version_id,
+                                    "page_number": 2,
+                                    "text": "Alternative fact.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError, match="document snapshot"):
+        EvaluationDataset.model_validate(base)
+
+    base["document_version_ids"] = [snapshot_version_id, outside_version_id]
+    dataset = EvaluationDataset.model_validate(base)
+
+    assert dataset.cases[0].expected.evidence[0].claim_id == "fact"
+    assert len(dataset.cases[0].expected.evidence[0].approved_alternatives) == 1
 
 
 @pytest.mark.parametrize(

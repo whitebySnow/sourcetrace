@@ -942,6 +942,111 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     assert "retrieval_queries" in serialized
 
 
+async def test_evidence_assessor_does_not_invite_unsupported_query_associations() -> None:
+    captured_system_prompt = ""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_system_prompt
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        captured_system_prompt = messages[0]["content"]
+        has_attribution_guard = (
+            "do not guess a paper, method, framework, component owner, or relationship"
+            in captured_system_prompt
+        )
+        has_query_isolation_guard = (
+            "Each supplemental query must contain only one missing evidence component"
+            in captured_system_prompt
+            and "Do not mix in a different term already supported by the selected candidates"
+            in captured_system_prompt
+        )
+        supplemental_query = (
+            "environment action interaction"
+            if has_attribution_guard and has_query_isolation_guard
+            else "environment action in RAG paper"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": [supplemental_query],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Which paper owns the environment action component?",
+            queries=("Which paper owns the environment action component?",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.supplemental_queries == ("environment action interaction",)
+    assert "use wording from the question without adding an owner" in captured_system_prompt
+    assert "return separate queries, one per component" in captured_system_prompt
+
+
+async def test_evidence_assessor_retries_one_incorrect_top_level_field_set() -> None:
+    payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert isinstance(payload, dict)
+        payloads.append(payload)
+        content: dict[str, object] = {
+            "sufficient": True,
+            "selected_chunk_ids": ["chunk-1"],
+            "supplemental_queries": [],
+        }
+        if len(payloads) == 1:
+            content["explanation"] = "The evidence supports the answer."
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="How are vectors indexed?",
+            queries=("How are vectors indexed?", "vector indexing"),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert decision.selected_chunk_ids == ("chunk-1",)
+    assert len(payloads) == 2
+    retry_messages = payloads[1]["messages"]
+    assert isinstance(retry_messages, list)
+    retry_instruction = retry_messages[-1]
+    assert isinstance(retry_instruction, dict)
+    assert "exactly these three top-level fields" in retry_instruction["content"]
+    assert "Return no other fields" in retry_instruction["content"]
+
+
 async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> None:
     payloads: list[dict[str, object]] = []
 
@@ -1087,7 +1192,11 @@ async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() 
 
 
 async def test_evidence_assessor_rejects_unstructured_output() -> None:
+    attempts = 0
+
     async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
         return httpx.Response(
             200,
             json={
@@ -1112,10 +1221,15 @@ async def test_evidence_assessor_rejects_unstructured_output() -> None:
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert attempts == 2
 
 
 async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> None:
+    attempts = 0
+
     async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
         return httpx.Response(
             200,
             json={
@@ -1148,6 +1262,7 @@ async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> No
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert attempts == 1
 
 
 @pytest.mark.parametrize(

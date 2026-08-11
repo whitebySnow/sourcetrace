@@ -1,11 +1,17 @@
 """Sanitized diagnostics for retrieval failures in a recorded evaluation report."""
 
+from collections.abc import Sequence
+
+from sourcetrace.evaluation.evidence_matching import match_evidence_claims
 from sourcetrace.evaluation.models import (
     EvaluationCase,
     EvaluationDataset,
     EvaluationReport,
+    EvidenceMatchStatus,
+    EvidenceReference,
     ExpectedEvidenceDiagnostic,
     ExpectedEvidenceMatchStatus,
+    ObservedEvidence,
     RetrievalCaseDiagnostic,
     RetrievalDiagnosticsReport,
     RetrievalFailureMechanism,
@@ -35,13 +41,26 @@ def build_retrieval_diagnostics(
             raise ValueError("evaluation report contains a case outside the supplied dataset")
         trace = result.observation.decision_trace
         retrievals = trace.retrievals if trace is not None else ()
+        claim_matches = match_evidence_claims(
+            case.expected.evidence,
+            result.observation.retrieved_evidence,
+        )
         expected = tuple(
             ExpectedEvidenceDiagnostic(
+                claim_id=claim_match.claim_id,
                 document_version_id=reference.document_version_id,
                 page_number=reference.page_number,
-                match_status=_match_status(reference, result.observation.retrieved_evidence),
+                match_status=_match_status(
+                    reference,
+                    claim_match.match_status,
+                    result.observation.retrieved_evidence,
+                ),
             )
-            for reference in case.expected.evidence
+            for reference, claim_match in zip(
+                case.expected.evidence,
+                claim_matches,
+                strict=True,
+            )
         )
         diagnostics.append(
             RetrievalCaseDiagnostic(
@@ -59,18 +78,21 @@ def build_retrieval_diagnostics(
     )
 
 
-def _match_status(reference, observed) -> ExpectedEvidenceMatchStatus:  # type: ignore[no-untyped-def]
+def _match_status(
+    reference: EvidenceReference,
+    match_status: EvidenceMatchStatus,
+    observed: Sequence[ObservedEvidence],
+) -> ExpectedEvidenceMatchStatus:
+    if match_status == "canonical":
+        return "canonical"
+    if match_status == "approved_alternative":
+        return "approved_alternative"
+    accepted_passages = (reference, *reference.approved_alternatives)
     if any(
-        item.document_version_id == reference.document_version_id
-        and item.page_number == reference.page_number
-        and reference.text.strip() in item.text.strip()
+        item.document_version_id == passage.document_version_id
+        and item.page_number == passage.page_number
         for item in observed
-    ):
-        return "matched"
-    if any(
-        item.document_version_id == reference.document_version_id
-        and item.page_number == reference.page_number
-        for item in observed
+        for passage in accepted_passages
     ):
         return "same_page_different_chunk"
     return "not_retrieved"
@@ -84,7 +106,9 @@ def _primary_mechanism(
     if retrievals and retrievals[0].query != case.question:
         return "query_rewrite_drift"
     if expected and all(
-        item.match_status in {"matched", "same_page_different_chunk"} for item in expected
+        item.match_status
+        in {"canonical", "approved_alternative", "same_page_different_chunk"}
+        for item in expected
     ):
         return "chunk_boundary_mismatch"
     return "embedding_retrieval_weakness"

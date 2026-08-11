@@ -129,6 +129,142 @@ async def test_harness_reports_independent_results_with_replay_versions() -> Non
     assert reviewed_report.judgment_review.reviewed_by == "project-owner"
 
 
+async def test_harness_reports_claim_scoped_approved_alternative_matches() -> None:
+    document_version_id = uuid4()
+    dataset = EvaluationDataset.model_validate(
+        {
+            "schema_version": "1",
+            "dataset_id": "alternative-evidence-fixture",
+            "dataset_version": "1.1.0",
+            "knowledge_base_id": uuid4(),
+            "document_version_ids": [document_version_id],
+            "review": {"status": "fixture"},
+            "cases": [
+                {
+                    "id": "multi-001",
+                    "category": "multi_chunk",
+                    "question": "Which components are described?",
+                    "expected": {
+                        "outcome": "answered",
+                        "reference_answer": "The source describes two components.",
+                        "evidence": [
+                            {
+                                "claim_id": "first-component",
+                                "document_version_id": document_version_id,
+                                "page_number": 1,
+                                "text": "Canonical first component.",
+                                "approved_alternatives": [
+                                    {
+                                        "document_version_id": document_version_id,
+                                        "page_number": 2,
+                                        "text": "Approved first component.",
+                                    }
+                                ],
+                            },
+                            {
+                                "claim_id": "second-component",
+                                "document_version_id": document_version_id,
+                                "page_number": 3,
+                                "text": "Canonical second component.",
+                            },
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+    alternative = ObservedEvidence(
+        document_version_id=document_version_id,
+        page_number=2,
+        text="Context with Approved first component.",
+    )
+    canonical = ObservedEvidence(
+        document_version_id=document_version_id,
+        page_number=3,
+        text="Context with Canonical second component.",
+    )
+    subject = DeterministicSubject(
+        {
+            "multi-001": EvaluationObservation(
+                outcome="answered",
+                answer="The source describes two components.",
+                retrieved_evidence=(alternative, canonical),
+                citations=(alternative, canonical),
+            )
+        }
+    )
+
+    report = await EvaluationHarness().run(
+        dataset,
+        subject,
+        metadata=EvaluationRunMetadata(
+            code_commit="test-commit",
+            model_provider="fake",
+            model_name="fake",
+            workflow_version="v1",
+            parser_version="v1",
+            tokenizer="cl100k_base",
+            chunk_size=500,
+            chunk_overlap=80,
+            chunking_version="v1",
+            embedding_provider="fake",
+            embedding_model="fake",
+            embedding_revision="1",
+            embedding_dimension=4,
+            embedding_version="v1",
+            retrieval_version="v1",
+            retrieval_top_k=8,
+            retrieval_minimum_score=0.5,
+            retrieval_minimum_evidence=1,
+            generation_prompt_version="v1",
+            question_rewrite_prompt_version="v1",
+            evidence_assessment_prompt_version="v1",
+            citation_repair_prompt_version="v1",
+        ),
+    )
+
+    result = report.cases[0]
+    assert result.retrieval == "passed"
+    assert result.citation == "passed"
+    assert [item.claim_id for item in result.retrieval_evidence_matches] == [
+        "first-component",
+        "second-component",
+    ]
+    assert [item.match_status for item in result.retrieval_evidence_matches] == [
+        "approved_alternative",
+        "canonical",
+    ]
+    assert result.retrieval_evidence_matches[0].matched_reference == (
+        dataset.cases[0].expected.evidence[0].approved_alternatives[0]
+    )
+    assert [item.match_status for item in result.citation_evidence_matches] == [
+        "approved_alternative",
+        "canonical",
+    ]
+
+    assert (
+        EvaluationHarness.retrieval_status(
+            dataset.cases[0].expected.evidence,
+            (alternative,),
+        )
+        == "failed"
+    )
+    assert (
+        EvaluationHarness.retrieval_status(
+            dataset.cases[0].expected.evidence,
+            (
+                alternative,
+                ObservedEvidence(
+                    document_version_id=document_version_id,
+                    page_number=3,
+                    text="Topically similar but unapproved text.",
+                ),
+            ),
+        )
+        == "failed"
+    )
+
+
 async def test_refusal_results_are_reported_without_scoring_irrelevant_axes() -> None:
     document_version_id = uuid4()
     dataset = EvaluationDataset.model_validate(

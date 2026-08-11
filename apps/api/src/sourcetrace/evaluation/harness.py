@@ -1,5 +1,9 @@
 from typing import Protocol
 
+from sourcetrace.evaluation.evidence_matching import (
+    evidence_status,
+    match_evidence_claims,
+)
 from sourcetrace.evaluation.models import (
     CaseEvaluationResult,
     EvaluationCase,
@@ -30,6 +34,14 @@ class EvaluationHarness:
         results: list[CaseEvaluationResult] = []
         for case in dataset.cases:
             observation = await subject.evaluate(case)
+            retrieval_matches = match_evidence_claims(
+                case.expected.evidence,
+                observation.retrieved_evidence,
+            )
+            citation_matches = match_evidence_claims(
+                case.expected.evidence,
+                observation.citations,
+            )
             retrieval = self.retrieval_status(
                 case.expected.evidence,
                 observation.retrieved_evidence,
@@ -55,6 +67,8 @@ class EvaluationHarness:
                         refusal=refusal,
                         judgment=None,
                     ),
+                    retrieval_evidence_matches=retrieval_matches,
+                    citation_evidence_matches=citation_matches,
                     observation=observation,
                 )
             )
@@ -85,36 +99,14 @@ class EvaluationHarness:
         expected: list[EvidenceReference],
         observed: tuple[ObservedEvidence, ...],
     ) -> EvaluationStatus:
-        if not expected:
-            return "not_applicable"
-        matches = all(
-            any(EvaluationHarness.matches(reference, actual) for actual in observed)
-            for reference in expected
-        )
-        return "passed" if matches else "failed"
+        return evidence_status(expected, observed)
 
     @staticmethod
     def _citation_status(
         expected: list[EvidenceReference],
         observed: tuple[ObservedEvidence, ...],
     ) -> EvaluationStatus:
-        if not expected:
-            return "not_applicable"
-        if not observed:
-            return "failed"
-        matches = all(
-            any(EvaluationHarness.matches(reference, actual) for actual in observed)
-            for reference in expected
-        )
-        return "passed" if matches else "failed"
-
-    @staticmethod
-    def matches(reference: EvidenceReference, actual: ObservedEvidence) -> bool:
-        return (
-            actual.document_version_id == reference.document_version_id
-            and actual.page_number == reference.page_number
-            and reference.text.strip() in actual.text.strip()
-        )
+        return evidence_status(expected, observed)
 
     @staticmethod
     def _end_to_end(

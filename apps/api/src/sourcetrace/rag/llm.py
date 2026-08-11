@@ -216,7 +216,16 @@ def _evidence_assessment_prompt(
                 "the question or use outside knowledge. If evidence is insufficient and "
                 "supplemental retrieval capacity remains, provide at most that many standalone "
                 "supplemental queries, ordered by importance. Each query must target one missing "
-                "evidence component and must not repeat an executed query. "
+                "evidence component and must not repeat an executed query. Each supplemental "
+                "query must contain only one missing evidence component. When multiple components "
+                "are missing and capacity permits, return separate queries, one per component. "
+                "Do not mix in a different term already supported by the selected candidates. "
+                "Supplemental queries "
+                "are search hypotheses, not conclusions: do not guess a paper, method, framework, "
+                "component owner, or relationship that is not explicitly stated in the question "
+                "or supported by a candidate. When the question asks which source owns a missing "
+                "term and the candidates do not establish that association, use wording from the "
+                "question without adding an owner. "
                 "Return JSON with exactly: sufficient (boolean), selected_chunk_ids (array of "
                 "strings), and supplemental_queries (array of strings)."
             ),
@@ -722,22 +731,41 @@ class OpenAICompatibleEvidenceAssessor:
         evidence: Sequence[RetrievalCandidate],
         supplemental_query_limit: int,
     ) -> EvidenceDecision:
+        expected_fields = {
+            "sufficient",
+            "selected_chunk_ids",
+            "supplemental_queries",
+        }
+        messages = _evidence_assessment_prompt(
+            question,
+            queries,
+            evidence,
+            supplemental_query_limit=supplemental_query_limit,
+        )
         parsed = await _structured_completion(
             self.config,
             self._client,
-            _evidence_assessment_prompt(
-                question,
-                queries,
-                evidence,
-                supplemental_query_limit=supplemental_query_limit,
-            ),
+            messages,
         )
+        if set(parsed) != expected_fields:
+            parsed = await _structured_completion(
+                self.config,
+                self._client,
+                [
+                    *messages,
+                    {
+                        "role": "system",
+                        "content": (
+                            "The previous response violated the JSON contract. Retry once with "
+                            "exactly these three top-level fields: sufficient, "
+                            "selected_chunk_ids, and supplemental_queries. Return no other "
+                            "fields. Preserve the required value types and configured limits."
+                        ),
+                    },
+                ],
+            )
         try:
-            if set(parsed) != {
-                "sufficient",
-                "selected_chunk_ids",
-                "supplemental_queries",
-            }:
+            if set(parsed) != expected_fields:
                 raise ValueError
             sufficient = parsed["sufficient"]
             selected = parsed["selected_chunk_ids"]

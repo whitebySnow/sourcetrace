@@ -79,6 +79,33 @@
       "title": "EvaluationCase",
       "type": "object"
     },
+    "EvidencePassage": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number",
+        "text"
+      ],
+      "title": "EvidencePassage",
+      "type": "object"
+    },
     "EvidenceReference": {
       "additionalProperties": false,
       "properties": {
@@ -96,6 +123,27 @@
           "minLength": 1,
           "title": "Text",
           "type": "string"
+        },
+        "claim_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Id"
+        },
+        "approved_alternatives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EvidencePassage"
+          },
+          "title": "Approved Alternatives",
+          "type": "array"
         }
       },
       "required": [

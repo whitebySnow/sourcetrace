@@ -39,10 +39,31 @@ class DatasetReview(StrictModel):
         return self
 
 
-class EvidenceReference(StrictModel):
+class EvidencePassage(StrictModel):
     document_version_id: UUID
     page_number: int = Field(ge=1)
     text: str = Field(min_length=1)
+
+
+class EvidenceReference(EvidencePassage):
+    claim_id: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    )
+    approved_alternatives: tuple[EvidencePassage, ...] = ()
+
+    @model_validator(mode="after")
+    def require_distinct_claim_scoped_alternatives(self) -> "EvidenceReference":
+        if self.approved_alternatives and self.claim_id is None:
+            raise ValueError("approved evidence alternatives require a claim ID")
+        canonical = (self.document_version_id, self.page_number, self.text.strip())
+        alternatives = [
+            (item.document_version_id, item.page_number, item.text.strip())
+            for item in self.approved_alternatives
+        ]
+        if canonical in alternatives or len(alternatives) != len(set(alternatives)):
+            raise ValueError("approved evidence alternatives must be distinct")
+        return self
 
 
 class ExpectedResult(StrictModel):
@@ -86,12 +107,24 @@ class EvaluationDataset(StrictModel):
             raise ValueError("document version IDs in the evaluation snapshot must be unique")
         snapshot = set(self.document_version_ids)
         evidence_versions = {
-            reference.document_version_id
+            passage.document_version_id
             for case in self.cases
             for reference in case.expected.evidence
+            for passage in (reference, *reference.approved_alternatives)
         }
         if not evidence_versions <= snapshot:
             raise ValueError("evaluation evidence must belong to the document snapshot")
+        for case in self.cases:
+            references = case.expected.evidence
+            claim_ids = [item.claim_id for item in references if item.claim_id is not None]
+            if len(claim_ids) != len(set(claim_ids)):
+                raise ValueError("evaluation evidence claim IDs must be unique within a case")
+            if any(item.approved_alternatives for item in references) and any(
+                item.claim_id is None for item in references
+            ):
+                raise ValueError(
+                    "all evidence references require claim IDs when a case has alternatives"
+                )
         return self
 
 
@@ -220,6 +253,23 @@ class EvaluationRunMetadata(StrictModel):
 
 type EvaluationStatus = Literal["passed", "failed", "pending_review", "not_applicable"]
 type HumanJudgment = Literal["passed", "failed"]
+type EvidenceMatchStatus = Literal[
+    "canonical",
+    "approved_alternative",
+    "not_matched",
+]
+
+
+class EvidenceClaimMatch(StrictModel):
+    claim_id: str = Field(min_length=1)
+    match_status: EvidenceMatchStatus
+    matched_reference: EvidencePassage | None = None
+
+    @model_validator(mode="after")
+    def require_reference_for_successful_match(self) -> "EvidenceClaimMatch":
+        if (self.match_status == "not_matched") != (self.matched_reference is None):
+            raise ValueError("evidence match status and matched reference must agree")
+        return self
 
 
 class CaseJudgment(StrictModel):
@@ -254,6 +304,8 @@ class CaseEvaluationResult(StrictModel):
     citation: EvaluationStatus
     refusal: EvaluationStatus
     end_to_end: EvaluationStatus
+    retrieval_evidence_matches: tuple[EvidenceClaimMatch, ...] = ()
+    citation_evidence_matches: tuple[EvidenceClaimMatch, ...] = ()
     observation: EvaluationObservation
 
 
@@ -286,13 +338,15 @@ type RetrievalFailureMechanism = Literal[
     "score_filtering",
 ]
 type ExpectedEvidenceMatchStatus = Literal[
-    "matched",
+    "canonical",
+    "approved_alternative",
     "same_page_different_chunk",
     "not_retrieved",
 ]
 
 
 class ExpectedEvidenceDiagnostic(StrictModel):
+    claim_id: str = Field(min_length=1)
     document_version_id: UUID
     page_number: int = Field(ge=1)
     match_status: ExpectedEvidenceMatchStatus

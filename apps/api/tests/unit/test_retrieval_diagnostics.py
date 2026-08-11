@@ -149,9 +149,23 @@ def test_diagnostics_classify_missing_expected_page_as_embedding_weakness() -> N
                 "reference_answer": "The expected source.",
                 "evidence": [
                     {
+                        "claim_id": "approved-source",
                         "document_version_id": str(version_id),
                         "page_number": 4,
                         "text": "Expected sentence.",
+                        "approved_alternatives": [
+                            {
+                                "document_version_id": str(other_version_id),
+                                "page_number": 1,
+                                "text": "Wrong page.",
+                            }
+                        ],
+                    },
+                    {
+                        "claim_id": "missing-source",
+                        "document_version_id": str(version_id),
+                        "page_number": 5,
+                        "text": "Missing sentence.",
                     }
                 ],
             },
@@ -222,4 +236,7 @@ def test_diagnostics_classify_missing_expected_page_as_embedding_weakness() -> N
     )
 
     assert diagnostics.cases[0].primary_mechanism == "embedding_retrieval_weakness"
-    assert diagnostics.cases[0].expected_evidence[0].match_status == "not_retrieved"
+    assert diagnostics.cases[0].expected_evidence[0].claim_id == "approved-source"
+    assert diagnostics.cases[0].expected_evidence[0].match_status == "approved_alternative"
+    assert diagnostics.cases[0].expected_evidence[1].claim_id == "missing-source"
+    assert diagnostics.cases[0].expected_evidence[1].match_status == "not_retrieved"
