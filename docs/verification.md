@@ -370,3 +370,29 @@ SHA-256 均为 `69036a6750fb533b86664bbd7f5871a9a41e3d0a5e3d887d672a55b69066c424
 因此 26/30 不能表述为端到端回答准确率。启动验证环境时还发现现有数据库记录 Alembic revision
 `a4d1c9e7b205`，而当前工作树无法定位该 revision，导致 Compose 的 migrate 容器退出 255；
 PostgreSQL 本身健康且只读重放可完成。该环境一致性问题不属于 Issue #54，必须另行处理。
+
+### Issue #57 声明级已批准替代证据
+
+2026-08-11 将数据集升级到 `agentic-rag-foundations@1.1.0`，为每条预期证据声明增加稳定
+`claim_id`，并允许在同一声明下记录经人工审核的替代证据。报告分别记录 `canonical`、
+`approved_alternative` 和 `not_matched`，未审核的同页或同主题片段仍不能满足预期证据。
+
+首次完整真实评测因 `deepseek-v4-flash` 偶发返回多余顶层字段而中止。提交
+`03a230617c650b83775dd7c68558dfa7b85fe5ae` 为证据评估响应增加一次严格字段集合纠错；第二次
+字段仍错误时继续失败，类型、重复值、空值和补充查询预算校验均未放宽。随后使用同一不可变
+文档快照、本地 BGE-M3、固定 `BAAI/bge-reranker-v2-m3` 和生产混合检索完成 30 题真实评测。
+原始报告 SHA-256 为
+`1212248a29f31c9deaace991f86cd0c32ae863e368f5ac18ba4310fbc670acc0`。
+
+| 维度 | 结果 |
+|---|---|
+| 检索 | 24 passed，3 failed，3 not applicable |
+| 引用 | 11 passed，16 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 3 passed，16 failed，11 pending review |
+
+47 条检索声明中有 44 条命中规范证据、3 条未命中、0 条命中已批准替代证据。`ARF-023`、
+`ARF-024` 和 `ARF-026` 仍是三个检索失败项。`ARF-026` 命中 DPR、BART 和 Self-RAG 的
+规范证据，但没有召回 ReAct 的规范片段或第 3 页已批准替代片段，最终按严格证据策略拒答。
+因此声明级替代证据的数据契约与匹配实现已通过自动化测试，但 Issue #57 的真实验收尚未完成；
+不能把本轮结果表述为替代证据已在生产检索中命中，也不能据此关闭 Issue。
