@@ -396,3 +396,34 @@ PostgreSQL 本身健康且只读重放可完成。该环境一致性问题不属
 规范证据，但没有召回 ReAct 的规范片段或第 3 页已批准替代片段，最终按严格证据策略拒答。
 因此声明级替代证据的数据契约与匹配实现已通过自动化测试，但 Issue #57 的真实验收尚未完成；
 不能把本轮结果表述为替代证据已在生产检索中命中，也不能据此关闭 Issue。
+
+随后定位到 `ARF-026` 的补充查询把待求证归属提前写成 `environment action in RAG paper`，或把
+环境动作与已由候选支持的 Self-RAG critique token 混入同一查询。提交
+`e611c16e9019606c6ff932e69ef3fdaef1db5fc9` 将证据评估提示词升级为
+`evidence-assessment-v3`：每条补充查询只覆盖一个缺失组件；多个缺口分别查询；不得增加问题或
+候选证据尚未建立的论文、方法、框架或组件归属。初始规划的语义冲突仍整体安全回退，未从无效
+响应中猜测性保留槽位。
+
+聚焦真实评测生成 `critique token component` 和 `environment action component`，`ARF-026`
+的 DPR、BART、Self-RAG 分别命中规范证据，ReAct 环境动作命中第 3 页已批准替代证据。随后
+完成同一数据集和生产配置的 30 题真实回归；报告绑定上述完整提交与 v3 提示词，通过项目报告
+模型校验，SHA-256 为
+`c1f0c51b1c9d1279286f6b3fedfdac7cf4ad8b23f093e359e584b929ffd79e43`。
+
+| 维度 | 结果 |
+|---|---|
+| 检索 | 25 passed，2 failed，3 not applicable |
+| 引用 | 6 passed，21 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 3 passed，21 failed，6 pending review |
+
+47 条检索声明中有 44 条规范命中、1 条批准替代命中、2 条未命中。相对首轮 v1.1.0 报告，
+`ARF-026` 是唯一检索状态变化并由 failed 变为 passed，原有 24 个检索通过项零退化；剩余失败
+为 `ARF-023` 和 `ARF-024`。Top 8、候选池、cosine 阈值、reranker、证据充分性、引用校验和
+拒答门禁均未放宽，因此 Issue #57 的检索与替代证据验收完成。
+
+本轮引用通过数从 11 降到 6；`ARF-002`、`ARF-003`、`ARF-004`、`ARF-007`、`ARF-012` 和
+`ARF-019` 的检索仍通过，但引用从通过变为失败，`ARF-001` 则从失败变为通过。该波动不能从
+单次供应商运行归因于检索修复，也不能表述为端到端质量提升。原始报告继续保留在被 Git 忽略的
+`output/evals/`，后续若处理回答或引用稳定性，应使用独立 Issue 和固定对照，不重新定义本次
+已完成的声明级替代证据范围。
