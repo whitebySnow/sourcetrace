@@ -90,11 +90,11 @@ class PlannedRetrieval:
 class SequentialAssessor:
     def __init__(self, *decisions: EvidenceDecision) -> None:
         self.decisions = list(decisions)
-        self.supplemental_allowed: list[bool] = []
+        self.supplemental_query_limits: list[int] = []
         self.queries: list[tuple[str, ...]] = []
 
     async def assess(self, **kwargs: object) -> EvidenceDecision:
-        self.supplemental_allowed.append(bool(kwargs["supplemental_allowed"]))
+        self.supplemental_query_limits.append(int(kwargs["supplemental_query_limit"]))
         self.queries.append(tuple(kwargs["queries"]))  # type: ignore[arg-type]
         return self.decisions.pop(0)
 
@@ -148,7 +148,7 @@ async def test_initial_plan_uses_the_shared_extra_query_budget() -> None:
         ),
         evidence,
     )
-    assessor = SequentialAssessor(EvidenceDecision(False, (), None))
+    assessor = SequentialAssessor(EvidenceDecision(False, (), ()))
     control = ActiveControl()
     workflow = AnswerWorkflow(
         retrieval=retrieval,
@@ -165,7 +165,7 @@ async def test_initial_plan_uses_the_shared_extra_query_budget() -> None:
     ]
 
     assert retrieval.searches == [("original", "expansion one", "expansion two")]
-    assert assessor.supplemental_allowed == [False]
+    assert assessor.supplemental_query_limits == [0]
     assert assessor.queries == [("original", "expansion one", "expansion two")]
     assert events[-1].type == "refused"
     assert control.traces[-1].retrieval_plan_version == "bounded-multi-query-v1"
@@ -188,7 +188,7 @@ async def test_duplicate_supplemental_query_is_not_executed() -> None:
         ),
         evidence,
     )
-    assessor = SequentialAssessor(EvidenceDecision(False, (), "  ORIGINAL   QUESTION  "))
+    assessor = SequentialAssessor(EvidenceDecision(False, (), ("  ORIGINAL   QUESTION  ",)))
     workflow = AnswerWorkflow(
         retrieval=retrieval,
         assessor=assessor,
@@ -219,8 +219,8 @@ async def test_one_unique_supplemental_query_creates_one_more_fusion_round() -> 
         evidence,
     )
     assessor = SequentialAssessor(
-        EvidenceDecision(False, (), "supplemental expansion"),
-        EvidenceDecision(True, (str(evidence.chunk_id),), None),
+        EvidenceDecision(False, (), ("supplemental expansion",)),
+        EvidenceDecision(True, (str(evidence.chunk_id),), ()),
     )
     citation_id = uuid5(run_id, str(evidence.chunk_id))
     control = ActiveControl()
@@ -242,7 +242,7 @@ async def test_one_unique_supplemental_query_creates_one_more_fusion_round() -> 
         ("original", "initial expansion"),
         ("original", "initial expansion", "supplemental expansion"),
     ]
-    assert assessor.supplemental_allowed == [True, False]
+    assert assessor.supplemental_query_limits == [1, 0]
     assert events[-1].type == "answered"
     final_trace = control.traces[-1]
     assert final_trace.retrieval_queries == (
@@ -252,3 +252,48 @@ async def test_one_unique_supplemental_query_creates_one_more_fusion_round() -> 
     )
     assert len(final_trace.retrieval_rounds) == 2
     assert final_trace.supplemental_retrieval_attempts == 1
+
+
+async def test_two_missing_evidence_slots_share_one_supplemental_round() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    retrieval = PlannedRetrieval(
+        RetrievalPlan(
+            version="bounded-multi-query-v1",
+            queries=("original",),
+        ),
+        evidence,
+    )
+    assessor = SequentialAssessor(
+        EvidenceDecision(
+            sufficient=False,
+            selected_chunk_ids=(),
+            supplemental_queries=("ReAct environment actions", "Self-RAG critique tokens"),
+        ),
+        EvidenceDecision(
+            sufficient=True,
+            selected_chunk_ids=(str(evidence.chunk_id),),
+            supplemental_queries=(),
+        ),
+    )
+    citation_id = uuid5(run_id, str(evidence.chunk_id))
+    workflow = AnswerWorkflow(
+        retrieval=retrieval,
+        assessor=assessor,
+        generator=StaticGenerator(f"Supported answer [{citation_id}]"),
+        citation_repairer=UnusedRepairer(),
+        run_control=ActiveControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event async for event in workflow.run(WorkflowRequest(run_id, uuid4(), "original", ()))
+    ]
+
+    assert retrieval.searches == [
+        ("original",),
+        ("original", "ReAct environment actions", "Self-RAG critique tokens"),
+    ]
+    assert assessor.supplemental_query_limits == [2, 0]
+    assert events[-1].type == "answered"

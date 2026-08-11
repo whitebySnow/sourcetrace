@@ -140,7 +140,7 @@ class SelectingAllEvidenceAssessor:
         return EvidenceDecision(
             sufficient=bool(evidence),
             selected_chunk_ids=tuple(item.chunk_id for item in evidence),
-            supplemental_query=None,
+            supplemental_queries=(),
         )
 
 
@@ -206,19 +206,19 @@ class EvidenceSlotEmbeddingProvider:
 
 class RecordingInsufficientEvidenceAssessor:
     def __init__(self) -> None:
-        self.supplemental_allowed: list[bool] = []
+        self.supplemental_query_limits: list[int] = []
 
     async def assess(
         self,
         *,
-        supplemental_allowed: bool,
+        supplemental_query_limit: int,
         **kwargs: object,
     ) -> EvidenceDecision:
-        self.supplemental_allowed.append(supplemental_allowed)
+        self.supplemental_query_limits.append(supplemental_query_limit)
         return EvidenceDecision(
             sufficient=False,
             selected_chunk_ids=(),
-            supplemental_query="forbidden fourth retrieval query",
+            supplemental_queries=("forbidden fourth retrieval query",),
         )
 
 
@@ -424,9 +424,9 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["llm_model"] == get_settings().llm_model
         assert persisted["prompt_version"] == "grounded-answer-v2"
         assert persisted["retrieval_version"] == get_settings().retrieval_config_version
-        assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v1")
+        assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v2")
         assert persisted["citation_repair_prompt_version"] == "citation-repair-v2"
-        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v2"
+        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v3"
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
         assert trace["retrieval_plan_version"] == "two-stage-evidence-slots-v5"
@@ -442,7 +442,7 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert trace["citation_repair_attempts"] == 0
         assert len(trace["assessments"]) == 1
         assert trace["assessments"][0]["sufficient"] is True
-        assert trace["assessments"][0]["supplemental_query"] is None
+        assert trace["assessments"][0]["supplemental_queries"] == []
         assert len(trace["assessments"][0]["selected_chunk_ids"]) == 1
         assert persisted["citations"] == citations
 
@@ -575,7 +575,7 @@ async def test_two_initial_slot_queries_exhaust_supplemental_budget_and_are_trac
     assert response.status_code == 200
     assert _events(response.text)[-1][0] == "refusal"
     assert embedding.queries == queries
-    assert assessor.supplemental_allowed == [False]
+    assert assessor.supplemental_query_limits == [0]
     persisted = history_response.json()["items"][0]
     assert persisted["outcome"] == "refused"
     trace = persisted["workflow_trace"]

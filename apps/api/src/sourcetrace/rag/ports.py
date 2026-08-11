@@ -15,7 +15,7 @@ class RetrievalCandidate:
 class EvidenceDecision:
     sufficient: bool
     selected_chunk_ids: tuple[str, ...]
-    supplemental_query: str | None
+    supplemental_queries: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +56,7 @@ class EvidenceAssessor(Protocol):
         question: str,
         queries: Sequence[str],
         evidence: Sequence[RetrievalCandidate],
-        supplemental_allowed: bool,
+        supplemental_query_limit: int,
     ) -> EvidenceDecision: ...
 
 

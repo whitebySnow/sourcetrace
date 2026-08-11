@@ -94,7 +94,7 @@ class SelectingAssessor:
         return EvidenceDecision(
             sufficient=True,
             selected_chunk_ids=(str(self.selected_chunk_id),),
-            supplemental_query=None,
+            supplemental_queries=(),
         )
 
 
@@ -106,17 +106,17 @@ class SelectingManyAssessor:
         return EvidenceDecision(
             sufficient=True,
             selected_chunk_ids=tuple(str(item) for item in self.selected_chunk_ids),
-            supplemental_query=None,
+            supplemental_queries=(),
         )
 
 
 class SequentialAssessor:
     def __init__(self, decisions: Sequence[EvidenceDecision]) -> None:
         self.decisions = list(decisions)
-        self.supplemental_allowed: list[bool] = []
+        self.supplemental_query_limits: list[int] = []
 
     async def assess(self, **kwargs: object) -> EvidenceDecision:
-        self.supplemental_allowed.append(bool(kwargs["supplemental_allowed"]))
+        self.supplemental_query_limits.append(int(kwargs["supplemental_query_limit"]))
         return self.decisions.pop(0)
 
 
@@ -259,12 +259,12 @@ async def test_workflow_performs_only_one_supplemental_retrieval() -> None:
             EvidenceDecision(
                 sufficient=False,
                 selected_chunk_ids=(),
-                supplemental_query="bounded agent maximum retrieval attempts",
+                supplemental_queries=("bounded agent maximum retrieval attempts",),
             ),
             EvidenceDecision(
                 sufficient=True,
                 selected_chunk_ids=(str(supplemental.chunk_id),),
-                supplemental_query=None,
+                supplemental_queries=(),
             ),
         ]
     )
@@ -299,7 +299,7 @@ async def test_workflow_performs_only_one_supplemental_retrieval() -> None:
             "bounded agent maximum retrieval attempts",
         ),
     ]
-    assert assessor.supplemental_allowed == [True, False]
+    assert assessor.supplemental_query_limits == [2, 0]
     assert control.traces[-1].retrieval_queries == (
         "What is the retry limit?",
         "bounded agent maximum retrieval attempts",
@@ -427,8 +427,8 @@ async def test_workflow_refuses_after_one_unsuccessful_supplemental_retrieval() 
     retrieval = TwoResultRetrieval([])
     assessor = SequentialAssessor(
         [
-            EvidenceDecision(False, (), "one supplemental query"),
-            EvidenceDecision(False, (), "a forbidden third query"),
+            EvidenceDecision(False, (), ("one supplemental query",)),
+            EvidenceDecision(False, (), ("a forbidden third query",)),
         ]
     )
     workflow = AnswerWorkflow(
@@ -449,7 +449,7 @@ async def test_workflow_refuses_after_one_unsuccessful_supplemental_retrieval() 
         ("Question",),
         ("Question", "one supplemental query"),
     ]
-    assert assessor.supplemental_allowed == [True, False]
+    assert assessor.supplemental_query_limits == [2, 0]
     assert events[-1].type == "refused"
     assert events[-1].code == "INSUFFICIENT_EVIDENCE"
 
@@ -488,7 +488,7 @@ async def test_workflow_rejects_an_assessment_that_selects_unknown_chunks() -> N
             EvidenceDecision(
                 sufficient=True,
                 selected_chunk_ids=(str(evidence.chunk_id), "unknown-chunk"),
-                supplemental_query=None,
+                supplemental_queries=(),
             )
         ]
     )

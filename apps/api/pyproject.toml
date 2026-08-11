@@ -2,7 +2,7 @@
 name = "sourcetrace-api"
 version = "0.1.0"
 description = "Traceable RAG knowledge base API and worker"
-readme = "../../README.md"
+readme = { text = "SourceTrace API and worker package.", content-type = "text/markdown" }
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.16,<2",

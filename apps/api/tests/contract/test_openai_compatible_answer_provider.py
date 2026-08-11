@@ -264,7 +264,7 @@ async def test_evidence_assessor_times_out_a_keep_alive_only_response() -> None:
                     question="Question",
                     queries=("Question",),
                     evidence=_evidence(),
-                    supplemental_allowed=True,
+                    supplemental_query_limit=1,
                 ),
                 timeout=0.5,
             )
@@ -907,7 +907,9 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
                                 {
                                     "sufficient": False,
                                     "selected_chunk_ids": [],
-                                    "supplemental_query": "BGE-M3 normalization indexing",
+                                    "supplemental_queries": [
+                                        "BGE-M3 normalization indexing",
+                                    ],
                                 }
                             )
                         },
@@ -924,19 +926,19 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
             question="How are vectors indexed?",
             queries=("How are vectors indexed?", "vector indexing"),
             evidence=_evidence(),
-            supplemental_allowed=True,
+            supplemental_query_limit=2,
         )
 
     assert decision.sufficient is False
     assert decision.selected_chunk_ids == ()
-    assert decision.supplemental_query == "BGE-M3 normalization indexing"
+    assert decision.supplemental_queries == ("BGE-M3 normalization indexing",)
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert payload["stream"] is False
     serialized = json.dumps(payload["messages"])
     assert "chunk-1" in serialized
     assert "BGE-M3 dense vectors" in serialized
-    assert "supplemental_allowed" in serialized
+    assert "supplemental_query_limit" in serialized
     assert "retrieval_queries" in serialized
 
 
@@ -954,7 +956,7 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
                 {
                     "sufficient": True,
                     "selected_chunk_ids": ["chunk-1"],
-                    "supplemental_query": None,
+                    "supplemental_queries": [],
                 }
             )
         )
@@ -976,7 +978,7 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
             question="How are vectors indexed?",
             queries=("How are vectors indexed?", "vector indexing"),
             evidence=_evidence(),
-            supplemental_allowed=True,
+            supplemental_query_limit=1,
         )
 
     assert decision.sufficient is True
@@ -1106,7 +1108,88 @@ async def test_evidence_assessor_rejects_unstructured_output() -> None:
                 question="Question",
                 queries=("Question", "query"),
                 evidence=_evidence(),
-                supplemental_allowed=True,
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": ["first", "second"],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question", "initial expansion"),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+@pytest.mark.parametrize(
+    "supplemental_queries",
+    [
+        ["duplicate query", "duplicate query"],
+        ["valid query", "   "],
+    ],
+)
+async def test_evidence_assessor_rejects_duplicate_or_blank_queries(
+    supplemental_queries: list[str],
+) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": supplemental_queries,
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=2,
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"

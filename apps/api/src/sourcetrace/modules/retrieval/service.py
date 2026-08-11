@@ -37,18 +37,23 @@ class RetrievalPlan:
     version: str
     queries: tuple[str, ...]
 
-    def with_additional_query(self, query: str) -> RetrievalPlan | None:
-        candidate = query.strip()
-        normalized = _normalize_query(candidate)
-        if (
-            not normalized
-            or normalized in {_normalize_query(item) for item in self.queries}
-            or len(self.queries) >= _MAX_ADDITIONAL_QUERIES + 1
-        ):
+    def with_additional_queries(self, queries: Sequence[str]) -> RetrievalPlan | None:
+        accepted = list(self.queries)
+        normalized = {_normalize_query(item) for item in accepted}
+        for query in queries:
+            candidate = query.strip()
+            normalized_candidate = _normalize_query(candidate)
+            if not normalized_candidate or normalized_candidate in normalized:
+                continue
+            if len(accepted) >= _MAX_ADDITIONAL_QUERIES + 1:
+                break
+            accepted.append(candidate)
+            normalized.add(normalized_candidate)
+        if len(accepted) == len(self.queries):
             return None
         return RetrievalPlan(
             version=self.version,
-            queries=(*self.queries, candidate),
+            queries=tuple(accepted),
         )
 
 

@@ -775,8 +775,8 @@ export interface components {
             sufficient: boolean;
             /** Selected Chunk Ids */
             selected_chunk_ids: string[];
-            /** Supplemental Query */
-            supplemental_query: string | null;
+            /** Supplemental Queries */
+            supplemental_queries: string[];
         };
         /** WorkflowFusedCandidateTrace */
         WorkflowFusedCandidateTrace: {
