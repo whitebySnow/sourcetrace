@@ -722,22 +722,41 @@ class OpenAICompatibleEvidenceAssessor:
         evidence: Sequence[RetrievalCandidate],
         supplemental_query_limit: int,
     ) -> EvidenceDecision:
+        expected_fields = {
+            "sufficient",
+            "selected_chunk_ids",
+            "supplemental_queries",
+        }
+        messages = _evidence_assessment_prompt(
+            question,
+            queries,
+            evidence,
+            supplemental_query_limit=supplemental_query_limit,
+        )
         parsed = await _structured_completion(
             self.config,
             self._client,
-            _evidence_assessment_prompt(
-                question,
-                queries,
-                evidence,
-                supplemental_query_limit=supplemental_query_limit,
-            ),
+            messages,
         )
+        if set(parsed) != expected_fields:
+            parsed = await _structured_completion(
+                self.config,
+                self._client,
+                [
+                    *messages,
+                    {
+                        "role": "system",
+                        "content": (
+                            "The previous response violated the JSON contract. Retry once with "
+                            "exactly these three top-level fields: sufficient, "
+                            "selected_chunk_ids, and supplemental_queries. Return no other "
+                            "fields. Preserve the required value types and configured limits."
+                        ),
+                    },
+                ],
+            )
         try:
-            if set(parsed) != {
-                "sufficient",
-                "selected_chunk_ids",
-                "supplemental_queries",
-            }:
+            if set(parsed) != expected_fields:
                 raise ValueError
             sufficient = parsed["sufficient"]
             selected = parsed["selected_chunk_ids"]
