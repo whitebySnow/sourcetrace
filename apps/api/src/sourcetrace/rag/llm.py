@@ -205,7 +205,7 @@ def _evidence_assessment_prompt(
     queries: Sequence[str],
     evidence: Sequence[RetrievalCandidate],
     *,
-    supplemental_allowed: bool,
+    supplemental_query_limit: int,
 ) -> list[dict[str, str]]:
     return [
         {
@@ -213,10 +213,12 @@ def _evidence_assessment_prompt(
             "content": (
                 "Judge whether the candidate evidence is sufficient to answer the question. "
                 "Use only the candidates, select only candidate chunk IDs, and do not answer "
-                "the question or use outside knowledge. If evidence is insufficient and a "
-                "supplemental retrieval is allowed, provide one standalone supplemental query. "
+                "the question or use outside knowledge. If evidence is insufficient and "
+                "supplemental retrieval capacity remains, provide at most that many standalone "
+                "supplemental queries, ordered by importance. Each query must target one missing "
+                "evidence component and must not repeat an executed query. "
                 "Return JSON with exactly: sufficient (boolean), selected_chunk_ids (array of "
-                "strings), and supplemental_query (string or null)."
+                "strings), and supplemental_queries (array of strings)."
             ),
         },
         {
@@ -225,7 +227,7 @@ def _evidence_assessment_prompt(
                 {
                     "question": question,
                     "retrieval_queries": list(queries),
-                    "supplemental_allowed": supplemental_allowed,
+                    "supplemental_query_limit": supplemental_query_limit,
                     "candidates": [
                         {
                             "chunk_id": item.chunk_id,
@@ -718,7 +720,7 @@ class OpenAICompatibleEvidenceAssessor:
         question: str,
         queries: Sequence[str],
         evidence: Sequence[RetrievalCandidate],
-        supplemental_allowed: bool,
+        supplemental_query_limit: int,
     ) -> EvidenceDecision:
         parsed = await _structured_completion(
             self.config,
@@ -727,19 +729,19 @@ class OpenAICompatibleEvidenceAssessor:
                 question,
                 queries,
                 evidence,
-                supplemental_allowed=supplemental_allowed,
+                supplemental_query_limit=supplemental_query_limit,
             ),
         )
         try:
             if set(parsed) != {
                 "sufficient",
                 "selected_chunk_ids",
-                "supplemental_query",
+                "supplemental_queries",
             }:
                 raise ValueError
             sufficient = parsed["sufficient"]
             selected = parsed["selected_chunk_ids"]
-            supplemental_query = parsed["supplemental_query"]
+            supplemental_queries = parsed["supplemental_queries"]
             if not isinstance(sufficient, bool):
                 raise ValueError
             if not isinstance(selected, list) or any(
@@ -748,18 +750,22 @@ class OpenAICompatibleEvidenceAssessor:
                 raise ValueError
             if len(set(selected)) != len(selected):
                 raise ValueError
-            if supplemental_query is not None and (
-                not isinstance(supplemental_query, str) or not supplemental_query.strip()
+            if not isinstance(supplemental_queries, list) or any(
+                not isinstance(item, str) or not item.strip()
+                for item in supplemental_queries
             ):
                 raise ValueError
-            if not supplemental_allowed and supplemental_query is not None:
+            normalized_supplemental = tuple(item.strip() for item in supplemental_queries)
+            if len(set(normalized_supplemental)) != len(normalized_supplemental):
+                raise ValueError
+            if not 0 <= supplemental_query_limit <= 2:
+                raise ValueError
+            if len(normalized_supplemental) > supplemental_query_limit:
                 raise ValueError
             return EvidenceDecision(
                 sufficient=sufficient,
                 selected_chunk_ids=tuple(selected),
-                supplemental_query=(
-                    supplemental_query.strip() if isinstance(supplemental_query, str) else None
-                ),
+                supplemental_queries=normalized_supplemental,
             )
         except (TypeError, ValueError) as error:
             raise LlmProviderError(

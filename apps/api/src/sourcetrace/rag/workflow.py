@@ -39,13 +39,13 @@ class WorkflowRequest:
 class EvidenceAssessmentTrace:
     sufficient: bool
     selected_chunk_ids: tuple[str, ...]
-    supplemental_query: str | None
+    supplemental_queries: tuple[str, ...]
 
     def to_payload(self) -> dict[str, object]:
         return {
             "sufficient": self.sufficient,
             "selected_chunk_ids": list(self.selected_chunk_ids),
-            "supplemental_query": self.supplemental_query,
+            "supplemental_queries": list(self.supplemental_queries),
         }
 
 
@@ -262,7 +262,7 @@ class _WorkflowState(TypedDict, total=False):
     retrieval_plan: RetrievalPlan
     evidence: list[RetrievedEvidence]
     supplemental_attempts: int
-    supplemental_query: str
+    supplemental_queries: tuple[str, ...]
     selected_evidence: list[RetrievedEvidence]
     cited_evidence: list[RetrievedEvidence]
     answer: str
@@ -387,13 +387,16 @@ class AnswerWorkflow:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="assessing"))
         candidates = self._candidates(state["run_id"], state["evidence"])
+        supplemental_query_limit = (
+            max(0, 3 - len(state["retrieval_plan"].queries))
+            if state["supplemental_attempts"] == 0
+            else 0
+        )
         decision = await self._assessor.assess(
             question=state["question"],
             queries=state["retrieval_plan"].queries,
             evidence=candidates,
-            supplemental_allowed=(
-                state["supplemental_attempts"] == 0 and len(state["retrieval_plan"].queries) < 3
-            ),
+            supplemental_query_limit=supplemental_query_limit,
         )
         trace = replace(
             state["workflow_trace"],
@@ -402,7 +405,7 @@ class AnswerWorkflow:
                 EvidenceAssessmentTrace(
                     sufficient=decision.sufficient,
                     selected_chunk_ids=decision.selected_chunk_ids,
-                    supplemental_query=decision.supplemental_query,
+                    supplemental_queries=decision.supplemental_queries,
                 ),
             ),
         )
@@ -418,11 +421,11 @@ class AnswerWorkflow:
         selected = [item for item in state["evidence"] if str(item.chunk_id) in selected_ids]
         if decision.sufficient and len(selected) >= self._minimum_evidence:
             return _WorkflowState(selected_evidence=selected, workflow_trace=trace)
-        supplemental_query = (decision.supplemental_query or "").strip()
-        expanded_plan = state["retrieval_plan"].with_additional_query(supplemental_query)
+        supplemental_queries = decision.supplemental_queries[:supplemental_query_limit]
+        expanded_plan = state["retrieval_plan"].with_additional_queries(supplemental_queries)
         if state["supplemental_attempts"] == 0 and expanded_plan is not None:
             return _WorkflowState(
-                supplemental_query=supplemental_query,
+                supplemental_queries=supplemental_queries,
                 retrieval_plan=expanded_plan,
                 workflow_trace=trace,
             )
@@ -553,7 +556,7 @@ class AnswerWorkflow:
     ) -> Literal["generate", "supplement", "refuse"]:
         if "refusal_code" in state:
             return "refuse"
-        if "supplemental_query" in state and state["supplemental_attempts"] == 0:
+        if "supplemental_queries" in state and state["supplemental_attempts"] == 0:
             return "supplement"
         return "generate"
 

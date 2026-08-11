@@ -2544,23 +2544,20 @@
             "type": "array",
             "title": "Selected Chunk Ids"
           },
-          "supplemental_query": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Supplemental Query"
+          "supplemental_queries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Supplemental Queries"
           }
         },
         "type": "object",
         "required": [
           "sufficient",
           "selected_chunk_ids",
-          "supplemental_query"
+          "supplemental_queries"
         ],
         "title": "WorkflowEvidenceAssessmentTrace"
       },

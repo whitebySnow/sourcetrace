@@ -190,7 +190,7 @@ Reciprocal Rank Fusion 合并，`RETRIEVAL_RRF_RANK_CONSTANT` 配置融合排名
 证据判断和引用修复同样使用 OpenAI 兼容供应商，但通过独立端口和严格 JSON 契约接入。
 `LLM_EVIDENCE_ASSESSMENT_PROMPT_VERSION` 与 `LLM_CITATION_REPAIR_PROMPT_VERSION` 分别记录
 两个决策提示词版本。每个 Answer Run 会同时保存这些版本以及
-`ANSWER_WORKFLOW_VERSION=langgraph-bounded-multi-query-v2`，用于重放时识别完整决策配置。
+`ANSWER_WORKFLOW_VERSION=langgraph-bounded-multi-query-v3`，用于重放时识别完整决策配置。
 
 可使用以下命令做最小连通性检查：
 

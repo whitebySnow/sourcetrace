@@ -117,7 +117,7 @@ class ObservedRetrieval(StrictModel):
 class ObservedEvidenceAssessment(StrictModel):
     sufficient: bool
     selected_chunk_ids: tuple[str, ...]
-    supplemental_query: str | None
+    supplemental_queries: tuple[str, ...] = Field(max_length=2)
 
 
 class ObservedCitationValidation(StrictModel):

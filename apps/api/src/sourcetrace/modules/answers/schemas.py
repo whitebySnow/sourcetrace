@@ -97,7 +97,7 @@ class AnswerCancellationResponse(BaseModel):
 class WorkflowEvidenceAssessmentTrace(BaseModel):
     sufficient: bool
     selected_chunk_ids: list[str]
-    supplemental_query: str | None
+    supplemental_queries: list[str] = Field(max_length=2)
 
 
 class WorkflowRetrievalCandidateTrace(BaseModel):

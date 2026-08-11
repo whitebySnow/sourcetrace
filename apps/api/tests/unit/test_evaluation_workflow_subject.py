@@ -77,7 +77,7 @@ class SelectingAssessor:
         return EvidenceDecision(
             sufficient=True,
             selected_chunk_ids=(str(self.chunk_id),),
-            supplemental_query=None,
+            supplemental_queries=(),
         )
 
 
@@ -86,7 +86,7 @@ class RefusingAssessor:
         return EvidenceDecision(
             sufficient=False,
             selected_chunk_ids=(),
-            supplemental_query=None,
+            supplemental_queries=(),
         )
 
 

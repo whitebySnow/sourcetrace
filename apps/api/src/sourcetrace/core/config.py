@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     llm_structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
     llm_prompt_version: str = "grounded-answer-v2"
     llm_retrieval_plan_prompt_version: str = "two-stage-evidence-slots-v5"
-    llm_evidence_assessment_prompt_version: str = "evidence-assessment-v1"
+    llm_evidence_assessment_prompt_version: str = "evidence-assessment-v2"
     llm_citation_repair_prompt_version: str = "citation-repair-v2"
     answer_context_question_limit: int = Field(default=4, ge=1, le=20)
     retrieval_top_k: int = Field(default=8, ge=1, le=8)
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)
     retrieval_minimum_evidence: int = Field(default=1, ge=1)
     retrieval_config_version: str = "pgvector-hybrid-query-aware-bge-reranker-v7"
-    answer_workflow_version: str = "langgraph-bounded-multi-query-v2"
+    answer_workflow_version: str = "langgraph-bounded-multi-query-v3"
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "BAAI/bge-m3"
     embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"

@@ -274,7 +274,7 @@ class WorkflowEvaluationSubject:
                 ObservedEvidenceAssessment(
                     sufficient=assessment.sufficient,
                     selected_chunk_ids=assessment.selected_chunk_ids,
-                    supplemental_query=assessment.supplemental_query,
+                    supplemental_queries=assessment.supplemental_queries,
                 )
                 for assessment in trace.assessments
             ),
