@@ -44,10 +44,10 @@
 - 完成全 Docker 运行、README、代码 Walkthrough 和面试材料初稿；用户独立讲解验收仍属于
   当前收尾。
 
-## 当前收尾
+## 验收顺序
 
-- 在当前实现上运行版本化 30 题真实 DeepSeek 回归，并完成必要的人工审核。
-- 将评测报告绑定 Dataset、Git commit、模型、提示词、检索配置和 SHA-256；不得复用旧 judgment。
+- 影响模型行为的改动先运行版本化真实回归并完成人工审核；报告必须绑定 Dataset、Git commit、
+  模型、提示词、检索配置和 SHA-256，不得复用旧 judgment。
 - 通过 CI 后重跑完整 Docker Compose MVP 旅程，验证摄取、问答、Citation、Refusal、
   Cancellation 和重启恢复。
 - 完成用户可独立讲解的代码验收；这属于简历准备，不改变产品功能完成状态。

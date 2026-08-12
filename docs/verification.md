@@ -432,3 +432,36 @@ upgrade、downgrade 与恢复验证。上述段落仍作为 Issue #54 当时环�
 单次供应商运行归因于检索修复，也不能表述为端到端质量提升。原始报告继续保留在被 Git 忽略的
 `output/evals/`，后续若处理回答或引用稳定性，应使用独立 Issue 和固定对照，不重新定义本次
 已完成的声明级替代证据范围。
+
+### 引用结构化修复真实回归
+
+2026-08-13 在提交 `fb5ea7c7e14747c27f1678475eaa0d74b0ee40d8` 上，使用
+`agentic-rag-foundations@1.1.0`、`deepseek-v4-flash`、回答提示 `grounded-answer-v4`、规划提示
+`two-stage-evidence-slots-v6`、证据评估提示 `evidence-assessment-v4`、引用修复提示
+`citation-repair-v6`、工作流 v3、生产混合检索 v7、本地 BGE-M3 和固定
+`BAAI/bge-reranker-v2-m3` 完成 30 题真实供应商回归。原始报告 SHA-256 为
+`d62a2cd90b2892a8164c2ad4d85be768edbad1738eafaa00a211502291d3a34b`。
+
+| 维度 | 人工审核前结果 |
+|---|---|
+| 检索 | 25 passed，2 failed，3 not applicable |
+| 引用 | 13 passed，14 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 3 passed，14 failed，13 pending review |
+
+旧行为报告 `c1aefe4` 中，`ARF-003`、`ARF-015`、`ARF-017`、`ARF-020`、`ARF-021`、
+`ARF-022`、`ARF-023`、`ARF-025` 和 `ARF-030` 均已获得充分证据，但初稿与唯一一次修复仍以
+`uncited_claim` 被拒绝。新报告中该类 answerable refusal 为 0；所有引用校验轨迹均未导致最终
+拒答。仍然拒答的 answerable case 为 `ARF-020`、`ARF-023`、`ARF-026` 和 `ARF-030`，均在
+证据充分性阶段终止且没有进入引用修复，因此不属于同一缺陷。
+
+用户逐条审核 13 个待审回答：12 个通过，`ARF-011` 因中文问题返回英文而失败。judgment 位于
+`evals/judgments/agentic-rag-foundations-v1-fb5ea7c-deepseek-v4-flash.json`，绑定上述原始报告
+SHA-256；应用后 reviewed report SHA-256 为
+`4d0b9361951ca1c5bbcf5606d43e32d62831a6b70f23800179bff059636ea0b5`，最终端到端结果为
+15 passed、15 failed、0 pending review。
+
+本次结果验证的是引用修复稳定性，而不是整个问答系统已经达到 50% 的通用准确率。14 个自动引用
+失败仍包含期望证据覆盖、预期回答和拒答行为等独立失败；`ARF-011` 暴露的回答语言一致性问题也
+尚未修复。case 级原始与 reviewed 报告包含本地论文摘录，继续保留在被 Git 忽略的
+`output/evals/`，不提交。

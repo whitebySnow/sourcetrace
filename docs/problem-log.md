@@ -406,8 +406,20 @@ uv run --project apps/api --extra cpu pytest `
   “问题只发生在首单元”的单一解释，并支持自由文本修复可能遗漏任意中间单元；若结构化渲染
   后仍只遗漏索引 3，则应转向单元切分或 claim 覆盖假设。
 
-新的 30 题真实供应商回归与人工审核仍是本次稳定化工作的发布前验收，
-未完成前不能宣称端到端效果提升。
+随后在提交 `fb5ea7c7e14747c27f1678475eaa0d74b0ee40d8` 上使用
+`agentic-rag-foundations@1.1.0`、`deepseek-v4-flash`、生产混合检索和固定 BGE reranker
+完成新的 30 题真实回归。原始报告 SHA-256 为
+`d62a2cd90b2892a8164c2ad4d85be768edbad1738eafaa00a211502291d3a34b`。旧报告中 9 个
+“最终证据充分、初稿与修复稿仍因 `uncited_claim` 拒答”的 answerable case，在新报告中降为
+0；新报告没有任何 answerable case 因引用校验失败而拒答，验证结构化声明与服务端确定性渲染
+解决了本问题描述的缺陷。
+
+用户逐条审核全部 13 个待审回答，其中 12 个通过；`ARF-011` 内容正确但未跟随中文问题的语言，
+判定失败。绑定原始报告的 judgment 位于
+`evals/judgments/agentic-rag-foundations-v1-fb5ea7c-deepseek-v4-flash.json`。审核后端到端结果为
+15 passed、15 failed、0 pending review。该结果不能泛化为产品准确率；14 个自动引用失败表示
+版本化期望证据覆盖或预期拒答不满足，不等同于本条问题的引用格式缺陷。4 个 answerable refusal
+发生在证据充分性阶段，也应与引用修复问题分开处理。
 
 ## 23. DeepSeek 兼容响应的终态、重试和 thinking 语义不稳定
 
