@@ -234,15 +234,19 @@ SourceTrace 应在请求前建立明确预算，保证输入、证据和预留�
 
 ## 与 SourceTrace 当前实现的差距
 
-对 `apps/api/src/sourcetrace/rag/llm.py` 的只读检查显示：
+对 `apps/api/src/sourcetrace/rag/llm.py` 的检查显示。下列前两项已在 2026-08-12 的后续实现中
+解决，其余项目仍是待办：
 
 1. 流式解析已经忽略非 `data:` 行，因此能够跳过 keep-alive 注释；也能跳过空 choice 的 usage
-   chunk，并对输出前的 `RemoteProtocolError` 做一次重试。
+   chunk，并对输出前的 `RemoteProtocolError` 做一次重试。**已解决**：现在还要求明确的
+   `finish_reason=stop`，单独的 `[DONE]` 不再绕过完整性门禁。
 2. 流式路径在收到 `[DONE]` 时直接返回，没有验证此前是否收到 `finish_reason=stop`；异常的
    `[DONE]` 可能绕过完整性门禁。其他非 `stop` 终态又被统一映射为
-   `LLM_INCOMPLETE_RESPONSE`，缺少五类安全原因。
+   `LLM_INCOMPLETE_RESPONSE`，缺少五类安全原因。**已解决**：流式和非流式路径均分类五种
+   官方终态；只有首次、尚未输出正文的 `insufficient_system_resource` 会重试一次。
 3. 非流式结构路径当前把所有非 `stop` 终态作为普通 `ValueError`，最终统一映射为
-   `LLM_INVALID_RESPONSE`，这正是本次失败无法判断是否可恢复的原因。
+   `LLM_INVALID_RESPONSE`，这正是本次失败无法判断是否可恢复的原因。**已解决**：固定安全原因
+   不包含响应正文或未知供应商原值；`length` 仍直接拒绝，待建立输出预算后再决定是否允许调整。
 4. 结构化路径已有 JSON Output、非空检查和一次空内容重试，但需确认所有结构提示词都明确包含
    `json` 并提供示例。
 5. 配置支持显式关闭结构化任务的 thinking；应保证 DeepSeek 官方环境使用该配置，且 thinking

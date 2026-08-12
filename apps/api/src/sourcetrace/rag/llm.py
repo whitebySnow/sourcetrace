@@ -356,6 +356,38 @@ def _finish_reason(payload: Any) -> object | None:
     return reason
 
 
+def _finish_reason_error(finish_reason: object) -> LlmProviderError:
+    if finish_reason == "insufficient_system_resource":
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_finish_insufficient_system_resource",
+        )
+    if finish_reason == "length":
+        return LlmProviderError(
+            "LLM_INCOMPLETE_RESPONSE",
+            "Language model did not complete the response",
+            reason="provider_finish_length",
+        )
+    if finish_reason == "content_filter":
+        return LlmProviderError(
+            "LLM_CONTENT_FILTERED",
+            "Language model response was blocked",
+            reason="provider_finish_content_filter",
+        )
+    if finish_reason == "tool_calls":
+        return LlmProviderError(
+            "LLM_INVALID_RESPONSE",
+            "Language model returned an invalid response",
+            reason="provider_finish_tool_calls",
+        )
+    return LlmProviderError(
+        "LLM_INVALID_RESPONSE",
+        "Language model returned an invalid response",
+        reason="provider_finish_unknown",
+    )
+
+
 class OpenAICompatibleAnswerGenerator:
     def __init__(
         self,
@@ -393,12 +425,20 @@ class OpenAICompatibleAnswerGenerator:
                             timeout=self.config.timeout_seconds,
                         ) as response:
                             response.raise_for_status()
+                            completed = False
+                            retry_after_resource_shortage = False
                             async for line in response.aiter_lines():
                                 if not line.startswith("data:"):
                                     continue
                                 data = line.removeprefix("data:").strip()
                                 if data == "[DONE]":
-                                    return
+                                    if completed:
+                                        return
+                                    raise LlmProviderError(
+                                        "LLM_INVALID_RESPONSE",
+                                        "Language model returned an incomplete response",
+                                        reason="provider_stream_missing_stop",
+                                    )
                                 try:
                                     payload = json.loads(data)
                                 except (json.JSONDecodeError, TypeError) as error:
@@ -413,14 +453,21 @@ class OpenAICompatibleAnswerGenerator:
                                 finish_reason = _finish_reason(payload)
                                 if finish_reason is not None:
                                     if finish_reason == "stop":
-                                        return
-                                    raise LlmProviderError(
-                                        "LLM_INCOMPLETE_RESPONSE",
-                                        "Language model did not complete the response",
-                                    )
+                                        completed = True
+                                        continue
+                                    if finish_reason == "insufficient_system_resource":
+                                        if not emitted_content and attempt == 0:
+                                            retry_after_resource_shortage = True
+                                            break
+                                    raise _finish_reason_error(finish_reason)
+                            if retry_after_resource_shortage:
+                                continue
+                            if completed:
+                                return
                             raise LlmProviderError(
                                 "LLM_INVALID_RESPONSE",
                                 "Language model returned an incomplete response",
+                                reason="provider_stream_missing_stop",
                             )
                     except httpx.RemoteProtocolError:
                         if emitted_content or attempt == 1:
@@ -665,8 +712,15 @@ async def _structured_completion(
                 if not isinstance(choices, list) or len(choices) != 1:
                     raise ValueError
                 choice = choices[0]
-                if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+                if not isinstance(choice, dict):
                     raise ValueError
+                finish_reason = choice.get("finish_reason")
+                if finish_reason == "insufficient_system_resource":
+                    if attempt == 0:
+                        continue
+                    raise _finish_reason_error(finish_reason)
+                if finish_reason != "stop":
+                    raise _finish_reason_error(finish_reason)
                 message = choice.get("message")
                 if not isinstance(message, dict):
                     raise ValueError
