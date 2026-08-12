@@ -102,6 +102,7 @@ def _uuid_evidence() -> tuple[list[RetrievalCandidate], str]:
 
 def _config(
     *,
+    answer_output_thinking: Literal["default", "enabled", "disabled"] = "disabled",
     structured_output_mode: Literal["text", "json_object"] = "json_object",
     structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled",
     structured_output_max_tokens: int = 2048,
@@ -112,6 +113,7 @@ def _config(
         model="gpt-5.6-luna",
         timeout_seconds=30,
         prompt_version="grounded-answer-v1",
+        answer_output_thinking=answer_output_thinking,
         structured_output_mode=structured_output_mode,
         structured_output_thinking=structured_output_thinking,
         structured_output_max_tokens=structured_output_max_tokens,
@@ -158,11 +160,71 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
     assert isinstance(payload, dict)
     assert payload["model"] == "gpt-5.6-luna"
     assert payload["stream"] is True
+    assert payload["thinking"] == {"type": "disabled"}
     assert "citation-1" in payload["messages"][0]["content"]
     assert "BGE-M3 dense vectors" in payload["messages"][0]["content"]
     assert "ASCII square brackets" in payload["messages"][0]["content"]
     assert "headings" in payload["messages"][0]["content"]
     assert "[citation_id]" in payload["messages"][0]["content"]
+
+
+async def test_provider_ignores_stream_metadata_and_reasoning_content() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b": keep-alive\n\n"
+                b'data: {"choices":[{"delta":{"reasoning_content":"private '
+                b'reasoning","content":null},"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"Grounded answer"},'
+                b'"finish_reason":null}],"usage":null}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}],"usage":null}\n\n'
+                b'data: {"choices":[],"usage":{"prompt_tokens":12,'
+                b'"completion_tokens":3,"total_tokens":15}}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Grounded answer"]
+
+
+async def test_provider_omits_thinking_for_a_generic_compatible_api() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Answer"},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(
+            _config(answer_output_thinking="default"),
+            client=client,
+        )
+
+        assert await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        ) == ["Answer"]
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert "thinking" not in payload
 
 
 @pytest.mark.parametrize(
@@ -307,6 +369,30 @@ async def test_provider_rejects_done_without_a_stop_finish_reason() -> None:
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
     assert error.value.reason == "provider_stream_missing_stop"
+
+
+async def test_provider_rejects_content_after_the_stop_finish_reason() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Complete"},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"Unexpected"},'
+                b'"finish_reason":null}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.reason == "provider_stream_content_after_stop"
 
 
 async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:

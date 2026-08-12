@@ -47,6 +47,7 @@ class OpenAICompatibleConfig:
     model: str
     timeout_seconds: float
     prompt_version: str
+    answer_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
     structured_output_mode: Literal["text", "json_object"] = "json_object"
     structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
     structured_output_max_tokens: int = 2048
@@ -484,6 +485,15 @@ class OpenAICompatibleAnswerGenerator:
                                 "model": self.config.model,
                                 "messages": _grounded_prompt(question, evidence),
                                 "stream": True,
+                                **(
+                                    {
+                                        "thinking": {
+                                            "type": self.config.answer_output_thinking
+                                        }
+                                    }
+                                    if self.config.answer_output_thinking != "default"
+                                    else {}
+                                ),
                             },
                             timeout=self.config.timeout_seconds,
                         ) as response:
@@ -516,6 +526,12 @@ class OpenAICompatibleAnswerGenerator:
                                         "Language model returned an invalid response",
                                     ) from error
                                 content = _delta_content(payload)
+                                if completed and content is not None:
+                                    raise LlmProviderError(
+                                        "LLM_INVALID_RESPONSE",
+                                        "Language model returned an invalid response",
+                                        reason="provider_stream_content_after_stop",
+                                    )
                                 if content is not None:
                                     emitted_content = True
                                     yield content

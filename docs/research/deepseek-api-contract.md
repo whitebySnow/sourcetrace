@@ -142,8 +142,8 @@ SourceTrace 的建议：
 - 结构化规划、证据判断和引用修复显式使用 `thinking.type=disabled`，避免依赖默认值变化，
   并减少推理 token 挤占 JSON 输出预算的风险。
 - 结构化解析只读取 `content`，绝不把 `reasoning_content` 当成答案或事实。
-- 流式回答如果开启 thinking，分别解析两个 delta；只把 `content` 发送为答案 delta，推理
-  内容既不持久化也不进入引用校验。
+- 流式回答默认显式关闭 thinking；若部署者显式开启，解析器仍只把 `content` 发送为答案 delta，
+  推理内容既不持久化也不进入引用校验。
 - Thinking 模式下不要依赖 `temperature=0` 获得确定性，因为官方说明该参数不生效。
 
 来源：[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)，访问日期：2026-08-12。
@@ -249,9 +249,9 @@ SourceTrace 应在请求前建立明确预算，保证输入、证据和预留�
    不包含响应正文或未知供应商原值；`length` 仍直接拒绝，待建立输出预算后再决定是否允许调整。
 4. 结构化路径已有 JSON Output、非空检查和一次空内容重试。**已解决**：检索规划、槽位细化、
    证据判断和引用修复提示词均明确要求 JSON，并包含与各自 Schema 对齐的完整示例。
-5. 配置支持显式关闭结构化任务的 thinking。**已解决**：结构化调用默认显式发送
+5. 配置支持显式关闭 thinking。**已解决**：结构化调用默认显式发送
    `response_format.type=json_object`、`thinking.type=disabled` 和有限的
-   `max_tokens=2048`；最终流式回答模式不在本轮修改范围内。
+   `max_tokens=2048`；最终流式回答也通过独立配置默认发送 `thinking.type=disabled`。
 6. HTTP 错误目前大多统一映射为供应商不可用；需要按状态码区分配置错误、余额、限流和瞬态错误，
    但对外仍只暴露安全问题详情。**已解决**：400、401、402 和 422 立即安全失败；429、500、
    503、单次请求超时及网络/协议错误在应用总 deadline 内最多重试一次。流式路径仅在尚未输出
@@ -270,8 +270,8 @@ SourceTrace 应在请求前建立明确预算，保证输入、证据和预留�
    只有瞬态错误进入有界退避重试。
 3. **固定结构化请求契约（已完成）**：显式关闭 thinking，确保 prompt 包含 JSON 指令和精确
    示例，保持非空、解码和 Schema 三重验证，并为结构化输出设置可配置的有限预算。
-4. **补齐流式契约测试**：覆盖 keep-alive、`finish_reason=null`、usage 空 choice、五类终态、
-   `[DONE]` 前断连和输出前后断连的不同处理。
+4. **补齐流式契约测试（已完成）**：覆盖 keep-alive、`finish_reason=null`、usage 空 choice、
+   reasoning content、五类终态、`[DONE]` 前断连、输出前后断连及终态后异常正文。
 5. **再运行真实评测**：确认供应商异常不会被错误计入 RAG 指标；报告保存安全失败分类和尝试次数，
    不保存密钥或被拒绝的响应正文。
 

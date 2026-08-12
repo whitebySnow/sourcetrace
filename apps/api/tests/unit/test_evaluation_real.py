@@ -50,6 +50,7 @@ def test_real_evaluation_uses_the_structured_output_contract() -> None:
 
     config = _llm_config(settings, prompt_version="test-structured-contract")
 
+    assert config.answer_output_thinking == "disabled"
     assert config.structured_output_mode == "json_object"
     assert config.structured_output_thinking == "disabled"
     assert config.structured_output_max_tokens == 2048

@@ -60,6 +60,7 @@ def _llm_config(settings: Settings, *, prompt_version: str) -> OpenAICompatibleC
         model=settings.llm_model,
         timeout_seconds=settings.llm_timeout_seconds,
         prompt_version=prompt_version,
+        answer_output_thinking=settings.llm_answer_output_thinking,
         structured_output_mode=settings.llm_structured_output_mode,
         structured_output_thinking=settings.llm_structured_output_thinking,
         structured_output_max_tokens=settings.llm_structured_output_max_tokens,

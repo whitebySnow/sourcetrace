@@ -42,10 +42,11 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model: str = "deepseek-v4-flash"
     llm_timeout_seconds: float = Field(default=60, gt=0)
+    llm_answer_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
     llm_structured_output_mode: Literal["text", "json_object"] = "json_object"
     llm_structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
     llm_structured_output_max_tokens: int = Field(default=2048, ge=256, le=16384)
-    llm_prompt_version: str = "grounded-answer-v3"
+    llm_prompt_version: str = "grounded-answer-v4"
     llm_retrieval_plan_prompt_version: str = "two-stage-evidence-slots-v6"
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v4"
     llm_citation_repair_prompt_version: str = "citation-repair-v6"

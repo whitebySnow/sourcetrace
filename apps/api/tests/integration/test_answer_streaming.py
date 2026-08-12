@@ -422,7 +422,7 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["answer"] == final["answer"]
         assert persisted["llm_provider"] == "openai-compatible"
         assert persisted["llm_model"] == get_settings().llm_model
-        assert persisted["prompt_version"] == "grounded-answer-v3"
+        assert persisted["prompt_version"] == "grounded-answer-v4"
         assert persisted["retrieval_version"] == get_settings().retrieval_config_version
         assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v4")
         assert persisted["citation_repair_prompt_version"] == "citation-repair-v6"
