@@ -796,8 +796,7 @@ class OpenAICompatibleEvidenceAssessor:
                 not isinstance(item, str) or not item for item in selected
             ):
                 raise ValueError
-            if len(set(selected)) != len(selected):
-                raise ValueError
+            normalized_selected = tuple(dict.fromkeys(selected))
             if not isinstance(supplemental_queries, list) or any(
                 not isinstance(item, str) or not item.strip()
                 for item in supplemental_queries
@@ -812,7 +811,7 @@ class OpenAICompatibleEvidenceAssessor:
                 raise ValueError
             return EvidenceDecision(
                 sufficient=sufficient,
-                selected_chunk_ids=tuple(selected),
+                selected_chunk_ids=normalized_selected,
                 supplemental_queries=normalized_supplemental,
             )
         except (TypeError, ValueError) as error:

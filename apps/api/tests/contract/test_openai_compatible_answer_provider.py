@@ -1241,6 +1241,46 @@ async def test_evidence_assessor_rejects_unstructured_output() -> None:
     assert attempts == 2
 
 
+async def test_evidence_assessor_deduplicates_selected_chunk_ids_in_order() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1", "chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=2,
+        )
+
+    assert decision.selected_chunk_ids == ("chunk-1",)
+    assert attempts == 1
+
+
 async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> None:
     attempts = 0
 
