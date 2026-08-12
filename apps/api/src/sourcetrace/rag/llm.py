@@ -24,10 +24,18 @@ _ANSWER_UNIT_SPLIT = re.compile(
 
 
 class LlmProviderError(Exception):
-    def __init__(self, code: str, safe_message: str) -> None:
-        super().__init__(safe_message)
+    def __init__(self, code: str, safe_message: str, *, reason: str | None = None) -> None:
+        diagnostic_message = f"{safe_message} [{reason}]" if reason is not None else safe_message
+        super().__init__(diagnostic_message)
         self.code = code
         self.safe_message = safe_message
+        self.reason = reason
+
+
+class _CitationRepairValidationError(ValueError):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -869,41 +877,91 @@ class OpenAICompatibleCitationRepairer:
         evidence: Sequence[RetrievalCandidate],
         validation_feedback: CitationValidationFeedback,
     ) -> str:
+        messages = _citation_repair_prompt(question, answer, evidence, validation_feedback)
         parsed = await _structured_completion(
             self.config,
             self._client,
-            _citation_repair_prompt(question, answer, evidence, validation_feedback),
+            messages,
         )
+        empty_citations_retry_used = False
+        while True:
+            try:
+                return self._render_claims(parsed, evidence)
+            except _CitationRepairValidationError as error:
+                if (
+                    error.reason == "citation_repair_empty_citations"
+                    and not empty_citations_retry_used
+                ):
+                    empty_citations_retry_used = True
+                    parsed = await _structured_completion(
+                        self.config,
+                        self._client,
+                        [
+                            *messages,
+                            {
+                                "role": "system",
+                                "content": (
+                                    "The previous response included a claim without citation_ids. "
+                                    "Retry once. Every claim must include one or more supplied "
+                                    "citation IDs copied verbatim. Return exactly the claims field "
+                                    "and its required claim fields."
+                                ),
+                            },
+                        ],
+                    )
+                    continue
+                raise LlmProviderError(
+                    "LLM_INVALID_RESPONSE",
+                    "Language model returned an invalid response",
+                    reason=error.reason,
+                ) from error
+
+    @staticmethod
+    def _render_claims(
+        parsed: dict[str, Any],
+        evidence: Sequence[RetrievalCandidate],
+    ) -> str:
         try:
             if set(parsed) != {"claims"}:
-                raise ValueError
+                raise _CitationRepairValidationError("citation_repair_invalid_fields")
             claims = parsed["claims"]
             if not isinstance(claims, list) or not claims:
-                raise ValueError
+                raise _CitationRepairValidationError("citation_repair_invalid_claims")
             allowed = {item.citation_id for item in evidence}
             rendered: list[str] = []
             for claim in claims:
                 if not isinstance(claim, dict) or set(claim) != {"text", "citation_ids"}:
-                    raise ValueError
+                    raise _CitationRepairValidationError("citation_repair_invalid_claim_fields")
                 text = claim["text"]
                 citation_ids = claim["citation_ids"]
                 if not isinstance(text, str) or not text.strip():
-                    raise ValueError
+                    raise _CitationRepairValidationError("citation_repair_empty_text")
                 if not isinstance(citation_ids, list) or any(
-                    not isinstance(item, str) or item not in allowed for item in citation_ids
+                    not isinstance(item, str) for item in citation_ids
                 ):
-                    raise ValueError
+                    raise _CitationRepairValidationError("citation_repair_invalid_citations")
                 normalized_ids = tuple(dict.fromkeys(citation_ids))
-                if not normalized_ids or _UUID_CITATION_LABEL.search(text):
-                    raise ValueError
-                units = [unit.strip() for unit in _ANSWER_UNIT_SPLIT.split(text) if unit.strip()]
+                if not normalized_ids:
+                    raise _CitationRepairValidationError("citation_repair_empty_citations")
+                if any(item not in allowed for item in normalized_ids):
+                    raise _CitationRepairValidationError("citation_repair_unknown_citation")
+                inline_ids = tuple(
+                    label[1:-1] for label in _UUID_CITATION_LABEL.findall(text)
+                )
+                if any(item not in allowed for item in inline_ids):
+                    raise _CitationRepairValidationError(
+                        "citation_repair_unknown_inline_citation"
+                    )
+                normalized_text = _UUID_CITATION_LABEL.sub("", text).strip()
+                units = [
+                    unit.strip()
+                    for unit in _ANSWER_UNIT_SPLIT.split(normalized_text)
+                    if unit.strip()
+                ]
                 if not units:
-                    raise ValueError
+                    raise _CitationRepairValidationError("citation_repair_empty_text")
                 labels = " ".join(f"[{item}]" for item in normalized_ids)
                 rendered.extend(f"{unit} {labels}" for unit in units)
             return "\n".join(rendered)
-        except (TypeError, ValueError) as error:
-            raise LlmProviderError(
-                "LLM_INVALID_RESPONSE",
-                "Language model returned an invalid response",
-            ) from error
+        except (KeyError, TypeError) as error:
+            raise _CitationRepairValidationError("citation_repair_invalid_claims") from error

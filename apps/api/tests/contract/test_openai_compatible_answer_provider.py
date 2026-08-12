@@ -2,6 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Literal
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -72,6 +73,21 @@ def _validation_feedback() -> CitationValidationFeedback:
         citation_count=0,
         uncited_unit_indices=(0,),
         unknown_label_unit_indices=(),
+    )
+
+
+def _uuid_evidence() -> tuple[list[RetrievalCandidate], str]:
+    citation_id = str(uuid4())
+    return (
+        [
+            RetrievalCandidate(
+                chunk_id="chunk-uuid",
+                content="The claim is supported.",
+                score=0.9,
+                citation_id=citation_id,
+            )
+        ],
+        citation_id,
     )
 
 
@@ -1219,6 +1235,174 @@ async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() 
         )
 
     assert answer == r"The objective is \(x + y\) [citation-1]"
+
+
+async def test_citation_repairer_replaces_allowed_inline_uuid_citation() -> None:
+    evidence, citation_id = _uuid_evidence()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": f"The claim is supported [{citation_id}]",
+                                            "citation_ids": [citation_id],
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        answer = await repairer.repair(
+            question="Question",
+            answer="Draft",
+            evidence=evidence,
+            validation_feedback=_validation_feedback(),
+        )
+
+    assert answer == f"The claim is supported [{citation_id}]"
+
+
+async def test_citation_repairer_rejects_unknown_inline_uuid_with_safe_reason() -> None:
+    evidence, citation_id = _uuid_evidence()
+    unknown_id = str(uuid4())
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": f"Unsupported [{unknown_id}]",
+                                            "citation_ids": [citation_id],
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        with pytest.raises(LlmProviderError) as error:
+            await repairer.repair(
+                question="Question",
+                answer="Draft",
+                evidence=evidence,
+                validation_feedback=_validation_feedback(),
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.reason == "citation_repair_unknown_inline_citation"
+    assert "citation_repair_unknown_inline_citation" in str(error.value)
+    assert error.value.safe_message == "Language model returned an invalid response"
+    assert unknown_id not in str(error.value)
+
+
+async def test_citation_repairer_retries_empty_citations_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        citation_ids = [] if attempts == 1 else ["citation-1"]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "Vectors are normalized",
+                                            "citation_ids": citation_ids,
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        answer = await repairer.repair(
+            question="Question",
+            answer="Draft",
+            evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
+        )
+
+    assert answer == "Vectors are normalized [citation-1]"
+    assert attempts == 2
+
+
+async def test_citation_repairer_rejects_repeated_empty_citations_with_safe_reason() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {"text": "No citation", "citation_ids": []}
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        with pytest.raises(LlmProviderError) as error:
+            await repairer.repair(
+                question="Question",
+                answer="Draft",
+                evidence=_evidence(),
+                validation_feedback=_validation_feedback(),
+            )
+
+    assert attempts == 2
+    assert error.value.reason == "citation_repair_empty_citations"
+    assert "citation_repair_empty_citations" in str(error.value)
 
 
 async def test_evidence_assessor_rejects_unstructured_output() -> None:
