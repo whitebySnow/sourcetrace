@@ -1300,6 +1300,7 @@ async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> No
     async def handler(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
         attempts += 1
+        supplemental_queries = ["first", "second"] if attempts == 1 else ["first"]
         return httpx.Response(
             200,
             json={
@@ -1310,7 +1311,7 @@ async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> No
                                 {
                                     "sufficient": False,
                                     "selected_chunk_ids": [],
-                                    "supplemental_queries": ["first", "second"],
+                                    "supplemental_queries": supplemental_queries,
                                 }
                             )
                         },
@@ -1323,16 +1324,15 @@ async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> No
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
 
-        with pytest.raises(LlmProviderError) as error:
-            await assessor.assess(
-                question="Question",
-                queries=("Question", "initial expansion"),
-                evidence=_evidence(),
-                supplemental_query_limit=1,
-            )
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question", "initial expansion"),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
 
-    assert error.value.code == "LLM_INVALID_RESPONSE"
-    assert attempts == 1
+    assert decision.supplemental_queries == ("first",)
+    assert attempts == 2
 
 
 @pytest.mark.parametrize(

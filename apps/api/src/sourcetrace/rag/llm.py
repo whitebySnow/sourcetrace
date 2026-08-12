@@ -793,41 +793,62 @@ class OpenAICompatibleEvidenceAssessor:
                     },
                 ],
             )
-        try:
-            if set(parsed) != expected_fields:
-                raise ValueError
-            sufficient = parsed["sufficient"]
-            selected = parsed["selected_chunk_ids"]
-            supplemental_queries = parsed["supplemental_queries"]
-            if not isinstance(sufficient, bool):
-                raise ValueError
-            if not isinstance(selected, list) or any(
-                not isinstance(item, str) or not item for item in selected
-            ):
-                raise ValueError
-            normalized_selected = tuple(dict.fromkeys(selected))
-            if not isinstance(supplemental_queries, list) or any(
-                not isinstance(item, str) or not item.strip()
-                for item in supplemental_queries
-            ):
-                raise ValueError
-            normalized_supplemental = tuple(item.strip() for item in supplemental_queries)
-            if len(set(normalized_supplemental)) != len(normalized_supplemental):
-                raise ValueError
-            if not 0 <= supplemental_query_limit <= 2:
-                raise ValueError
-            if len(normalized_supplemental) > supplemental_query_limit:
-                raise ValueError
-            return EvidenceDecision(
-                sufficient=sufficient,
-                selected_chunk_ids=normalized_selected,
-                supplemental_queries=normalized_supplemental,
-            )
-        except (TypeError, ValueError) as error:
-            raise LlmProviderError(
-                "LLM_INVALID_RESPONSE",
-                "Language model returned an invalid response",
-            ) from error
+        budget_retry_used = False
+        while True:
+            try:
+                if set(parsed) != expected_fields:
+                    raise ValueError
+                sufficient = parsed["sufficient"]
+                selected = parsed["selected_chunk_ids"]
+                supplemental_queries = parsed["supplemental_queries"]
+                if not isinstance(sufficient, bool):
+                    raise ValueError
+                if not isinstance(selected, list) or any(
+                    not isinstance(item, str) or not item for item in selected
+                ):
+                    raise ValueError
+                normalized_selected = tuple(dict.fromkeys(selected))
+                if not isinstance(supplemental_queries, list) or any(
+                    not isinstance(item, str) or not item.strip()
+                    for item in supplemental_queries
+                ):
+                    raise ValueError
+                normalized_supplemental = tuple(item.strip() for item in supplemental_queries)
+                if len(set(normalized_supplemental)) != len(normalized_supplemental):
+                    raise ValueError
+                if not 0 <= supplemental_query_limit <= 2:
+                    raise ValueError
+                if len(normalized_supplemental) > supplemental_query_limit:
+                    if budget_retry_used:
+                        raise ValueError
+                    budget_retry_used = True
+                    parsed = await _structured_completion(
+                        self.config,
+                        self._client,
+                        [
+                            *messages,
+                            {
+                                "role": "system",
+                                "content": (
+                                    "The previous response exceeded the remaining supplemental "
+                                    f"query capacity ({supplemental_query_limit}). Retry once "
+                                    "with no more than that many unique, non-empty queries. "
+                                    "Return exactly the required three fields."
+                                ),
+                            },
+                        ],
+                    )
+                    continue
+                return EvidenceDecision(
+                    sufficient=sufficient,
+                    selected_chunk_ids=normalized_selected,
+                    supplemental_queries=normalized_supplemental,
+                )
+            except (TypeError, ValueError) as error:
+                raise LlmProviderError(
+                    "LLM_INVALID_RESPONSE",
+                    "Language model returned an invalid response",
+                ) from error
 
 
 class OpenAICompatibleCitationRepairer:
