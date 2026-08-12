@@ -36,7 +36,7 @@
 - 实现引用校验、PDF 页跳转、answer run 状态和主动取消。
 - 确保证据不足时拒答，同一会话不并发回答。
 
-## 产品功能已完成：里程碑 4，受约束 Agent 与评测
+## 功能已实现、验收收尾中：里程碑 4，受约束 Agent 与评测
 
 - 使用 LangGraph 实现问题分析、检索、证据判断和至多一次补充检索。
 - 实现结构化证据选择、回答约束、引用修复和最终拒答门禁。
@@ -46,15 +46,14 @@
 
 ## 当前收尾
 
-- 在当前 Issue #60 分支上运行版本化 30 题真实 DeepSeek 回归，并完成必要的人工审核。
+- 在当前实现上运行版本化 30 题真实 DeepSeek 回归，并完成必要的人工审核。
 - 将评测报告绑定 Dataset、Git commit、模型、提示词、检索配置和 SHA-256；不得复用旧 judgment。
-- 创建 PR，等待 CI 通过后合并并关闭 Issue #60。
-- 合并后重跑完整 Docker Compose MVP 旅程，验证摄取、问答、Citation、Refusal、Cancellation
-  和重启恢复。
+- 通过 CI 后重跑完整 Docker Compose MVP 旅程，验证摄取、问答、Citation、Refusal、
+  Cancellation 和重启恢复。
 - 完成用户可独立讲解的代码验收；这属于简历准备，不改变产品功能完成状态。
 
 供应商 connect/read timeout 与应用总 deadline 的拆分属于后续独立改进，不阻塞当前严格拒答
-MVP，但不能与 Issue #60 的引用稳定性验收混在同一结论中。
+MVP，但不能与本轮引用稳定性验收混在同一结论中。
 
 ## 暂不实现
 

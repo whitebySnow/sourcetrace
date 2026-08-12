@@ -386,7 +386,27 @@ ARF-026 聚焦及完整 30 题运行均使 ReAct 声明命中 `approved_alternat
 **验证**：单元测试通过公开 `AnswerWorkflow.run` 接缝稳定复现“证据充分 -> 初稿无引用 -> 一次
 修复仍无引用 -> Refusal”，并区分两次校验的失败单元；供应商契约覆盖结构声明、重复允许标签、
 未知 UUID、空引用纠错和非法 Schema。该修复没有降低 Knowledge Base、Evidence Decision、
-Citation 或 Refusal 门禁。新的 30 题真实供应商回归与人工审核仍是 Issue #60 的发布前验收，
+Citation 或 Refusal 门禁。可单独运行以下回归命令：
+
+```powershell
+uv run --project apps/api --extra cpu pytest `
+  apps/api/tests/unit/test_answer_workflow.py::test_workflow_refuses_when_the_single_citation_repair_is_still_invalid -q
+```
+
+新增阶段化诊断断言在修复前失败，修复后命令通过；测试不调用网络或数据库。行为稳定化前的
+`c1aefe4` 真实报告提供了三类代表性持续失败，以下分类只使用结构计数和索引，不保留回答正文：
+
+- `ARF-003`：初稿与修复稿都是 5 个单元、0 个引用，未引用索引始终为 0 至 4。假设是自由文本
+  修复没有执行引用任务而是近似原样返回；若结构化 claims 能生成非空允许引用并通过确定性
+  校验，则该假设得到支持，若仍为全零引用则被证伪。
+- `ARF-015`：两次都是 8 个单元、7 个引用，仅索引 0 持续未引用。假设是开头结构单元容易被
+  模型视为标题或引言而跳过；若服务端按 claim 的每个确定性单元渲染后索引 0 仍缺失，则该
+  假设被证伪。
+- `ARF-021`：两次都是 7 个单元，引用数从 8 增至 9，但索引 3 持续未引用。该 case 证伪了
+  “问题只发生在首单元”的单一解释，并支持自由文本修复可能遗漏任意中间单元；若结构化渲染
+  后仍只遗漏索引 3，则应转向单元切分或 claim 覆盖假设。
+
+新的 30 题真实供应商回归与人工审核仍是本次稳定化工作的发布前验收，
 未完成前不能宣称端到端效果提升。
 
 ## 23. DeepSeek 兼容响应的终态、重试和 thinking 语义不稳定

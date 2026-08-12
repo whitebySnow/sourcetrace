@@ -65,7 +65,7 @@ A structured Agent decision declaring whether retrieved chunks are sufficient an
 _Avoid_: Model reasoning, relevance score
 
 **Supplemental Retrieval**:
-The single optional second retrieval allowed after an insufficient Evidence Decision, using one standalone rewritten query against the same knowledge base.
+The single optional second retrieval stage allowed after an insufficient Evidence Decision, using up to the remaining two-query budget as independent standalone Retrieval Queries against the same Knowledge Base.
 _Avoid_: Retry loop, web search
 
 **Citation Repair**:
