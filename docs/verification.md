@@ -371,6 +371,11 @@ SHA-256 均为 `69036a6750fb533b86664bbd7f5871a9a41e3d0a5e3d887d672a55b69066c424
 `a4d1c9e7b205`，而当前工作树无法定位该 revision，导致 Compose 的 migrate 容器退出 255；
 PostgreSQL 本身健康且只读重放可完成。该环境一致性问题不属于 Issue #54，必须另行处理。
 
+后续状态：仓库已恢复迁移文件
+`apps/api/migrations/versions/a4d1c9e7b205_add_chunk_english_text_search_index.py`，并保留该迁移的
+upgrade、downgrade 与恢复验证。上述段落仍作为 Issue #54 当时环境的历史记录，不代表当前
+工作树仍缺失该 revision。
+
 ### Issue #57 声明级已批准替代证据
 
 2026-08-11 将数据集升级到 `agentic-rag-foundations@1.1.0`，为每条预期证据声明增加稳定

@@ -234,8 +234,8 @@ SourceTrace 应在请求前建立明确预算，保证输入、证据和预留�
 
 ## 与 SourceTrace 当前实现的差距
 
-对 `apps/api/src/sourcetrace/rag/llm.py` 的检查显示。下列前两项已在 2026-08-12 的后续实现中
-解决，其余项目仍是待办：
+对 `apps/api/src/sourcetrace/rag/llm.py` 的检查显示。第 1 至 6 项已在 2026-08-12 的后续实现中
+解决；第 7、8 项共同构成仍待独立处理的超时语义问题：
 
 1. 流式解析已经忽略非 `data:` 行，因此能够跳过 keep-alive 注释；也能跳过空 choice 的 usage
    chunk，并对输出前的 `RemoteProtocolError` 做一次重试。**已解决**：现在还要求明确的
@@ -264,8 +264,8 @@ SourceTrace 应在请求前建立明确预算，保证输入、证据和预留�
 
 ## 推荐实施顺序
 
-1. **先修当前阻塞**：实现五类 `finish_reason` 安全分类，只对
-   `insufficient_system_resource` 和经预算确认可修复的 `length` 做一次有界重试。
+1. **分类供应商终态（已完成）**：实现五类 `finish_reason` 安全分类；只对尚未输出正文的
+   `insufficient_system_resource` 做一次有界重试，`length` 在预算策略完成前保持安全拒绝。
 2. **完善供应商错误边界（已完成）**：区分 400、401、402、422、429、500、503 与网络异常；
    只有瞬态错误进入有界退避重试。
 3. **固定结构化请求契约（已完成）**：显式关闭 thinking，确保 prompt 包含 JSON 指令和精确

@@ -365,3 +365,49 @@ Self-RAG 两个槽位，但在同一上下文中不会稳定补出 `top-k docume
 ARF-026 聚焦及完整 30 题运行均使 ReAct 声明命中 `approved_alternative`，检索状态由 failed
 变为 passed。全量检索为 25 passed、2 failed、3 not applicable，上一轮 24 个检索通过项零
 退化。引用维度仍存在独立波动，不属于本问题的完成声明。
+
+## 22. 证据充分但自由文本引用修复仍不稳定
+
+**症状**：固定真实评测中，一批 Answer Run 已通过 Retrieval 和最终 Evidence Decision，但初稿
+与唯一一次 Citation Repair 都以 `uncited_claim` 被确定性校验拒绝。旧轨迹只记录一个失败类别，
+无法判断是全部结构单元、开头单元还是中间单元缺少引用，也无法比较初稿与修复稿是否以同一
+方式失败。
+
+**根因**：提示词要求模型直接生成或重写带 UUID 引用的自由文本，供应商既要保持声明语义，又要
+精确复制标签并放到每个事实单元中。模型有时原样返回草稿、只给部分句子加引用，或返回正文中
+已有 UUID 与结构字段不一致的结果。继续增加自然语言强调无法把格式正确性变成稳定契约。
+
+**修复**：决策轨迹现在按 `initial` 和 `repair` 阶段记录结构单元总数、引用数、未引用单元索引
+和未知标签单元索引，不保存被拒绝正文。Citation Repair 改为结构化 `claims`：每项只接受
+`text` 与允许的 `citation_ids`，服务端移除允许的行内重复标签后确定性渲染引用。未知 UUID、
+空 claim、空引用、错误字段集合和重复证据选择继续拒绝；只有第一次空引用允许一次严格纠错，
+渲染结果仍必须重新通过原有确定性门禁。
+
+**验证**：单元测试通过公开 `AnswerWorkflow.run` 接缝稳定复现“证据充分 -> 初稿无引用 -> 一次
+修复仍无引用 -> Refusal”，并区分两次校验的失败单元；供应商契约覆盖结构声明、重复允许标签、
+未知 UUID、空引用纠错和非法 Schema。该修复没有降低 Knowledge Base、Evidence Decision、
+Citation 或 Refusal 门禁。新的 30 题真实供应商回归与人工审核仍是 Issue #60 的发布前验收，
+未完成前不能宣称端到端效果提升。
+
+## 23. DeepSeek 兼容响应的终态、重试和 thinking 语义不稳定
+
+**症状**：真实 DeepSeek 调用先后出现非 `stop` 终态、结构化空正文、额外字段、网络断连和供应商
+错误。旧适配器把多种原因合并为格式错误或供应商不可用，难以判断是否可恢复；DeepSeek V4 又
+默认开启 thinking，可能改变结构化 JSON 与最终流式回答的响应形态和 token 成本。
+
+**根因**：OpenAI-compatible 只描述传输外形，不保证不同平台具有相同的终态、错误码、JSON
+Output、thinking 和 SSE 细节。适配器此前没有把 DeepSeek 官方五类 `finish_reason`、HTTP 状态、
+流式输出前后断连、keep-alive、usage-only chunk 和 `[DONE]` 完整性建模为明确契约。
+
+**修复**：结构化调用默认显式发送 `response_format.type=json_object`、
+`thinking.type=disabled` 和有限 `max_tokens`，四类结构提示词包含与业务 Schema 对齐的 JSON
+示例；结果必须依次通过 `stop`、非空、JSON 和精确 Schema。最终流式回答使用独立 thinking
+配置，DeepSeek 基线默认关闭，不支持该扩展的平台可设为 `default` 以省略字段。适配器分类五类
+官方终态与 400、401、402、422、429、500、503；瞬态 HTTP、网络、协议和资源不足只在尚未输出
+正文时有界重试一次。流式解析忽略 keep-alive、reasoning content 和 usage-only chunk，要求
+明确 `stop`，拒绝终态后正文和 `[DONE]` 前断连。
+
+**验证**：供应商契约 fake 覆盖正常结构化和流式响应、空正文、Schema 偏差、五类终态、各类
+HTTP 状态、输出前后断连、keep-alive、usage-only chunk、reasoning content、thinking 省略回退
+和安全错误信息；完整静态检查、后端与前端测试和生产构建通过。当前仍使用覆盖整个调用生命周期
+的单一应用 deadline；connect、等待首 token 和 read timeout 的拆分属于后续独立问题。

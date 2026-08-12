@@ -96,13 +96,15 @@ data/uploads/     本地开发上传目录，不提交用户文件
 ## 当前阶段
 
 仓库已具备知识库、不可变文档版本、异步 PDF 解析切分、本地 dense embedding、
-知识库范围内的最新可检索版本召回、有限历史追问改写，以及带稳定引用或明确拒答的 SSE
-回答链路。回答决策由有界 LangGraph 状态机编排，最多执行一次补充检索和一次引用修复。
+知识库范围内的 Active Searchable Version 混合召回、RRF、BGE reranker、有限历史追问规划，
+以及带稳定引用或明确拒答的 SSE 回答链路。回答决策由有界 LangGraph 状态机编排，每个 Answer
+Run 最多执行两条额外 Retrieval Query、一次 Supplemental Retrieval 阶段和一次 Citation Repair。
 仓库同时提供版本化评测数据契约、确定性离线重放和必须显式确认的真实供应商评测入口，
 分别输出检索、引用、拒答和端到端结果。`evals/datasets/agentic-rag-foundations-v1.json`
 包含首个由用户逐条审核的 30 条正式评测样本。该数据集已在多个固定代码和模型配置上完成
-真实供应商评测及回答结果的二次人工审核；最新正式记录使用提交 `b87c635`、
-`deepseek-v4-flash`、本地 BGE-M3 与生产 BGE reranker，详见 `docs/verification.md`。业务功能按 `docs/roadmap.md`
-分阶段实现，效果数字必须同时注明数据集、提交和配置，不能把单次评测泛化为产品准确率。
+真实供应商评测及回答结果的二次人工审核。当前 Issue #60 正在收尾 DeepSeek 引用生成稳定性；
+合并前仍需在当前提交上运行新的 30 题真实回归，旧报告不能替代本轮验收。历史结果与适用边界
+见 `docs/verification.md`。业务功能按 `docs/roadmap.md` 分阶段实现，效果数字必须同时注明
+Dataset、Git commit、模型、提示词、检索配置和报告 SHA，不能把单次评测泛化为产品准确率。
 大模型或自动化代理开始修改前必须阅读
 [`AGENTS.md`](AGENTS.md)。
