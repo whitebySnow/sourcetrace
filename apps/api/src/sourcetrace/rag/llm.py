@@ -47,8 +47,9 @@ class OpenAICompatibleConfig:
     model: str
     timeout_seconds: float
     prompt_version: str
-    structured_output_mode: Literal["text", "json_object"] = "text"
-    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
+    structured_output_mode: Literal["text", "json_object"] = "json_object"
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
+    structured_output_max_tokens: int = 2048
 
     def __post_init__(self) -> None:
         if not self.base_url.startswith(("http://", "https://")):
@@ -59,6 +60,8 @@ class OpenAICompatibleConfig:
             raise ValueError("LLM model is required")
         if self.timeout_seconds <= 0:
             raise ValueError("LLM timeout must be positive")
+        if self.structured_output_max_tokens <= 0:
+            raise ValueError("LLM structured output max tokens must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +160,9 @@ def _retrieval_plan_prompt(
                 "by sources' and whose document_title exactly matches a supplied title; preserve "
                 "what is unsupported and what provides support. "
                 "Use recent questions only to resolve references. Do not answer, add conclusions, "
-                "or include facts that are not needed to retrieve one slot."
+                "or include facts that are not needed to retrieve one slot. "
+                'EXAMPLE JSON OUTPUT: {"evidence_groups": [{"query": "Method A '
+                'distinctive mechanism", "document_title": "Method A.pdf"}]}'
             ),
         },
         {
@@ -202,7 +207,9 @@ def _retrieval_slot_refinement_prompt(
                 "or invent a different paper association. Use recent questions only to resolve "
                 "references. Searchable titles constrain associations but are not evidence. This "
                 "request contains no retrieved chunks, expected answers, evaluation evidence, or "
-                "labels, and you must not infer that they were supplied."
+                "labels, and you must not infer that they were supplied. "
+                'EXAMPLE JSON OUTPUT: {"evidence_group": {"query": "Method A '
+                'distinctive mechanism", "document_title": "Method A.pdf"}}'
             ),
         },
         {
@@ -250,7 +257,9 @@ def _evidence_assessment_prompt(
                 "term and the candidates do not establish that association, use wording from the "
                 "question without adding an owner. "
                 "Return JSON with exactly: sufficient (boolean), selected_chunk_ids (array of "
-                "strings), and supplemental_queries (array of strings)."
+                "strings), and supplemental_queries (array of strings). "
+                'EXAMPLE JSON OUTPUT: {"sufficient": false, "selected_chunk_ids": [], '
+                '"supplemental_queries": ["missing evidence component"]}'
             ),
         },
         {
@@ -295,7 +304,9 @@ def _citation_repair_prompt(
                 "The application will deterministically place each claim's citations after every "
                 "sentence or list item in text. The validation feedback contains zero-based "
                 "indexes of draft units that failed; rewrite the entire draft. Keep the question's "
-                "language."
+                "language. "
+                'EXAMPLE JSON OUTPUT: {"claims": [{"text": "Evidence-supported claim", '
+                '"citation_ids": ["allowed-citation-id"]}]}'
             ),
         },
         {
@@ -754,6 +765,7 @@ async def _structured_completion(
                     "model": config.model,
                     "messages": messages,
                     "stream": False,
+                    "max_tokens": config.structured_output_max_tokens,
                 }
                 if temperature is not None:
                     request["temperature"] = temperature

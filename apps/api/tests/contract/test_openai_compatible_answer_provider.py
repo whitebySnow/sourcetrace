@@ -102,8 +102,9 @@ def _uuid_evidence() -> tuple[list[RetrievalCandidate], str]:
 
 def _config(
     *,
-    structured_output_mode: Literal["text", "json_object"] = "text",
-    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default",
+    structured_output_mode: Literal["text", "json_object"] = "json_object",
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled",
+    structured_output_max_tokens: int = 2048,
 ) -> OpenAICompatibleConfig:
     return OpenAICompatibleConfig(
         base_url="https://gateway.example/v1",
@@ -113,6 +114,7 @@ def _config(
         prompt_version="grounded-answer-v1",
         structured_output_mode=structured_output_mode,
         structured_output_thinking=structured_output_thinking,
+        structured_output_max_tokens=structured_output_max_tokens,
     )
 
 
@@ -884,6 +886,10 @@ async def test_question_planner_uses_only_recent_user_questions() -> None:
     assert isinstance(messages, list)
     assert [message["role"] for message in messages] == ["system", "user"]
     system_prompt = messages[0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in system_prompt
+    assert '{"evidence_groups": [' in system_prompt
+    assert '"query": "Method A distinctive mechanism"' in system_prompt
+    assert '"document_title": "Method A.pdf"' in system_prompt
     assert "zero to three evidence groups" in system_prompt
     assert "whole-run budget" in system_prompt
     assert "not broad bags of keywords" in system_prompt
@@ -1010,6 +1016,13 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
     assert "expected answers" in react_payload
     assert "must differ from the proposed query" in react_payload
     assert "do not satisfy refinement" in react_payload
+    refinement_messages = refinement_payloads["ReAct.pdf"]["messages"]
+    assert isinstance(refinement_messages, list)
+    refinement_system_prompt = refinement_messages[0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in refinement_system_prompt
+    assert '{"evidence_group": {' in refinement_system_prompt
+    assert '"query": "Method A distinctive mechanism"' in refinement_system_prompt
+    assert '"document_title": "Method A.pdf"' in refinement_system_prompt
 
 
 async def test_question_planner_discards_refinement_that_changes_document() -> None:
@@ -1474,11 +1487,19 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert payload["stream"] is False
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["max_tokens"] == 2048
     serialized = json.dumps(payload["messages"])
     assert "chunk-1" in serialized
     assert "BGE-M3 dense vectors" in serialized
     assert "supplemental_query_limit" in serialized
     assert "retrieval_queries" in serialized
+    system_prompt = payload["messages"][0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in system_prompt
+    assert '"sufficient": false' in system_prompt
+    assert '"selected_chunk_ids": []' in system_prompt
+    assert '"supplemental_queries": ["missing evidence component"]' in system_prompt
 
 
 async def test_evidence_assessor_does_not_invite_unsupported_query_associations() -> None:
@@ -1866,6 +1887,9 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     assert "citation-1" in serialized
     assert "claims" in payload["messages"][0]["content"]
     assert "citation_ids" in payload["messages"][0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in payload["messages"][0]["content"]
+    assert '"text": "Evidence-supported claim"' in payload["messages"][0]["content"]
+    assert '"citation_ids": ["allowed-citation-id"]' in payload["messages"][0]["content"]
     serialized_user_message = payload["messages"][1]["content"]
     assert '"uncited_unit_indices": [0]' in serialized_user_message
     assert "headings" in payload["messages"][0]["content"]

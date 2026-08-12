@@ -1,7 +1,7 @@
 import pytest
 
 from sourcetrace.core.config import Settings
-from sourcetrace.evaluation.real import _resolve_embedding_model
+from sourcetrace.evaluation.real import _llm_config, _resolve_embedding_model
 from sourcetrace.evaluation.repository import CorpusProvenance
 
 
@@ -43,3 +43,13 @@ def test_embedding_replay_rejects_a_different_runtime_revision() -> None:
 
     with pytest.raises(RuntimeError, match="embedding revision"):
         _resolve_embedding_model(corpus_provenance(), settings)
+
+
+def test_real_evaluation_uses_the_structured_output_contract() -> None:
+    settings = Settings()
+
+    config = _llm_config(settings, prompt_version="test-structured-contract")
+
+    assert config.structured_output_mode == "json_object"
+    assert config.structured_output_thinking == "disabled"
+    assert config.structured_output_max_tokens == 2048
