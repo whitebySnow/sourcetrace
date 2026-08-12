@@ -21,6 +21,8 @@ _UUID_CITATION_LABEL = re.compile(
 _ANSWER_UNIT_SPLIT = re.compile(
     r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
 )
+_TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 503})
+_PROVIDER_RETRY_DELAY_SECONDS = 0.1
 
 
 class LlmProviderError(Exception):
@@ -388,6 +390,56 @@ def _finish_reason_error(finish_reason: object) -> LlmProviderError:
     )
 
 
+def _http_status_error(status_code: int) -> LlmProviderError:
+    if status_code == 400:
+        return LlmProviderError(
+            "LLM_INVALID_REQUEST",
+            "Language model request was invalid",
+            reason="provider_http_invalid_format",
+        )
+    if status_code == 401:
+        return LlmProviderError(
+            "LLM_AUTHENTICATION_FAILED",
+            "Language model authentication failed",
+            reason="provider_http_authentication_failed",
+        )
+    if status_code == 402:
+        return LlmProviderError(
+            "LLM_INSUFFICIENT_BALANCE",
+            "Language model account has insufficient balance",
+            reason="provider_http_insufficient_balance",
+        )
+    if status_code == 422:
+        return LlmProviderError(
+            "LLM_INVALID_REQUEST",
+            "Language model request was invalid",
+            reason="provider_http_invalid_parameters",
+        )
+    if status_code == 429:
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_http_rate_limited",
+        )
+    if status_code == 500:
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_http_server_error",
+        )
+    if status_code == 503:
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_http_overloaded",
+        )
+    return LlmProviderError(
+        "LLM_PROVIDER_UNAVAILABLE",
+        "Language model is temporarily unavailable",
+        reason="provider_http_unavailable",
+    )
+
+
 class OpenAICompatibleAnswerGenerator:
     def __init__(
         self,
@@ -424,7 +476,13 @@ class OpenAICompatibleAnswerGenerator:
                             },
                             timeout=self.config.timeout_seconds,
                         ) as response:
-                            response.raise_for_status()
+                            if response.status_code in _TRANSIENT_HTTP_STATUS_CODES:
+                                if attempt == 0:
+                                    await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                                    continue
+                                raise _http_status_error(response.status_code)
+                            if not response.is_success:
+                                raise _http_status_error(response.status_code)
                             completed = False
                             retry_after_resource_shortage = False
                             async for line in response.aiter_lines():
@@ -469,9 +527,15 @@ class OpenAICompatibleAnswerGenerator:
                                 "Language model returned an incomplete response",
                                 reason="provider_stream_missing_stop",
                             )
-                    except httpx.RemoteProtocolError:
+                    except httpx.TimeoutException:
                         if emitted_content or attempt == 1:
                             raise
+                        await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                        continue
+                    except (httpx.NetworkError, httpx.ProtocolError):
+                        if emitted_content or attempt == 1:
+                            raise
+                        await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
                         continue
         except LlmProviderError:
             raise
@@ -479,11 +543,15 @@ class OpenAICompatibleAnswerGenerator:
             raise LlmProviderError(
                 "LLM_TIMEOUT",
                 "Language model request timed out",
+                reason="provider_request_timeout",
             ) from error
+        except httpx.HTTPStatusError as error:
+            raise _http_status_error(error.response.status_code) from error
         except httpx.HTTPError as error:
             raise LlmProviderError(
                 "LLM_PROVIDER_UNAVAILABLE",
                 "Language model is temporarily unavailable",
+                reason="provider_network_error",
             ) from error
 
 
@@ -700,11 +768,23 @@ async def _structured_completion(
                         json=request,
                         timeout=config.timeout_seconds,
                     )
+                except httpx.TimeoutException:
+                    if attempt == 1:
+                        raise
+                    await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                    continue
                 except (httpx.NetworkError, httpx.ProtocolError):
                     if attempt == 1:
                         raise
+                    await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
                     continue
-                response.raise_for_status()
+                if response.status_code in _TRANSIENT_HTTP_STATUS_CODES:
+                    if attempt == 0:
+                        await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                        continue
+                    raise _http_status_error(response.status_code)
+                if not response.is_success:
+                    raise _http_status_error(response.status_code)
                 payload = response.json()
                 if not isinstance(payload, dict):
                     raise ValueError
@@ -742,11 +822,15 @@ async def _structured_completion(
         raise LlmProviderError(
             "LLM_TIMEOUT",
             "Language model request timed out",
+            reason="provider_request_timeout",
         ) from error
+    except httpx.HTTPStatusError as error:
+        raise _http_status_error(error.response.status_code) from error
     except httpx.HTTPError as error:
         raise LlmProviderError(
             "LLM_PROVIDER_UNAVAILABLE",
             "Language model is temporarily unavailable",
+            reason="provider_network_error",
         ) from error
 
 

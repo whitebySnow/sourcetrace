@@ -55,6 +55,15 @@ class BrokenResponseStream(httpx.AsyncByteStream):
         return None
 
 
+class BrokenAfterContentResponseStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b'data: {"choices":[{"delta":{"content":"Partial"}}]}\n\n'
+        raise httpx.RemoteProtocolError("private upstream disconnect")
+
+    async def aclose(self) -> None:
+        return None
+
+
 def _evidence() -> list[RetrievalCandidate]:
     return [
         RetrievalCandidate(
@@ -177,6 +186,88 @@ async def test_provider_maps_upstream_failures_without_leaking_details(
     assert "private" not in str(error.value)
 
 
+async def test_provider_retries_a_transient_http_error_before_content_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503, text="private overloaded response")
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"},'
+                b'"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Recovered"]
+    assert attempts == 2
+
+
+async def test_provider_does_not_retry_a_nonretryable_http_error() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(401, text="private authentication response")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == "LLM_AUTHENTICATION_FAILED"
+    assert error.value.reason == "provider_http_authentication_failed"
+    assert "private" not in str(error.value)
+    assert attempts == 1
+
+
+async def test_provider_retries_a_network_error_before_content_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("private network detail", request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"},'
+                b'"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Recovered"]
+    assert attempts == 2
+
+
 async def test_provider_rejects_a_stream_that_ends_without_completion() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -245,6 +336,30 @@ async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:
 
     assert deltas == ["Recovered"]
     assert attempts == 2
+
+
+async def test_provider_does_not_reconnect_after_stream_content() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=BrokenAfterContentResponseStream(),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert error.value.reason == "provider_network_error"
+    assert "private" not in str(error.value)
+    assert attempts == 1
 
 
 async def test_provider_rejects_a_length_truncated_completion() -> None:
@@ -420,6 +535,281 @@ async def test_evidence_assessor_times_out_a_keep_alive_only_response() -> None:
 
     assert error.value.code == "LLM_TIMEOUT"
     assert upstream.closed is True
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_code", "expected_reason", "expected_message"),
+    [
+        (
+            400,
+            "LLM_INVALID_REQUEST",
+            "provider_http_invalid_format",
+            "Language model request was invalid",
+        ),
+        (
+            401,
+            "LLM_AUTHENTICATION_FAILED",
+            "provider_http_authentication_failed",
+            "Language model authentication failed",
+        ),
+        (
+            402,
+            "LLM_INSUFFICIENT_BALANCE",
+            "provider_http_insufficient_balance",
+            "Language model account has insufficient balance",
+        ),
+        (
+            422,
+            "LLM_INVALID_REQUEST",
+            "provider_http_invalid_parameters",
+            "Language model request was invalid",
+        ),
+    ],
+)
+async def test_evidence_assessor_classifies_nonretryable_http_errors(
+    status_code: int,
+    expected_code: str,
+    expected_reason: str,
+    expected_message: str,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(status_code, text="private provider response")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == expected_code
+    assert error.value.reason == expected_reason
+    assert error.value.safe_message == expected_message
+    assert "private" not in str(error.value)
+    assert attempts == 1
+
+
+@pytest.mark.parametrize("status_code", [429, 500, 503])
+async def test_evidence_assessor_retries_transient_http_errors_once(
+    status_code: int,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(status_code, text="private transient response")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert attempts == 2
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_reason"),
+    [
+        (429, "provider_http_rate_limited"),
+        (500, "provider_http_server_error"),
+        (503, "provider_http_overloaded"),
+    ],
+)
+async def test_evidence_assessor_stops_after_repeated_transient_http_errors(
+    status_code: int,
+    expected_reason: str,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(status_code, text="private transient response")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert error.value.reason == expected_reason
+    assert "private" not in str(error.value)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_retries_a_network_error_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("private network detail", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert attempts == 2
+
+
+async def test_evidence_assessor_stops_after_repeated_network_errors() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectError("private network detail", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert error.value.reason == "provider_network_error"
+    assert "private" not in str(error.value)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_retries_a_request_timeout_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadTimeout("private timeout detail", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert attempts == 2
+
+
+async def test_evidence_assessor_stops_after_repeated_request_timeouts() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadTimeout("private timeout detail", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_TIMEOUT"
+    assert error.value.reason == "provider_request_timeout"
+    assert "private" not in str(error.value)
+    assert attempts == 2
 
 
 async def test_consumer_cancellation_closes_the_upstream_response_stream() -> None:
