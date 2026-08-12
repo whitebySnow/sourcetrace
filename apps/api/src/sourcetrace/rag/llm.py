@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -11,6 +12,14 @@ from sourcetrace.rag.ports import (
     EvidenceDecision,
     RetrievalCandidate,
     RetrievalPlanProposal,
+)
+
+_UUID_CITATION_LABEL = re.compile(
+    r"\[[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\]"
+)
+_ANSWER_UNIT_SPLIT = re.compile(
+    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
 )
 
 
@@ -268,15 +277,15 @@ def _citation_repair_prompt(
             "content": (
                 "Repair the draft so every factual claim is supported by the supplied evidence "
                 "and cites only its allowed citation labels. Do not add claims or use outside "
-                "knowledge. Every factual sentence or list item must cite an allowed label with "
-                "ASCII square brackets in exactly this form: [citation_id]. Replace citation_id "
-                "with a supplied label copied verbatim; do not use bare IDs, full-width brackets, "
-                "footnotes, or a sources section. Use only plain paragraphs or bullet list items. "
-                "Do not add standalone headings, tables, prefaces, or conclusions. Put each "
-                "citation in the same sentence or list item as its claim. The validation feedback "
-                "contains zero-based indexes of draft units that failed; rewrite the entire draft, "
-                "not only those units. Keep the question's language. Return JSON with exactly one "
-                "string field named answer."
+                "knowledge. Return JSON with exactly one array field named claims. Each claim "
+                "must contain exactly two fields: text and citation_ids. text must contain only "
+                "the claim text without citations; citation_ids must contain one or more supplied "
+                "citation IDs copied verbatim. Use only evidence-supported claims, do not add "
+                "outside knowledge, headings, tables, prefaces, conclusions, or a sources section. "
+                "The application will deterministically place each claim's citations after every "
+                "sentence or list item in text. The validation feedback contains zero-based "
+                "indexes of draft units that failed; rewrite the entire draft. Keep the question's "
+                "language."
             ),
         },
         {
@@ -845,12 +854,33 @@ class OpenAICompatibleCitationRepairer:
             _citation_repair_prompt(question, answer, evidence, validation_feedback),
         )
         try:
-            if set(parsed) != {"answer"}:
+            if set(parsed) != {"claims"}:
                 raise ValueError
-            repaired = parsed["answer"]
-            if not isinstance(repaired, str) or not repaired.strip():
+            claims = parsed["claims"]
+            if not isinstance(claims, list) or not claims:
                 raise ValueError
-            return repaired.strip()
+            allowed = {item.citation_id for item in evidence}
+            rendered: list[str] = []
+            for claim in claims:
+                if not isinstance(claim, dict) or set(claim) != {"text", "citation_ids"}:
+                    raise ValueError
+                text = claim["text"]
+                citation_ids = claim["citation_ids"]
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError
+                if not isinstance(citation_ids, list) or any(
+                    not isinstance(item, str) or item not in allowed for item in citation_ids
+                ):
+                    raise ValueError
+                normalized_ids = tuple(dict.fromkeys(citation_ids))
+                if not normalized_ids or _UUID_CITATION_LABEL.search(text):
+                    raise ValueError
+                units = [unit.strip() for unit in _ANSWER_UNIT_SPLIT.split(text) if unit.strip()]
+                if not units:
+                    raise ValueError
+                labels = " ".join(f"[{item}]" for item in normalized_ids)
+                rendered.extend(f"{unit} {labels}" for unit in units)
+            return "\n".join(rendered)
         except (TypeError, ValueError) as error:
             raise LlmProviderError(
                 "LLM_INVALID_RESPONSE",

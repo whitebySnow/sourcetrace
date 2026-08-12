@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     llm_prompt_version: str = "grounded-answer-v3"
     llm_retrieval_plan_prompt_version: str = "two-stage-evidence-slots-v5"
     llm_evidence_assessment_prompt_version: str = "evidence-assessment-v3"
-    llm_citation_repair_prompt_version: str = "citation-repair-v3"
+    llm_citation_repair_prompt_version: str = "citation-repair-v4"
     answer_context_question_limit: int = Field(default=4, ge=1, le=20)
     retrieval_top_k: int = Field(default=8, ge=1, le=8)
     retrieval_page_neighbor_count: int = Field(default=1, ge=0, le=3)

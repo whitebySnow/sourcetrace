@@ -132,7 +132,7 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
     assert "citation-1" in payload["messages"][0]["content"]
     assert "BGE-M3 dense vectors" in payload["messages"][0]["content"]
     assert "ASCII square brackets" in payload["messages"][0]["content"]
-    assert "standalone headings" in payload["messages"][0]["content"]
+    assert "headings" in payload["messages"][0]["content"]
     assert "[citation_id]" in payload["messages"][0]["content"]
 
 
@@ -1115,7 +1115,16 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps({"answer": "Vectors are normalized [citation-1]"})
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "Vectors are normalized",
+                                            "citation_ids": ["citation-1"],
+                                        }
+                                    ]
+                                }
+                            )
                         },
                         "finish_reason": "stop",
                     }
@@ -1140,11 +1149,11 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     serialized = json.dumps(payload["messages"])
     assert "Vectors are normalized." in serialized
     assert "citation-1" in serialized
-    assert "ASCII square brackets" in payload["messages"][0]["content"]
-    assert "[citation_id]" in payload["messages"][0]["content"]
+    assert "claims" in payload["messages"][0]["content"]
+    assert "citation_ids" in payload["messages"][0]["content"]
     serialized_user_message = payload["messages"][1]["content"]
     assert '"uncited_unit_indices": [0]' in serialized_user_message
-    assert "standalone headings" in payload["messages"][0]["content"]
+    assert "headings" in payload["messages"][0]["content"]
 
 
 async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> None:
@@ -1156,7 +1165,8 @@ async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> 
                     {
                         "message": {
                             "content": (
-                                '{"answer":"Vectors are normalized [citation-1]"}'
+                                '{"claims":[{"text":"Vectors are normalized",'
+                                '"citation_ids":["citation-1"]}]}'
                                 "\n\nThe citation has been repaired."
                             )
                         },
@@ -1187,7 +1197,10 @@ async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() 
                 "choices": [
                     {
                         "message": {
-                            "content": ('{"answer":"The objective is \\(x + y\\) [citation-1]"}')
+                            "content": (
+                                '{"claims":[{"text":"The objective is \\(x + y\\)",'
+                                '"citation_ids":["citation-1"]}]}'
+                            )
                         },
                         "finish_reason": "stop",
                     }

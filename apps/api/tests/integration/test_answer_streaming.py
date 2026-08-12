@@ -425,7 +425,7 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["prompt_version"] == "grounded-answer-v3"
         assert persisted["retrieval_version"] == get_settings().retrieval_config_version
         assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v3")
-        assert persisted["citation_repair_prompt_version"] == "citation-repair-v3"
+        assert persisted["citation_repair_prompt_version"] == "citation-repair-v4"
         assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v3"
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
