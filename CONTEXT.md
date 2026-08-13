@@ -107,3 +107,7 @@ _Avoid_: Ground truth, score
 **Evaluation Report**:
 A replayable artifact that keeps retrieval, citation, refusal, and end-to-end results separate and binds them to dataset, code, model, workflow, chunking, embedding, and retrieval versions.
 _Avoid_: Accuracy claim, benchmark without provenance
+
+**Citation Diagnostics Report**:
+A sanitized, replayable classification of failed answer citations, bound to one Evaluation Dataset and one Evaluation Report without retaining questions, answers, prompts, or evidence text.
+_Avoid_: Alternative-evidence approval, corrected evaluation result

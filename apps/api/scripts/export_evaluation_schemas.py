@@ -3,6 +3,7 @@ from pathlib import Path
 
 from sourcetrace.evaluation.fixtures import FixtureObservationSet
 from sourcetrace.evaluation.models import (
+    CitationDiagnosticsReport,
     EvaluationDataset,
     EvaluationJudgmentSet,
     EvaluationReport,
@@ -17,6 +18,7 @@ def main() -> None:
     output_dir = Path(__file__).resolve().parents[3] / "evals" / "schema"
     output_dir.mkdir(parents=True, exist_ok=True)
     schemas = {
+        "citation-diagnostics-v1.schema.json": CitationDiagnosticsReport.model_json_schema(),
         "dataset-v1.schema.json": EvaluationDataset.model_json_schema(),
         "fixture-observations-v1.schema.json": FixtureObservationSet.model_json_schema(),
         "hybrid-query-plan-v1.schema.json": HybridQueryPlanFixture.model_json_schema(),

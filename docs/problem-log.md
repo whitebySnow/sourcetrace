@@ -443,3 +443,34 @@ Output、thinking 和 SSE 细节。适配器此前没有把 DeepSeek 官方五�
 HTTP 状态、输出前后断连、keep-alive、usage-only chunk、reasoning content、thinking 省略回退
 和安全错误信息；完整静态检查、后端与前端测试和生产构建通过。当前仍使用覆盖整个调用生命周期
 的单一应用 deadline；connect、等待首 token 和 read timeout 的拆分属于后续独立问题。
+
+## 24. 引用评分失败缺少可复用的去敏诊断
+
+**症状**：`fb5ea7c` 真实报告有 10 个实际已回答但引用评分失败的 case。原报告包含完整问题、回答、
+候选和论文片段，手工解析既难以重放，也不适合提交或直接用于 Issue 诊断；现有
+`diagnose-retrieval` 只覆盖检索失败，无法判断目标证据是否已召回但未被最终 Citation 使用。
+
+**修复**：新增纯离线 `diagnose-citations` 命令和 `citation-diagnostics-v1` Schema。工具复用统一
+声明级证据匹配，只输出 case/claim ID、文档版本 ID、页码、检索/引用匹配状态、失败机制、源
+Report SHA-256 和原运行配置。问题、参考答案、模型回答、提示词及文档正文均不进入诊断产物；
+命令不批准替代证据，也不修改 Dataset、Report 或线上门禁。
+
+**验证**：使用 `agentic-rag-foundations@1.1.0` 和 reviewed report SHA-256
+`4d0b9361951ca1c5bbcf5606d43e32d62831a6b70f23800179bff059636ea0b5` 离线生成两次诊断；两份
+产物字节相同，SHA-256 均为
+`8709094a18d3bf7375321307c57faf38dbce8e830f8de508b234169819f0c9f0`。诊断得到 10 个 failed
+answered case：
+
+- `ARF-001`、`ARF-004`、`ARF-006`、`ARF-008`、`ARF-012`、`ARF-013`、`ARF-015`、
+  `ARF-018` 共 8 个为 `retrieved_but_not_cited`，即所有目标声明的规范证据已召回，但最终引用
+  没有命中规范证据或已批准替代证据。
+- `ARF-025` 为 `partial_claim_coverage`：两个目标声明均召回规范证据，但最终只引用第一个声明
+  的规范证据。
+- `ARF-024` 为 `expected_evidence_not_retrieved`：第一个声明召回规范证据，第二个声明未召回，
+  两个声明的最终引用都未命中目标证据。
+
+该分类证伪了“10 个失败都来自 embedding”的单一解释，也不能证明实际引用都是可批准的等价
+证据。后续应分开处理：先人工核验 8 个完全偏移和 1 个部分覆盖 case 的实际引用是否语义等价；
+只有通过核验的片段才能作为声明级 `approved_alternatives`。`ARF-024` 的缺失声明继续进入独立
+检索诊断。若实际引用不等价，再单独修改 Evidence Decision 或声明覆盖策略，并重新运行真实
+评测，不能在本诊断 Issue 中直接放宽匹配规则。

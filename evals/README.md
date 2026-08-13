@@ -33,6 +33,20 @@ pnpm eval:fake
 报告文件的 SHA-256、审核人与 UTC 时间，并完整覆盖所有 `pending_review` case。审核只通过
 独立的 `review` 命令应用到既有报告，不能在新一轮模型调用前复用旧 judgment。
 
+引用失败可通过纯离线命令生成去敏诊断，不访问数据库、本地模型或远程供应商：
+
+```powershell
+pnpm eval:diagnose-citations -- `
+  --dataset evals/datasets/<dataset>.json `
+  --report output/evals/<report>.json `
+  --output output/evals/<citation-diagnostics>.json
+```
+
+诊断报告绑定 Dataset ID/version、源报告 SHA-256 和运行配置，只保存 case/claim ID、不可变文档
+版本 ID、页码、匹配状态和汇总计数。它不复制问题、参考答案、模型回答、提示词、文档或 chunk
+正文，也不自动批准替代证据或改变原评测结果。Schema 位于
+`schema/citation-diagnostics-v1.schema.json`。
+
 ## 真实受控评测
 
 真实评测要求 PostgreSQL 中存在数据集指定的知识库和文档版本，本机可加载配置的 embedding

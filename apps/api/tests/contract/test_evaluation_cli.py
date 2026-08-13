@@ -7,6 +7,7 @@ import pytest
 
 from sourcetrace.evaluation.cli import main
 from sourcetrace.evaluation.models import (
+    CitationDiagnosticsReport,
     HybridQueryPlanFixture,
     HybridRetrievalEvaluationReport,
     RerankerEvaluationReport,
@@ -23,6 +24,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     output_path = tmp_path / "reports" / "report.json"
     reviewed_output_path = tmp_path / "reports" / "reviewed-report.json"
     diagnostics_output_path = tmp_path / "reports" / "retrieval-diagnostics.json"
+    citation_diagnostics_output_path = tmp_path / "reports" / "citation-diagnostics.json"
     dataset_path.write_text(
         json.dumps(
             {
@@ -168,12 +170,27 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
             str(diagnostics_output_path),
         ]
     )
+    citation_diagnostics_exit_code = main(
+        [
+            "diagnose-citations",
+            "--dataset",
+            str(dataset_path),
+            "--report",
+            str(output_path),
+            "--output",
+            str(citation_diagnostics_output_path),
+        ]
+    )
 
     report = json.loads(reviewed_output_path.read_text(encoding="utf-8"))
     diagnostics = json.loads(diagnostics_output_path.read_text(encoding="utf-8"))
+    citation_diagnostics = json.loads(
+        citation_diagnostics_output_path.read_text(encoding="utf-8")
+    )
     assert exit_code == 0
     assert review_exit_code == 0
     assert diagnostics_exit_code == 0
+    assert citation_diagnostics_exit_code == 0
     assert report["dataset_id"] == "cli-fixture"
     assert report["metadata"]["code_commit"] == "test-commit"
     assert report["retrieval_summary"]["passed"] == 1
@@ -181,6 +198,9 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     assert report["judgment_review"]["reviewed_by"] == "project-owner"
     assert diagnostics["dataset_id"] == "cli-fixture"
     assert diagnostics["cases"] == []
+    assert citation_diagnostics["report_sha256"] == report_sha256
+    assert citation_diagnostics["summary"]["failed_answered_cases"] == 0
+    assert citation_diagnostics["cases"] == []
 
 
 def test_real_cli_requires_explicit_provider_confirmation() -> None:
@@ -251,6 +271,17 @@ def test_repository_reranker_report_schema_matches_model() -> None:
     )
 
     assert schema == RerankerEvaluationReport.model_json_schema()
+
+
+def test_repository_citation_diagnostics_schema_matches_model() -> None:
+    root = Path(__file__).resolve().parents[4]
+    schema = json.loads(
+        (root / "evals/schema/citation-diagnostics-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert schema == CitationDiagnosticsReport.model_json_schema()
 
 
 @pytest.mark.parametrize(
