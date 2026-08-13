@@ -132,6 +132,10 @@ async def test_question_is_not_committed_when_answer_run_creation_fails() -> Non
             evidence_assessment_prompt_version="evidence-assessment-v1",
             citation_repair_prompt_version="citation-repair-v1",
             workflow_version="linear-grounded-v1",
+            provider_connect_timeout_seconds=10,
+            provider_read_timeout_seconds=120,
+            provider_request_timeout_seconds=180,
+            provider_operation_deadline_seconds=361,
         ),
         context_question_limit=4,
     )
@@ -162,6 +166,10 @@ async def test_disconnecting_during_retrieval_cancels_the_run() -> None:
             evidence_assessment_prompt_version="evidence-assessment-v1",
             citation_repair_prompt_version="citation-repair-v1",
             workflow_version="linear-grounded-v1",
+            provider_connect_timeout_seconds=10,
+            provider_read_timeout_seconds=120,
+            provider_request_timeout_seconds=180,
+            provider_operation_deadline_seconds=361,
         ),
         context_question_limit=4,
     )
@@ -195,6 +203,10 @@ async def test_unexpected_workflow_error_marks_the_run_failed() -> None:
             evidence_assessment_prompt_version="evidence-assessment-v1",
             citation_repair_prompt_version="citation-repair-v1",
             workflow_version="linear-grounded-v1",
+            provider_connect_timeout_seconds=10,
+            provider_read_timeout_seconds=120,
+            provider_request_timeout_seconds=180,
+            provider_operation_deadline_seconds=361,
         ),
         context_question_limit=4,
     )

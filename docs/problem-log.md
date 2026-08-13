@@ -568,4 +568,5 @@ timeout 值，保证后续报告可重放。
 Dataset 1.2.0 的完整回归在修复合并后回到 Issue #67 单独授权执行。
 
 该 timeout 契约改变 Answer Run 的可重放供应商行为，工作流版本同步升级为
-`langgraph-bounded-multi-query-v6`。
+`langgraph-bounded-multi-query-v6`。四项实际 timeout 同时写入在线 Answer Run；旧 Run 在迁移
+时回填原单一 60 秒预算，避免仅凭可变环境配置推断运行边界。

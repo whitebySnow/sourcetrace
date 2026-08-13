@@ -84,6 +84,10 @@ class AnswerExecutionMetadata:
     evidence_assessment_prompt_version: str
     citation_repair_prompt_version: str
     workflow_version: str
+    provider_connect_timeout_seconds: float
+    provider_read_timeout_seconds: float
+    provider_request_timeout_seconds: float
+    provider_operation_deadline_seconds: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +127,10 @@ class AnswerRepositoryPort(Protocol):
         evidence_assessment_prompt_version: str,
         citation_repair_prompt_version: str,
         workflow_version: str,
+        provider_connect_timeout_seconds: float,
+        provider_read_timeout_seconds: float,
+        provider_request_timeout_seconds: float,
+        provider_operation_deadline_seconds: float,
     ) -> AnswerRun: ...
 
     async def complete_refusal(self, run: AnswerRun, *, code: str, message: str) -> bool: ...
@@ -240,6 +248,16 @@ class AnswerService:
             ),
             citation_repair_prompt_version=self._metadata.citation_repair_prompt_version,
             workflow_version=self._metadata.workflow_version,
+            provider_connect_timeout_seconds=(
+                self._metadata.provider_connect_timeout_seconds
+            ),
+            provider_read_timeout_seconds=self._metadata.provider_read_timeout_seconds,
+            provider_request_timeout_seconds=(
+                self._metadata.provider_request_timeout_seconds
+            ),
+            provider_operation_deadline_seconds=(
+                self._metadata.provider_operation_deadline_seconds
+            ),
         )
         await self._repository.commit()
         return self._stream(
@@ -487,6 +505,12 @@ class AnswerService:
             ),
             citation_repair_prompt_version=run.citation_repair_prompt_version,
             workflow_version=run.workflow_version,
+            provider_connect_timeout_seconds=run.provider_connect_timeout_seconds,
+            provider_read_timeout_seconds=run.provider_read_timeout_seconds,
+            provider_request_timeout_seconds=run.provider_request_timeout_seconds,
+            provider_operation_deadline_seconds=(
+                run.provider_operation_deadline_seconds
+            ),
             workflow_trace=AnswerWorkflowTrace.model_validate(run.workflow_trace),
             created_at=run.created_at,
             completed_at=run.completed_at,

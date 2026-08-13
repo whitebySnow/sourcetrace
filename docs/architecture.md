@@ -203,7 +203,8 @@ OpenAI-compatible 供应商适配器把最终流式生成与内部结构化调�
 HTTP、网络和协议错误只在尚未输出正文且仍有总 deadline 时重试一次，避免重复拼接与无限计费。
 供应商配置分别定义 connect、read、单次 request lifecycle 和整个模型操作 deadline；总
 deadline 必须容纳两次单次请求和一次退避，避免第一次 timeout 耗尽预算后让声明的重试不可达。
-真实评测把这四项值写入 Report metadata，保证失败与成本边界可重放。
+真实评测把这四项值写入 Report metadata，在线回答把它们写入 Answer Run，保证失败与
+成本边界可重放。
 工作流在每个节点边界及等待模型分片期间检查取消；图流、节点任务和上游模型流按层级显式
 关闭，避免断连后遗留数据库或供应商任务。
 

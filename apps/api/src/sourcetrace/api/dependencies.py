@@ -252,6 +252,10 @@ def get_answer_service(
             evidence_assessment_prompt_version=(settings.llm_evidence_assessment_prompt_version),
             citation_repair_prompt_version=(settings.llm_citation_repair_prompt_version),
             workflow_version=settings.answer_workflow_version,
+            provider_connect_timeout_seconds=settings.llm_connect_timeout_seconds,
+            provider_read_timeout_seconds=settings.llm_read_timeout_seconds,
+            provider_request_timeout_seconds=settings.llm_request_timeout_seconds,
+            provider_operation_deadline_seconds=(settings.llm_operation_deadline_seconds),
         ),
         context_question_limit=settings.answer_context_question_limit,
     )
