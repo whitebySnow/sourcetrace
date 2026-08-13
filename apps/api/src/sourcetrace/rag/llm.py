@@ -7,6 +7,11 @@ from typing import Any, Literal
 
 import httpx
 
+from sourcetrace.rag.answer_text import split_answer_units
+from sourcetrace.rag.language import (
+    answer_language_instruction,
+    answer_matches_question_language,
+)
 from sourcetrace.rag.ports import (
     CitationValidationFeedback,
     ClaimSupportDecision,
@@ -20,9 +25,6 @@ from sourcetrace.rag.ports import (
 _UUID_CITATION_LABEL = re.compile(
     r"\[[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\]"
-)
-_ANSWER_UNIT_SPLIT = re.compile(
-    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
 )
 _TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 503})
 _PROVIDER_RETRY_DELAY_SECONDS = 0.1
@@ -79,6 +81,7 @@ def _grounded_prompt(
     evidence: Sequence[RetrievalCandidate],
 ) -> list[dict[str, str]]:
     evidence_text = "\n\n".join(f"[{item.citation_id}]\n{item.content}" for item in evidence)
+    language_instruction = answer_language_instruction(question)
     return [
         {
             "role": "system",
@@ -92,7 +95,7 @@ def _grounded_prompt(
                 "tables, prefaces, conclusions, or a sources section. Put each citation in the "
                 "same sentence or list item as its claim. Do not use bare IDs, full-width "
                 "brackets, or footnotes. "
-                "Use the same language as the question. Do not use outside knowledge. If the "
+                f"{language_instruction} Do not use outside knowledge. If the "
                 f"evidence cannot answer the question, say so.\n\n{evidence_text}"
             ),
         },
@@ -294,6 +297,7 @@ def _citation_repair_prompt(
     evidence: Sequence[RetrievalCandidate],
     validation_feedback: CitationValidationFeedback,
 ) -> list[dict[str, str]]:
+    language_instruction = answer_language_instruction(question)
     return [
         {
             "role": "system",
@@ -307,8 +311,8 @@ def _citation_repair_prompt(
                 "outside knowledge, headings, tables, prefaces, conclusions, or a sources section. "
                 "The application will deterministically place each claim's citations after every "
                 "sentence or list item in text. The validation feedback contains zero-based "
-                "indexes of draft units that failed; rewrite the entire draft. Keep the question's "
-                "language. "
+                "indexes of draft units that failed; rewrite the entire draft. "
+                f"{language_instruction} "
                 'EXAMPLE JSON OUTPUT: {"claims": [{"text": "Evidence-supported claim", '
                 '"citation_ids": ["allowed-citation-id"]}]}'
             ),
@@ -349,6 +353,7 @@ def _claim_support_prompt(
     answer: str,
     evidence: Sequence[RetrievalCandidate],
 ) -> list[dict[str, str]]:
+    language_instruction = answer_language_instruction(question)
     return [
         {
             "role": "system",
@@ -362,7 +367,7 @@ def _claim_support_prompt(
                 "one array field named claims. Each claim must contain exactly text and "
                 "citation_ids. "
                 "Every claim must be non-empty and cite one or more supplied IDs copied verbatim. "
-                "Keep the question language and do not add outside knowledge. "
+                f"{language_instruction} Do not add outside knowledge. "
                 'EXAMPLE JSON OUTPUT: {"claims":[{"text":"Supported claim",'
                 '"citation_ids":["citation-id"]}]}'
             ),
@@ -1095,7 +1100,7 @@ class OpenAICompatibleCitationRepairer:
         empty_citations_retry_used = False
         while True:
             try:
-                return self._render_claims(parsed, evidence)
+                return self._render_claims(parsed, evidence, question)
             except _CitationRepairValidationError as error:
                 if (
                     error.reason == "citation_repair_empty_citations"
@@ -1129,6 +1134,7 @@ class OpenAICompatibleCitationRepairer:
     def _render_claims(
         parsed: dict[str, Any],
         evidence: Sequence[RetrievalCandidate],
+        question: str,
     ) -> str:
         try:
             if set(parsed) != {"claims"}:
@@ -1162,11 +1168,14 @@ class OpenAICompatibleCitationRepairer:
                         "citation_repair_unknown_inline_citation"
                     )
                 normalized_text = _UUID_CITATION_LABEL.sub("", text).strip()
-                units = [
-                    unit.strip()
-                    for unit in _ANSWER_UNIT_SPLIT.split(normalized_text)
-                    if unit.strip()
-                ]
+                if not answer_matches_question_language(
+                    question=question,
+                    answer=normalized_text,
+                ):
+                    raise _CitationRepairValidationError(
+                        "citation_repair_language_mismatch"
+                    )
+                units = split_answer_units(normalized_text)
                 if not units:
                     raise _CitationRepairValidationError("citation_repair_empty_text")
                 labels = " ".join(f"[{item}]" for item in normalized_ids)
