@@ -173,6 +173,38 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
     assert "[citation_id]" in payload["messages"][0]["content"]
 
 
+async def test_answer_generator_requests_chinese_for_a_chinese_question() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                'data: {"choices":[{"delta":{"content":"向量会先归一化。"}}]}\n\n'
+                'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+                "data: [DONE]\n\n"
+            ).encode(),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+        await _collect(
+            provider.stream_answer(
+                question="BGE-M3 的向量如何存储?",
+                evidence=_evidence(),
+            )
+        )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    system_prompt = payload["messages"][0]["content"]
+    assert "question language is Chinese" in system_prompt
+    assert "even when all evidence is in English" in system_prompt
+    assert "do not add explanatory details" in system_prompt
+
+
 async def test_provider_ignores_stream_metadata_and_reasoning_content() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -1986,6 +2018,54 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     assert "headings" in payload["messages"][0]["content"]
 
 
+async def test_citation_repairer_requests_chinese_without_translating_evidence() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "向量在写入索引前会被归一化。",
+                                            "citation_ids": ["citation-1"],
+                                        }
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        answer = await repairer.repair(
+            question="向量如何存储?",
+            answer="向量会先归一化。",
+            evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
+        )
+
+    assert answer == "向量在写入索引前会被归一化。 [citation-1]"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    system_prompt = payload["messages"][0]["content"]
+    assert "question language is Chinese" in system_prompt
+    assert "Translate only evidence-supported meaning" in system_prompt
+    user_payload = payload["messages"][1]["content"]
+    assert "BGE-M3 dense vectors are normalized before indexing." in user_payload
+
+
 async def test_claim_support_verifier_preserves_evidence_qualifiers() -> None:
     captured: dict[str, object] = {}
     evidence = [
@@ -2063,6 +2143,51 @@ async def test_claim_support_verifier_preserves_evidence_qualifiers() -> None:
     assert "never strengthen" in system_prompt
     assert "outperforming a named baseline into state-of-the-art" in system_prompt
     assert "Split a mixed claim" in system_prompt
+
+
+async def test_claim_support_verifier_requests_chinese_for_english_evidence() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "向量在写入索引前会被归一化。",
+                                            "citation_ids": ["citation-1"],
+                                        }
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        verifier = OpenAICompatibleClaimSupportVerifier(_config(), client=client)
+        decision = await verifier.verify(
+            question="向量如何存储?",
+            answer="Vectors are normalized before indexing. [citation-1]",
+            evidence=_evidence(),
+        )
+
+    assert decision.claims[0].text == "向量在写入索引前会被归一化。"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    system_prompt = payload["messages"][0]["content"]
+    assert "question language is Chinese" in system_prompt
+    assert "do not add explanatory details" in system_prompt
 
 
 async def test_claim_support_verifier_rejects_unknown_citation_safely() -> None:

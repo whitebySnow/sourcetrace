@@ -570,6 +570,110 @@ async def test_workflow_repairs_invalid_citations_once_before_answering() -> Non
     assert events[-1].answer == (f"Bounded workflows prevent unbounded loops [{citation_id}]")
 
 
+async def test_workflow_refuses_an_english_final_answer_for_a_chinese_question() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = str(uuid5(run_id, str(evidence.chunk_id)))
+    english_answer = f"Agent workflows must remain bounded. [{citation_id}]"
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator(english_answer),
+        claim_support_verifier=RecordingClaimSupportVerifier(
+            ClaimSupportDecision(
+                claims=(
+                    GroundedClaim(
+                        text="Agent workflows must remain bounded.",
+                        citation_ids=(citation_id,),
+                    ),
+                )
+            )
+        ),
+        citation_repairer=UnusedCitationRepairer(),
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(run_id, uuid4(), "为什么 Agent 工作流必须有界?", ())
+        )
+    ]
+
+    assert events[-1].type == "refused"
+    assert events[-1].code == "ANSWER_LANGUAGE_VALIDATION_FAILED"
+
+
+async def test_workflow_keeps_chinese_after_citation_repair() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = str(uuid5(run_id, str(evidence.chunk_id)))
+    repairer = RecordingCitationRepairer(
+        f"Agent workflows must remain bounded. [{citation_id}]"
+    )
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator("Agent 工作流必须保持有界。"),
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
+        citation_repairer=repairer,
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(run_id, uuid4(), "为什么 Agent 工作流必须有界?", ())
+        )
+    ]
+
+    assert repairer.answers == ["Agent 工作流必须保持有界。"]
+    assert events[-1].type == "refused"
+    assert events[-1].code == "ANSWER_LANGUAGE_VALIDATION_FAILED"
+
+
+async def test_workflow_can_render_english_evidence_as_a_grounded_chinese_answer() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = str(uuid5(run_id, str(evidence.chunk_id)))
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator(
+            f"Agent workflows must remain bounded. [{citation_id}]"
+        ),
+        claim_support_verifier=RecordingClaimSupportVerifier(
+            ClaimSupportDecision(
+                claims=(
+                    GroundedClaim(
+                        text="Agent 工作流必须保持有界。",
+                        citation_ids=(citation_id,),
+                    ),
+                )
+            )
+        ),
+        citation_repairer=UnusedCitationRepairer(),
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(run_id, uuid4(), "Agent 工作流必须满足什么约束?", ())
+        )
+    ]
+
+    assert evidence.text == "Agent workflows must remain bounded."
+    assert events[-1].type == "answered"
+    assert events[-1].answer == f"Agent 工作流必须保持有界。 [{citation_id}]"
+
+
 async def test_workflow_stops_when_cancellation_is_seen_between_nodes() -> None:
     evidence = _evidence()
     control = CancellingRunControl([False, False, True])

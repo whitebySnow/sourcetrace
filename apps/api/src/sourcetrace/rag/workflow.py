@@ -14,6 +14,7 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
     RetrievedEvidence,
 )
+from sourcetrace.rag.language import answer_matches_question_language
 from sourcetrace.rag.ports import (
     AnswerGenerator,
     CitationRepairer,
@@ -301,6 +302,7 @@ class _WorkflowState(TypedDict, total=False):
     answer: str
     claim_support_valid: bool
     citation_valid: bool
+    answer_language_valid: bool
     repair_attempts: int
     refusal_code: str
     refusal_message: str
@@ -343,6 +345,7 @@ class AnswerWorkflow:
         graph.add_node("claim_support_validation", self._validate_claim_support)
         graph.add_node("citation_validation", self._validate_citations)
         graph.add_node("citation_repair", self._repair_citations)
+        graph.add_node("answer_language_validation", self._validate_answer_language)
         graph.add_node("answer", self._answer)
         graph.add_node("refusal", self._refuse)
         graph.add_edge(START, "analysis")
@@ -363,7 +366,7 @@ class AnswerWorkflow:
             "citation_validation",
             self._after_validation,
             {
-                "answer": "answer",
+                "language": "answer_language_validation",
                 "repair": "citation_repair",
                 "support": "claim_support_validation",
                 "refuse": "refusal",
@@ -375,6 +378,11 @@ class AnswerWorkflow:
             {"validate": "citation_validation", "refuse": "refusal"},
         )
         graph.add_edge("citation_repair", "citation_validation")
+        graph.add_conditional_edges(
+            "answer_language_validation",
+            self._after_answer_language_validation,
+            {"answer": "answer", "refuse": "refusal"},
+        )
         graph.add_edge("answer", END)
         graph.add_edge("refusal", END)
         self._graph = graph.compile(name="bounded-answer-workflow")
@@ -637,6 +645,19 @@ class AnswerWorkflow:
             workflow_trace=trace,
         )
 
+    async def _validate_answer_language(self, state: _WorkflowState) -> _WorkflowState:
+        await self._ensure_active(state["run_id"])
+        if answer_matches_question_language(
+            question=state["question"],
+            answer=state["answer"],
+        ):
+            return _WorkflowState(answer_language_valid=True)
+        return self._refusal_state(
+            "ANSWER_LANGUAGE_VALIDATION_FAILED",
+            "The generated answer did not preserve the question language.",
+            trace=state["workflow_trace"],
+        )
+
     async def _answer(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(
@@ -670,16 +691,22 @@ class AnswerWorkflow:
     @staticmethod
     def _after_validation(
         state: _WorkflowState,
-    ) -> Literal["answer", "repair", "refuse", "support"]:
+    ) -> Literal["language", "repair", "refuse", "support"]:
         if state["citation_valid"] and not state.get("claim_support_valid", False):
             return "support"
         if state["citation_valid"]:
-            return "answer"
+            return "language"
         return "refuse" if state["repair_attempts"] >= 1 else "repair"
 
     @staticmethod
     def _after_claim_support(state: _WorkflowState) -> Literal["validate", "refuse"]:
         return "validate" if state.get("claim_support_valid", False) else "refuse"
+
+    @staticmethod
+    def _after_answer_language_validation(
+        state: _WorkflowState,
+    ) -> Literal["answer", "refuse"]:
+        return "answer" if state.get("answer_language_valid", False) else "refuse"
 
     @staticmethod
     def _refusal_state(
