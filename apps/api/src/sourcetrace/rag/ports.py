@@ -28,6 +28,21 @@ class CitationValidationFeedback:
 
 
 @dataclass(frozen=True, slots=True)
+class GroundedClaim:
+    text: str
+    citation_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimSupportDecision:
+    claims: tuple[GroundedClaim, ...]
+
+
+class ClaimSupportValidationError(Exception):
+    """Raised when a claim-support decision cannot be safely used."""
+
+
+@dataclass(frozen=True, slots=True)
 class RetrievalPlanProposal:
     additional_queries: tuple[str, ...]
 
@@ -78,6 +93,16 @@ class CitationRepairer(Protocol):
         evidence: Sequence[RetrievalCandidate],
         validation_feedback: CitationValidationFeedback,
     ) -> str: ...
+
+
+class ClaimSupportVerifier(Protocol):
+    async def verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> ClaimSupportDecision: ...
 
 
 class QuestionPlanner(Protocol):

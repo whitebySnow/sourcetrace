@@ -3,7 +3,7 @@ import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from typing import Literal, Protocol, TypedDict, cast
+from typing import Literal, NoReturn, Protocol, TypedDict, cast
 from uuid import UUID, uuid5
 
 from langgraph.config import get_stream_writer
@@ -18,6 +18,8 @@ from sourcetrace.rag.ports import (
     AnswerGenerator,
     CitationRepairer,
     CitationValidationFeedback,
+    ClaimSupportValidationError,
+    ClaimSupportVerifier,
     EvidenceAssessor,
     RetrievalCandidate,
 )
@@ -26,6 +28,23 @@ _CITATION_LABEL = re.compile(
     r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
 )
+_ANSWER_UNIT_SPLIT = re.compile(
+    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
+)
+
+
+class _FailClosedClaimSupportVerifier:
+    async def verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> NoReturn:
+        raise ClaimSupportValidationError
+
+
+_FAIL_CLOSED_CLAIM_SUPPORT_VERIFIER = _FailClosedClaimSupportVerifier()
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +299,7 @@ class _WorkflowState(TypedDict, total=False):
     selected_evidence: list[RetrievedEvidence]
     cited_evidence: list[RetrievedEvidence]
     answer: str
+    claim_support_valid: bool
     citation_valid: bool
     repair_attempts: int
     refusal_code: str
@@ -298,6 +318,7 @@ class AnswerWorkflow:
         run_control: WorkflowRunControl,
         minimum_score: float,
         minimum_evidence: int,
+        claim_support_verifier: ClaimSupportVerifier = _FAIL_CLOSED_CLAIM_SUPPORT_VERIFIER,
     ) -> None:
         if not -1.0 <= minimum_score <= 1.0:
             raise ValueError("minimum retrieval score must be between -1 and 1")
@@ -306,6 +327,7 @@ class AnswerWorkflow:
         self._retrieval = retrieval
         self._assessor = assessor
         self._generator = generator
+        self._claim_support_verifier = claim_support_verifier
         self._citation_repairer = citation_repairer
         self._run_control = run_control
         self._minimum_score = minimum_score
@@ -318,6 +340,7 @@ class AnswerWorkflow:
         graph.add_node("evidence_assessment", self._assess)
         graph.add_node("supplemental_retrieval", self._retrieve_supplemental)
         graph.add_node("generation", self._generate)
+        graph.add_node("claim_support_validation", self._validate_claim_support)
         graph.add_node("citation_validation", self._validate_citations)
         graph.add_node("citation_repair", self._repair_citations)
         graph.add_node("answer", self._answer)
@@ -339,7 +362,17 @@ class AnswerWorkflow:
         graph.add_conditional_edges(
             "citation_validation",
             self._after_validation,
-            {"answer": "answer", "repair": "citation_repair", "refuse": "refusal"},
+            {
+                "answer": "answer",
+                "repair": "citation_repair",
+                "support": "claim_support_validation",
+                "refuse": "refusal",
+            },
+        )
+        graph.add_conditional_edges(
+            "claim_support_validation",
+            self._after_claim_support,
+            {"validate": "citation_validation", "refuse": "refusal"},
         )
         graph.add_edge("citation_repair", "citation_validation")
         graph.add_edge("answer", END)
@@ -529,6 +562,51 @@ class AnswerWorkflow:
             workflow_trace=trace,
         )
 
+    async def _validate_claim_support(self, state: _WorkflowState) -> _WorkflowState:
+        await self._ensure_active(state["run_id"])
+        get_stream_writer()(WorkflowStatus(stage="validating"))
+        candidates = self._candidates(state["run_id"], state["selected_evidence"])
+        try:
+            decision = await self._claim_support_verifier.verify(
+                question=state["question"],
+                answer=state["answer"],
+                evidence=candidates,
+            )
+        except ClaimSupportValidationError:
+            return self._refusal_state(
+                "CLAIM_SUPPORT_VALIDATION_FAILED",
+                "The generated answer included a claim not supported by the evidence.",
+                trace=state["workflow_trace"],
+            )
+        allowed = {item.citation_id for item in candidates}
+        rendered: list[str] = []
+        for claim in decision.claims:
+            text = _CITATION_LABEL.sub("", claim.text).strip()
+            citation_ids = tuple(dict.fromkeys(claim.citation_ids))
+            if (
+                not text
+                or not citation_ids
+                or any(item not in allowed for item in citation_ids)
+            ):
+                return self._refusal_state(
+                    "CLAIM_SUPPORT_VALIDATION_FAILED",
+                    "The generated answer included a claim not supported by the evidence.",
+                    trace=state["workflow_trace"],
+            )
+            labels = " ".join(f"[{item}]" for item in citation_ids)
+            units = [unit.strip() for unit in _ANSWER_UNIT_SPLIT.split(text) if unit.strip()]
+            rendered.extend(f"{unit} {labels}" for unit in units)
+        if not rendered:
+            return self._refusal_state(
+                "CLAIM_SUPPORT_VALIDATION_FAILED",
+                "The generated answer included a claim not supported by the evidence.",
+                trace=state["workflow_trace"],
+            )
+        return _WorkflowState(
+            answer="\n".join(rendered),
+            claim_support_valid=True,
+        )
+
     async def _repair_citations(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="repairing"))
@@ -554,6 +632,7 @@ class AnswerWorkflow:
         )
         return _WorkflowState(
             answer=repaired.strip(),
+            claim_support_valid=False,
             repair_attempts=1,
             workflow_trace=trace,
         )
@@ -591,10 +670,16 @@ class AnswerWorkflow:
     @staticmethod
     def _after_validation(
         state: _WorkflowState,
-    ) -> Literal["answer", "repair", "refuse"]:
+    ) -> Literal["answer", "repair", "refuse", "support"]:
+        if state["citation_valid"] and not state.get("claim_support_valid", False):
+            return "support"
         if state["citation_valid"]:
             return "answer"
         return "refuse" if state["repair_attempts"] >= 1 else "repair"
+
+    @staticmethod
+    def _after_claim_support(state: _WorkflowState) -> Literal["validate", "refuse"]:
+        return "validate" if state.get("claim_support_valid", False) else "refuse"
 
     @staticmethod
     def _refusal_state(
@@ -701,10 +786,7 @@ class AnswerWorkflow:
             )
         units = [
             unit.strip()
-            for unit in re.split(
-                r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+",
-                answer,
-            )
+            for unit in _ANSWER_UNIT_SPLIT.split(answer)
             if unit.strip()
         ]
         if not units:

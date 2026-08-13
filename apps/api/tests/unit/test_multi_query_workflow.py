@@ -11,7 +11,7 @@ from sourcetrace.modules.retrieval.service import (
 )
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowRequest, WorkflowTrace
-from tests.helpers import PreserveOrderReranker
+from tests.helpers import CitationPreservingClaimSupportVerifier, PreserveOrderReranker
 
 
 def _evidence() -> RetrievedEvidence:
@@ -228,6 +228,7 @@ async def test_one_unique_supplemental_query_creates_one_more_fusion_round() -> 
         retrieval=retrieval,
         assessor=assessor,
         generator=StaticGenerator(f"Supported answer [{citation_id}]"),
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
         citation_repairer=UnusedRepairer(),
         run_control=control,
         minimum_score=0.5,
@@ -281,6 +282,7 @@ async def test_two_missing_evidence_slots_share_one_supplemental_round() -> None
         retrieval=retrieval,
         assessor=assessor,
         generator=StaticGenerator(f"Supported answer [{citation_id}]"),
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
         citation_repairer=UnusedRepairer(),
         run_control=ActiveControl(),
         minimum_score=0.5,

@@ -12,6 +12,7 @@ from starlette.types import Message, Scope
 from sourcetrace.api.dependencies import (
     get_answer_generator,
     get_citation_repairer,
+    get_claim_support_verifier,
     get_document_source_storage,
     get_evidence_assessor,
     get_query_embedding_provider,
@@ -29,11 +30,14 @@ from sourcetrace.modules.documents.repository import DocumentRepository
 from sourcetrace.modules.documents.service import DocumentService
 from sourcetrace.modules.documents.storage import LocalDocumentStorage
 from sourcetrace.rag.ports import (
+    ClaimSupportDecision,
+    ClaimSupportValidationError,
     EvidenceDecision,
+    GroundedClaim,
     RetrievalCandidate,
     RetrievalPlanProposal,
 )
-from tests.helpers import PreserveOrderReranker
+from tests.helpers import CitationPreservingClaimSupportVerifier, PreserveOrderReranker
 
 
 class QueryEmbeddingProvider:
@@ -80,6 +84,19 @@ class UncitedAnswerGenerator:
 
     async def _stream(self) -> AsyncIterator[str]:
         yield "Vectors are normalized, but this response omits its citation label."
+
+
+class CitedDraftAnswerGenerator:
+    def stream_answer(
+        self,
+        *,
+        evidence: Sequence[RetrievalCandidate],
+        **kwargs: object,
+    ) -> AsyncIterator[str]:
+        return self._stream(evidence[0].citation_id)
+
+    async def _stream(self, citation_id: str) -> AsyncIterator[str]:
+        yield f"Over-broad draft claim [{citation_id}]"
 
 
 class MixedCitationAnswerGenerator:
@@ -149,11 +166,37 @@ class NoOpCitationRepairer:
         return answer
 
 
+class RewritingClaimSupportVerifier:
+    async def verify(
+        self,
+        *,
+        evidence: Sequence[RetrievalCandidate],
+        **kwargs: object,
+    ) -> ClaimSupportDecision:
+        citation_id = evidence[0].citation_id
+        return ClaimSupportDecision(
+            claims=(
+                GroundedClaim(
+                    text="Vectors are normalized before storage.",
+                    citation_ids=(citation_id,),
+                ),
+            )
+        )
+
+
+class InvalidClaimSupportVerifier:
+    async def verify(self, **kwargs: object) -> ClaimSupportDecision:
+        raise ClaimSupportValidationError
+
+
 def _answer_app():
     app = create_app()
     app.dependency_overrides[get_question_planner] = NoAdditionalQueryPlanner
     app.dependency_overrides[get_evidence_assessor] = SelectingAllEvidenceAssessor
     app.dependency_overrides[get_citation_repairer] = NoOpCitationRepairer
+    app.dependency_overrides[
+        get_claim_support_verifier
+    ] = CitationPreservingClaimSupportVerifier
     app.dependency_overrides[get_reranker] = PreserveOrderReranker
     return app
 
@@ -422,11 +465,11 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["answer"] == final["answer"]
         assert persisted["llm_provider"] == "openai-compatible"
         assert persisted["llm_model"] == get_settings().llm_model
-        assert persisted["prompt_version"] == "grounded-answer-v4"
+        assert persisted["prompt_version"] == get_settings().llm_prompt_version
         assert persisted["retrieval_version"] == get_settings().retrieval_config_version
         assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v4")
         assert persisted["citation_repair_prompt_version"] == "citation-repair-v6"
-        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v3"
+        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v4"
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
         assert trace["retrieval_plan_version"] == "two-stage-evidence-slots-v6"
@@ -722,6 +765,89 @@ async def test_follow_up_answer_uses_question_language_and_preserves_source_text
     citations = final[1]["citations"]
     assert isinstance(citations, list)
     assert citations[0]["excerpt"] == "Vectors are normalized before storage."
+
+
+async def test_claim_support_verifier_rewrites_answer_before_it_is_persisted(
+    session: AsyncSession,
+) -> None:
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app = _answer_app()
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
+    app.dependency_overrides[get_answer_generator] = CitedDraftAnswerGenerator
+    app.dependency_overrides[get_claim_support_verifier] = RewritingClaimSupportVerifier
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        knowledge_base_response = await client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "Claim support validation"},
+        )
+        knowledge_base_id = knowledge_base_response.json()["id"]
+        conversation_response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations",
+            json={"title": "Scope rewrite"},
+        )
+        conversation_id = conversation_response.json()["id"]
+        await _create_searchable_evidence(session, UUID(knowledge_base_id))
+
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers",
+            json={"content": "How are vectors stored?"},
+        )
+
+    final = _events(response.text)[-1]
+    assert final[0] == "final"
+    assert str(final[1]["answer"]).startswith("Vectors are normalized before storage. [")
+    assert len(final[1]["citations"]) == 1
+
+
+async def test_invalid_claim_support_decision_is_refused_and_persisted(
+    session: AsyncSession,
+) -> None:
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app = _answer_app()
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
+    app.dependency_overrides[get_answer_generator] = CitedDraftAnswerGenerator
+    app.dependency_overrides[get_claim_support_verifier] = InvalidClaimSupportVerifier
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        knowledge_base = await client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "Invalid claim support"},
+        )
+        knowledge_base_id = knowledge_base.json()["id"]
+        conversation = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations",
+            json={"title": "Invalid decision"},
+        )
+        conversation_id = conversation.json()["id"]
+        await _create_searchable_evidence(session, UUID(knowledge_base_id))
+
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers",
+            json={"content": "How are vectors stored?"},
+        )
+        history = await client.get(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers"
+        )
+
+    events = _events(response.text)
+    assert events[-1][0] == "refusal"
+    assert events[-1][1]["code"] == "CLAIM_SUPPORT_VALIDATION_FAILED"
+    persisted = history.json()["items"][0]
+    assert persisted["status"] == "completed"
+    assert persisted["outcome"] == "refused"
+    assert persisted["refusal_code"] == "CLAIM_SUPPORT_VALIDATION_FAILED"
+    assert persisted["answer"] is None
 
 
 async def test_insufficient_evidence_is_refused_and_persisted(

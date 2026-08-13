@@ -28,6 +28,7 @@ from sourcetrace.rag.embeddings import BgeM3EmbeddingProvider, EmbeddingConfig
 from sourcetrace.rag.llm import (
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleCitationRepairer,
+    OpenAICompatibleClaimSupportVerifier,
     OpenAICompatibleConfig,
     OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionPlanner,
@@ -35,6 +36,7 @@ from sourcetrace.rag.llm import (
 from sourcetrace.rag.ports import (
     AnswerGenerator,
     CitationRepairer,
+    ClaimSupportVerifier,
     EmbeddingProvider,
     EvidenceAssessor,
     QuestionPlanner,
@@ -183,6 +185,15 @@ async def get_citation_repairer() -> AsyncIterator[CitationRepairer]:
         )
 
 
+async def get_claim_support_verifier() -> AsyncIterator[ClaimSupportVerifier]:
+    settings = get_settings()
+    async with httpx.AsyncClient() as client:
+        yield OpenAICompatibleClaimSupportVerifier(
+            _openai_compatible_config(prompt_version=settings.llm_prompt_version),
+            client=client,
+        )
+
+
 def get_answer_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     conversations: Annotated[
@@ -198,6 +209,9 @@ def get_answer_service(
     question_planner: Annotated[QuestionPlanner, Depends(get_question_planner)],
     evidence_assessor: Annotated[EvidenceAssessor, Depends(get_evidence_assessor)],
     citation_repairer: Annotated[CitationRepairer, Depends(get_citation_repairer)],
+    claim_support_verifier: Annotated[
+        ClaimSupportVerifier, Depends(get_claim_support_verifier)
+    ],
 ) -> AnswerService:
     settings = get_settings()
     repository = AnswerRepository(session)
@@ -220,6 +234,7 @@ def get_answer_service(
             retrieval=retrieval,
             assessor=evidence_assessor,
             generator=generator,
+            claim_support_verifier=claim_support_verifier,
             citation_repairer=citation_repairer,
             run_control=AnswerWorkflowRunControl(repository),
             minimum_score=settings.retrieval_minimum_score,

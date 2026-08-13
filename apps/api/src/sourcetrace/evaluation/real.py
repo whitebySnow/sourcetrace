@@ -16,6 +16,7 @@ from sourcetrace.rag.embeddings import BgeM3EmbeddingProvider, EmbeddingConfig
 from sourcetrace.rag.llm import (
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleCitationRepairer,
+    OpenAICompatibleClaimSupportVerifier,
     OpenAICompatibleConfig,
     OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionPlanner,
@@ -141,6 +142,10 @@ async def run_real_evaluation(
                     client=client,
                 ),
                 generator=OpenAICompatibleAnswerGenerator(
+                    _llm_config(settings, prompt_version=settings.llm_prompt_version),
+                    client=client,
+                ),
+                claim_support_verifier=OpenAICompatibleClaimSupportVerifier(
                     _llm_config(settings, prompt_version=settings.llm_prompt_version),
                     client=client,
                 ),

@@ -11,11 +11,16 @@ from sourcetrace.rag.llm import (
     LlmProviderError,
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleCitationRepairer,
+    OpenAICompatibleClaimSupportVerifier,
     OpenAICompatibleConfig,
     OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionPlanner,
 )
-from sourcetrace.rag.ports import CitationValidationFeedback, RetrievalCandidate
+from sourcetrace.rag.ports import (
+    CitationValidationFeedback,
+    ClaimSupportValidationError,
+    RetrievalCandidate,
+)
 
 
 class RecordingResponseStream(httpx.AsyncByteStream):
@@ -1979,6 +1984,121 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     serialized_user_message = payload["messages"][1]["content"]
     assert '"uncited_unit_indices": [0]' in serialized_user_message
     assert "headings" in payload["messages"][0]["content"]
+
+
+async def test_claim_support_verifier_preserves_evidence_qualifiers() -> None:
+    captured: dict[str, object] = {}
+    evidence = [
+        RetrievalCandidate(
+            chunk_id="rag-results",
+            content=(
+                "RAG models achieve state-of-the-art results on Natural Questions, "
+                "WebQuestions and CuratedTrec and strongly outperform recent approaches "
+                "using specialised pre-training objectives on TriviaQA."
+            ),
+            score=0.9,
+            citation_id="citation-1",
+        )
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": (
+                                                "RAG achieved state-of-the-art results on "
+                                                "Natural Questions, WebQuestions, and CuratedTREC."
+                                            ),
+                                            "citation_ids": ["citation-1"],
+                                        },
+                                        {
+                                            "text": (
+                                                "On TriviaQA, RAG strongly outperformed approaches "
+                                                "using specialized pre-training objectives."
+                                            ),
+                                            "citation_ids": ["citation-1"],
+                                        },
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        verifier = OpenAICompatibleClaimSupportVerifier(_config(), client=client)
+        decision = await verifier.verify(
+            question="RAG reported leading results on which open-domain QA datasets?",
+            answer=(
+                "RAG achieved state-of-the-art results on Natural Questions, TriviaQA, "
+                "WebQuestions, and CuratedTREC [citation-1]."
+            ),
+            evidence=evidence,
+        )
+
+    assert [claim.text for claim in decision.claims] == [
+        (
+            "RAG achieved state-of-the-art results on Natural Questions, WebQuestions, "
+            "and CuratedTREC."
+        ),
+        (
+            "On TriviaQA, RAG strongly outperformed approaches using specialized "
+            "pre-training objectives."
+        ),
+    ]
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    system_prompt = payload["messages"][0]["content"]
+    assert "never strengthen" in system_prompt
+    assert "outperforming a named baseline into state-of-the-art" in system_prompt
+    assert "Split a mixed claim" in system_prompt
+
+
+async def test_claim_support_verifier_rejects_unknown_citation_safely() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "Private unsupported expansion",
+                                            "citation_ids": ["unknown-private-id"],
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        verifier = OpenAICompatibleClaimSupportVerifier(_config(), client=client)
+        with pytest.raises(ClaimSupportValidationError):
+            await verifier.verify(
+                question="Question",
+                answer="Draft [citation-1]",
+                evidence=_evidence(),
+            )
+
 
 
 async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> None:

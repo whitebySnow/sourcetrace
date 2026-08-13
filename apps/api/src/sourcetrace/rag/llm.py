@@ -9,7 +9,10 @@ import httpx
 
 from sourcetrace.rag.ports import (
     CitationValidationFeedback,
+    ClaimSupportDecision,
+    ClaimSupportValidationError,
     EvidenceDecision,
+    GroundedClaim,
     RetrievalCandidate,
     RetrievalPlanProposal,
 )
@@ -332,6 +335,46 @@ def _citation_repair_prompt(
                             "citation_id": item.citation_id,
                             "content": item.content,
                         }
+                        for item in evidence
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def _claim_support_prompt(
+    question: str,
+    answer: str,
+    evidence: Sequence[RetrievalCandidate],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Check each factual claim in the draft against only the supplied evidence. "
+                "Preserve distinctions and qualifiers from the evidence; never strengthen "
+                "outperforming a named baseline into state-of-the-art, best, all, always, or "
+                "similar stronger wording. Split a mixed claim when the evidence supports its "
+                "parts with different qualifiers. Rewrite unsupported or over-broad claims into "
+                "the narrowest evidence-supported wording, or omit them. Return JSON with exactly "
+                "one array field named claims. Each claim must contain exactly text and "
+                "citation_ids. "
+                "Every claim must be non-empty and cite one or more supplied IDs copied verbatim. "
+                "Keep the question language and do not add outside knowledge. "
+                'EXAMPLE JSON OUTPUT: {"claims":[{"text":"Supported claim",'
+                '"citation_ids":["citation-id"]}]}'
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": question,
+                    "draft_answer": answer,
+                    "evidence": [
+                        {"citation_id": item.citation_id, "content": item.content}
                         for item in evidence
                     ],
                 },
@@ -1131,3 +1174,51 @@ class OpenAICompatibleCitationRepairer:
             return "\n".join(rendered)
         except (KeyError, TypeError) as error:
             raise _CitationRepairValidationError("citation_repair_invalid_claims") from error
+
+
+class OpenAICompatibleClaimSupportVerifier:
+    def __init__(
+        self,
+        config: OpenAICompatibleConfig,
+        *,
+        client: httpx.AsyncClient,
+    ) -> None:
+        self.config = config
+        self._client = client
+
+    async def verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> ClaimSupportDecision:
+        parsed = await _structured_completion(
+            self.config,
+            self._client,
+            _claim_support_prompt(question, answer, evidence),
+        )
+        try:
+            if set(parsed) != {"claims"}:
+                raise ValueError
+            claims = parsed["claims"]
+            allowed = {item.citation_id for item in evidence}
+            if not isinstance(claims, list) or not claims:
+                raise ValueError
+            result: list[GroundedClaim] = []
+            for claim in claims:
+                if not isinstance(claim, dict) or set(claim) != {"text", "citation_ids"}:
+                    raise ValueError
+                text = claim["text"]
+                citation_ids = claim["citation_ids"]
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError
+                if not isinstance(citation_ids, list) or not citation_ids:
+                    raise ValueError
+                normalized_ids = tuple(dict.fromkeys(citation_ids))
+                if any(not isinstance(item, str) or item not in allowed for item in normalized_ids):
+                    raise ValueError
+                result.append(GroundedClaim(text=text.strip(), citation_ids=normalized_ids))
+            return ClaimSupportDecision(claims=tuple(result))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ClaimSupportValidationError from error
