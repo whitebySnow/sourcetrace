@@ -2509,6 +2509,21 @@
       },
       "WorkflowCitationValidationTrace": {
         "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "initial",
+                  "repair"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
           "valid": {
             "type": "boolean",
             "title": "Valid"
@@ -2522,6 +2537,32 @@
               "valid"
             ],
             "title": "Issue"
+          },
+          "unit_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unit Count",
+            "default": 0
+          },
+          "citation_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Citation Count",
+            "default": 0
+          },
+          "uncited_unit_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Uncited Unit Indices"
+          },
+          "unknown_label_unit_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Unknown Label Unit Indices"
           }
         },
         "type": "object",
