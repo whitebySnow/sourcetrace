@@ -17,7 +17,7 @@ def test_reviewed_agentic_rag_dataset_is_versioned_and_complete() -> None:
     )
 
     assert dataset.dataset_id == "agentic-rag-foundations"
-    assert dataset.dataset_version == "1.1.0"
+    assert dataset.dataset_version == "1.2.0"
     assert dataset.review.status == "reviewed"
     assert len(dataset.document_version_ids) == 3
     assert len(dataset.cases) == 30
@@ -43,6 +43,27 @@ def test_reviewed_agentic_rag_dataset_is_versioned_and_complete() -> None:
         1,
         1,
     ]
+
+    approved_case_ids = {
+        "ARF-001",
+        "ARF-004",
+        "ARF-008",
+        "ARF-012",
+        "ARF-013",
+        "ARF-015",
+        "ARF-018",
+        "ARF-025",
+    }
+    cases_by_id = {case.id: case for case in dataset.cases}
+    for case_id in approved_case_ids:
+        evidence = cases_by_id[case_id].expected.evidence
+        assert all(item.claim_id is not None for item in evidence)
+        assert any(item.approved_alternatives for item in evidence)
+
+    assert all(
+        not item.approved_alternatives
+        for item in cases_by_id["ARF-006"].expected.evidence
+    )
 
 
 def test_reviewed_dataset_loads_with_versioned_ground_truth(tmp_path) -> None:

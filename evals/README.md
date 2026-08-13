@@ -17,6 +17,8 @@ case 也因此能在文档更新后稳定重放。
 `evals/datasets/` 中符合 Schema 的正式数据集。当前
 `datasets/agentic-rag-foundations-v1.json` 已完成 30 条逐项审核，固定三篇论文版本并覆盖
 direct、multi_chunk、unanswerable 和 confusing 四类样本；其中不可回答样本的 evidence 为空。
+`reviews/` 保存改变评测真值的人工审核依据，必须绑定源报告 SHA-256，并逐声明记录规范证据、
+候选证据和明确决定；它是审计记录，不参与运行时评分，也不能代替 `judgments/`。
 
 ## 离线重放
 
