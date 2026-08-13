@@ -30,6 +30,10 @@ class AnswerRepository:
         evidence_assessment_prompt_version: str,
         citation_repair_prompt_version: str,
         workflow_version: str,
+        provider_connect_timeout_seconds: float,
+        provider_read_timeout_seconds: float,
+        provider_request_timeout_seconds: float,
+        provider_operation_deadline_seconds: float,
     ) -> AnswerRun:
         run = AnswerRun(
             question_id=question.id,
@@ -45,6 +49,10 @@ class AnswerRepository:
             evidence_assessment_prompt_version=evidence_assessment_prompt_version,
             citation_repair_prompt_version=citation_repair_prompt_version,
             workflow_version=workflow_version,
+            provider_connect_timeout_seconds=provider_connect_timeout_seconds,
+            provider_read_timeout_seconds=provider_read_timeout_seconds,
+            provider_request_timeout_seconds=provider_request_timeout_seconds,
+            provider_operation_deadline_seconds=provider_operation_deadline_seconds,
             workflow_trace={
                 "retrieval_plan_version": None,
                 "retrieval_queries": [],

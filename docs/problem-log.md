@@ -543,3 +543,30 @@ state-of-the-art 与 TriviaQA 的特定基线优势。供应商契约 fake 验�
 形成目标语言声明，原有声明支持度、Citation 和 Refusal 门禁保持不变。语言字符集匹配不代表
 翻译或事实正确。供应商流式 delta 在终态校验前仍是临时界面内容，只有通过全部门禁的最终答案
 可以持久化。本修复只使用确定性 fake 和 HTTP mock，不调用真实供应商，也不改写历史评测结果。
+
+## 28. 单一供应商 timeout 使有界重试不可达
+
+**症状**：2026-08-14 在提交 `cfdc08b` 上启动 Dataset 1.2.0 的 30 题 DeepSeek 官方真实回归。
+运行约 18 分钟后，一个 Evidence Assessment 非流式请求超过 60 秒，整轮以
+`provider_request_timeout` 终止且未生成 Report。该失败属于基础设施错误，未计入 RAG 指标，
+也没有复用旧 judgment。
+
+**根因**：适配器虽然为结构化调用声明最多两次尝试，却用同一个 60 秒
+`asyncio.timeout` 包裹整个循环，同时又把每次 HTTP 请求 timeout 设为 60 秒。第一次请求耗尽
+单次 timeout 时也耗尽整个 operation deadline，因此内层 retry 分支没有剩余时间执行。
+
+**修复**：OpenAI-compatible 配置拆分为 connect、read、单次 request lifecycle 和 operation
+deadline，默认分别为 10、120、180 和 361 秒。配置构造时验证所有值为正、connect/read 不超过
+单次 lifecycle，且总 deadline 至少容纳两次单次请求和固定退避。流式和非流式路径共用显式
+`httpx.Timeout`；单次 lifecycle 继续由 `asyncio.timeout` 硬限制。结构化请求首次 timeout 可在
+总预算内重试一次；流式路径已有正文后仍禁止重试。真实 Evaluation Report metadata 新增四项
+timeout 值，保证后续报告可重放。
+
+**验证边界**：HTTP MockTransport 首次延迟超过单次 lifecycle、第二次立即返回，修复前因配置
+缺少独立预算而失败，修复后恰好两次请求并成功；重复 timeout 仍恰好两次后安全映射为
+`LLM_TIMEOUT`，keep-alive-only 流仍受 operation deadline 限制。本 Issue 不重新调用真实供应商；
+Dataset 1.2.0 的完整回归在修复合并后回到 Issue #67 单独授权执行。
+
+该 timeout 契约改变 Answer Run 的可重放供应商行为，工作流版本同步升级为
+`langgraph-bounded-multi-query-v6`。四项实际 timeout 同时写入新的在线 Answer Run；旧 Run
+保持 `null/unknown`，因为旧单一 timeout 可由环境覆盖，不能从默认 60 秒反推每次运行的实际值。

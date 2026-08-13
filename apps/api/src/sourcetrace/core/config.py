@@ -41,7 +41,10 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.example.com/v1"
     llm_api_key: SecretStr | None = None
     llm_model: str = "deepseek-v4-flash"
-    llm_timeout_seconds: float = Field(default=60, gt=0)
+    llm_connect_timeout_seconds: float = Field(default=10, gt=0)
+    llm_read_timeout_seconds: float = Field(default=120, gt=0)
+    llm_request_timeout_seconds: float = Field(default=180, gt=0)
+    llm_operation_deadline_seconds: float = Field(default=361, gt=0)
     llm_answer_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
     llm_structured_output_mode: Literal["text", "json_object"] = "json_object"
     llm_structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
@@ -57,7 +60,7 @@ class Settings(BaseSettings):
     retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)
     retrieval_minimum_evidence: int = Field(default=1, ge=1)
     retrieval_config_version: str = "pgvector-hybrid-query-aware-bge-reranker-v7"
-    answer_workflow_version: str = "langgraph-bounded-multi-query-v5"
+    answer_workflow_version: str = "langgraph-bounded-multi-query-v6"
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "BAAI/bge-m3"
     embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"

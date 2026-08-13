@@ -256,11 +256,14 @@ SourceTrace 应在请求前建立明确预算，保证输入、证据和预留�
    但对外仍只暴露安全问题详情。**已解决**：400、401、402 和 422 立即安全失败；429、500、
    503、单次请求超时及网络/协议错误在应用总 deadline 内最多重试一次。流式路径仅在尚未输出
    正文时重试，固定原因不包含供应商响应正文。
-7. 当前单一 timeout 包住完整请求。后续应在不破坏应用总 deadline 的前提下明确 connect/read
-   语义，并为保活和供应商排队设计契约测试。
-8. 当前本地 `LLM_TIMEOUT_SECONDS=60`，而官方说明请求可能通过空行或 SSE 注释保持连接，并在
-   尚未开始推理 10 分钟后才由服务端关闭。SourceTrace 不必等待到官方上限，但必须明确 60 秒是
-   自己的成本与体验 deadline，并避免把仍有保活的排队请求误分类成供应商格式错误。
+7. **已解决**：供应商 timeout 已拆分为 connect、read、单次 request lifecycle 和 operation
+   deadline；后者至少容纳两次单次请求和一次退避。结构化调用第一次 lifecycle timeout 后可
+   进入唯一一次重试；流式调用已有正文后仍禁止重试。
+8. **已解决**：移除单一 `LLM_TIMEOUT_SECONDS=60`，默认采用 10 秒 connect、120 秒 read、
+   180 秒单次 lifecycle 和 361 秒 operation deadline。2026-08-14 的 Dataset 1.2.0 真实回归
+   在旧配置下复现 Evidence Assessment 首次 60 秒 timeout 耗尽总预算、声明的第二次请求不可达；
+   修复后用确定性 HTTP fake 锁定该路径。默认值是 SourceTrace 的成本与体验判断，不代表
+   DeepSeek 官方上限。
 
 ## 推荐实施顺序
 
@@ -272,7 +275,7 @@ SourceTrace 应在请求前建立明确预算，保证输入、证据和预留�
    示例，保持非空、解码和 Schema 三重验证，并为结构化输出设置可配置的有限预算。
 4. **补齐流式契约测试（已完成）**：覆盖 keep-alive、`finish_reason=null`、usage 空 choice、
    reasoning content、五类终态、`[DONE]` 前断连、输出前后断连及终态后异常正文。
-5. **再运行真实评测**：确认供应商异常不会被错误计入 RAG 指标；报告保存安全失败分类和尝试次数，
+5. **再运行真实评测**：确认供应商异常不会被错误计入 RAG 指标；报告保存 timeout 配置与安全失败分类，
    不保存密钥或被拒绝的响应正文。
 
 建议的供应商 contract fake 测试至少覆盖：

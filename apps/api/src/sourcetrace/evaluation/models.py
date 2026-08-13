@@ -254,6 +254,10 @@ class EvaluationRunMetadata(StrictModel):
     question_rewrite_prompt_version: str = Field(min_length=1)
     evidence_assessment_prompt_version: str = Field(min_length=1)
     citation_repair_prompt_version: str = Field(min_length=1)
+    provider_connect_timeout_seconds: float | None = Field(default=None, gt=0)
+    provider_read_timeout_seconds: float | None = Field(default=None, gt=0)
+    provider_request_timeout_seconds: float | None = Field(default=None, gt=0)
+    provider_operation_deadline_seconds: float | None = Field(default=None, gt=0)
 
 
 type EvaluationStatus = Literal["passed", "failed", "pending_review", "not_applicable"]

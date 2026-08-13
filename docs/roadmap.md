@@ -52,8 +52,8 @@
   Cancellation 和重启恢复。
 - 完成用户可独立讲解的代码验收；这属于简历准备，不改变产品功能完成状态。
 
-供应商 connect/read timeout 与应用总 deadline 的拆分属于后续独立改进，不阻塞当前严格拒答
-MVP，但不能与本轮引用稳定性验收混在同一结论中。
+供应商 connect/read、单次 request lifecycle 与应用总 deadline 已拆分并纳入评测 provenance；
+真实供应商回归仍必须作为独立验收步骤，不与 timeout 修复本身混在同一结论中。
 
 ## 暂不实现
 

@@ -116,7 +116,10 @@ def _config(
         base_url="https://gateway.example/v1",
         api_key="test-secret",
         model="gpt-5.6-luna",
-        timeout_seconds=30,
+        connect_timeout_seconds=10,
+        read_timeout_seconds=30,
+        request_timeout_seconds=30,
+        operation_deadline_seconds=61,
         prompt_version="grounded-answer-v1",
         answer_output_thinking=answer_output_thinking,
         structured_output_mode=structured_output_mode,
@@ -129,6 +132,20 @@ async def _collect(stream: AsyncIterator[str]) -> list[str]:
     return [item async for item in stream]
 
 
+def test_provider_config_requires_a_deadline_for_two_attempts() -> None:
+    with pytest.raises(ValueError, match="two requests and retry delay"):
+        OpenAICompatibleConfig(
+            base_url="https://gateway.example/v1",
+            api_key="test-secret",
+            model="deepseek-v4-flash",
+            connect_timeout_seconds=1,
+            read_timeout_seconds=2,
+            request_timeout_seconds=2,
+            operation_deadline_seconds=4,
+            prompt_version="grounded-answer-v1",
+        )
+
+
 async def test_provider_streams_openai_chat_deltas_with_configured_model() -> None:
     captured: dict[str, object] = {}
 
@@ -136,6 +153,7 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
         captured["url"] = str(request.url)
         captured["authorization"] = request.headers["authorization"]
         captured["payload"] = json.loads(request.content)
+        captured["timeout"] = request.extensions["timeout"]
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
@@ -161,6 +179,12 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
     assert deltas == ["Vectors ", "are normalized."]
     assert captured["url"] == "https://gateway.example/v1/chat/completions"
     assert captured["authorization"] == "Bearer test-secret"
+    assert captured["timeout"] == {
+        "connect": 10,
+        "read": 30,
+        "write": 30,
+        "pool": 10,
+    }
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert payload["model"] == "gpt-5.6-luna"
@@ -615,7 +639,10 @@ async def test_provider_times_out_a_keep_alive_only_stream() -> None:
         base_url="https://gateway.example/v1",
         api_key="test-secret",
         model="gpt-5.6-luna",
-        timeout_seconds=0.01,
+        connect_timeout_seconds=0.01,
+        read_timeout_seconds=0.01,
+        request_timeout_seconds=0.01,
+        operation_deadline_seconds=0.2,
         prompt_version="grounded-answer-v1",
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -641,7 +668,10 @@ async def test_evidence_assessor_times_out_a_keep_alive_only_response() -> None:
         base_url="https://gateway.example/v1",
         api_key="test-secret",
         model="gpt-5.6-luna",
-        timeout_seconds=0.01,
+        connect_timeout_seconds=0.01,
+        read_timeout_seconds=0.01,
+        request_timeout_seconds=0.01,
+        operation_deadline_seconds=0.2,
         prompt_version="evidence-assessment-v1",
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -934,6 +964,57 @@ async def test_evidence_assessor_stops_after_repeated_request_timeouts() -> None
     assert error.value.code == "LLM_TIMEOUT"
     assert error.value.reason == "provider_request_timeout"
     assert "private" not in str(error.value)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_retries_after_a_request_lifecycle_timeout() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            await asyncio.sleep(0.02)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    config = OpenAICompatibleConfig(
+        base_url="https://gateway.example/v1",
+        api_key="test-secret",
+        model="deepseek-v4-flash",
+        connect_timeout_seconds=0.01,
+        read_timeout_seconds=0.01,
+        request_timeout_seconds=0.01,
+        operation_deadline_seconds=0.2,
+        prompt_version="evidence-assessment-v4",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(config, client=client)
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
     assert attempts == 2
 
 

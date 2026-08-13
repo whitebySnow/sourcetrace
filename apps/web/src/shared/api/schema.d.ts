@@ -367,6 +367,14 @@ export interface components {
             citation_repair_prompt_version: string;
             /** Workflow Version */
             workflow_version: string;
+            /** Provider Connect Timeout Seconds */
+            provider_connect_timeout_seconds: number | null;
+            /** Provider Read Timeout Seconds */
+            provider_read_timeout_seconds: number | null;
+            /** Provider Request Timeout Seconds */
+            provider_request_timeout_seconds: number | null;
+            /** Provider Operation Deadline Seconds */
+            provider_operation_deadline_seconds: number | null;
             workflow_trace: components["schemas"]["AnswerWorkflowTrace"];
             /**
              * Created At

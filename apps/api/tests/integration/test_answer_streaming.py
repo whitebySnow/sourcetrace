@@ -469,7 +469,11 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["retrieval_version"] == get_settings().retrieval_config_version
         assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v4")
         assert persisted["citation_repair_prompt_version"] == "citation-repair-v7"
-        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v5"
+        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v6"
+        assert persisted["provider_connect_timeout_seconds"] == 10
+        assert persisted["provider_read_timeout_seconds"] == 120
+        assert persisted["provider_request_timeout_seconds"] == 180
+        assert persisted["provider_operation_deadline_seconds"] == 361
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
         assert trace["retrieval_plan_version"] == "two-stage-evidence-slots-v6"
@@ -714,6 +718,15 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
     )
     assert current["outcome"] == "refused"
     assert current["answer"] is None
+    prior = next(
+        item
+        for item in history_response.json()["items"]
+        if item["question_content"] == "What is the Moon made of?"
+    )
+    assert prior["provider_connect_timeout_seconds"] is None
+    assert prior["provider_read_timeout_seconds"] is None
+    assert prior["provider_request_timeout_seconds"] is None
+    assert prior["provider_operation_deadline_seconds"] is None
 
 
 async def test_follow_up_answer_uses_question_language_and_preserves_source_text(
@@ -1268,6 +1281,10 @@ async def test_startup_recovery_fails_interrupted_answer_runs(
         evidence_assessment_prompt_version="evidence-assessment-v1",
         citation_repair_prompt_version="citation-repair-v1",
         workflow_version="linear-grounded-v1",
+        provider_connect_timeout_seconds=10,
+        provider_read_timeout_seconds=60,
+        provider_request_timeout_seconds=60,
+        provider_operation_deadline_seconds=121,
     )
     await repository.commit()
 
