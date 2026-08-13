@@ -7,7 +7,11 @@ from typing import Any, Literal
 
 import httpx
 
-from sourcetrace.rag.language import answer_language_instruction
+from sourcetrace.rag.answer_text import split_answer_units
+from sourcetrace.rag.language import (
+    answer_language_instruction,
+    answer_matches_question_language,
+)
 from sourcetrace.rag.ports import (
     CitationValidationFeedback,
     ClaimSupportDecision,
@@ -21,9 +25,6 @@ from sourcetrace.rag.ports import (
 _UUID_CITATION_LABEL = re.compile(
     r"\[[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\]"
-)
-_ANSWER_UNIT_SPLIT = re.compile(
-    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
 )
 _TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 503})
 _PROVIDER_RETRY_DELAY_SECONDS = 0.1
@@ -1099,7 +1100,7 @@ class OpenAICompatibleCitationRepairer:
         empty_citations_retry_used = False
         while True:
             try:
-                return self._render_claims(parsed, evidence)
+                return self._render_claims(parsed, evidence, question)
             except _CitationRepairValidationError as error:
                 if (
                     error.reason == "citation_repair_empty_citations"
@@ -1133,6 +1134,7 @@ class OpenAICompatibleCitationRepairer:
     def _render_claims(
         parsed: dict[str, Any],
         evidence: Sequence[RetrievalCandidate],
+        question: str,
     ) -> str:
         try:
             if set(parsed) != {"claims"}:
@@ -1166,11 +1168,14 @@ class OpenAICompatibleCitationRepairer:
                         "citation_repair_unknown_inline_citation"
                     )
                 normalized_text = _UUID_CITATION_LABEL.sub("", text).strip()
-                units = [
-                    unit.strip()
-                    for unit in _ANSWER_UNIT_SPLIT.split(normalized_text)
-                    if unit.strip()
-                ]
+                if not answer_matches_question_language(
+                    question=question,
+                    answer=normalized_text,
+                ):
+                    raise _CitationRepairValidationError(
+                        "citation_repair_language_mismatch"
+                    )
+                units = split_answer_units(normalized_text)
                 if not units:
                     raise _CitationRepairValidationError("citation_repair_empty_text")
                 labels = " ".join(f"[{item}]" for item in normalized_ids)

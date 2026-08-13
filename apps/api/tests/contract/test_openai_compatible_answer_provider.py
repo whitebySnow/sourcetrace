@@ -2066,6 +2066,44 @@ async def test_citation_repairer_requests_chinese_without_translating_evidence()
     assert "BGE-M3 dense vectors are normalized before indexing." in user_payload
 
 
+async def test_citation_repairer_rejects_english_claims_for_a_chinese_question() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "Vectors are normalized before indexing.",
+                                            "citation_ids": ["citation-1"],
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        with pytest.raises(LlmProviderError) as error:
+            await repairer.repair(
+                question="向量如何存储?",
+                answer="向量会先归一化。",
+                evidence=_evidence(),
+                validation_feedback=_validation_feedback(),
+            )
+
+    assert error.value.reason == "citation_repair_language_mismatch"
+
+
 async def test_claim_support_verifier_preserves_evidence_qualifiers() -> None:
     captured: dict[str, object] = {}
     evidence = [

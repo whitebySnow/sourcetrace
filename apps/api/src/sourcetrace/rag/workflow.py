@@ -14,6 +14,7 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
     RetrievedEvidence,
 )
+from sourcetrace.rag.answer_text import split_answer_units
 from sourcetrace.rag.language import answer_matches_question_language
 from sourcetrace.rag.ports import (
     AnswerGenerator,
@@ -29,11 +30,6 @@ _CITATION_LABEL = re.compile(
     r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
 )
-_ANSWER_UNIT_SPLIT = re.compile(
-    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
-)
-
-
 class _FailClosedClaimSupportVerifier:
     async def verify(
         self,
@@ -602,7 +598,7 @@ class AnswerWorkflow:
                     trace=state["workflow_trace"],
             )
             labels = " ".join(f"[{item}]" for item in citation_ids)
-            units = [unit.strip() for unit in _ANSWER_UNIT_SPLIT.split(text) if unit.strip()]
+            units = split_answer_units(text)
             rendered.extend(f"{unit} {labels}" for unit in units)
         if not rendered:
             return self._refusal_state(
@@ -811,11 +807,7 @@ class AnswerWorkflow:
                 uncited_unit_indices=(),
                 unknown_label_unit_indices=(),
             )
-        units = [
-            unit.strip()
-            for unit in _ANSWER_UNIT_SPLIT.split(answer)
-            if unit.strip()
-        ]
+        units = split_answer_units(answer)
         if not units:
             return CitationValidationTrace(
                 attempt=attempt,

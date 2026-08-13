@@ -32,5 +32,25 @@ def test_english_question_rejects_a_chinese_claim() -> None:
     )
 
 
+def test_english_question_can_quote_a_chinese_term() -> None:
+    question = 'What does "检索" mean?'
+
+    assert "question language is English" in answer_language_instruction(question)
+    assert answer_matches_question_language(
+        question=question,
+        answer='"检索" means retrieval.',
+    )
+
+
+def test_chinese_question_can_contain_multiple_english_terms() -> None:
+    question = "Self-RAG 的 reflection tokens 用来做什么?"
+
+    assert "question language is Chinese" in answer_language_instruction(question)
+    assert answer_matches_question_language(
+        question=question,
+        answer="Self-RAG 使用 reflection tokens。",
+    )
+
+
 def test_symbol_only_question_does_not_guess_a_language() -> None:
     assert answer_matches_question_language(question="???", answer="任意回答")

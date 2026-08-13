@@ -1,32 +1,33 @@
 import re
 from enum import StrEnum
 
+from sourcetrace.rag.answer_text import split_answer_units
+
 _HAN_CHARACTER = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
-_LATIN_CHARACTER = re.compile(r"[A-Za-z]")
+_LATIN_WORD = re.compile(r"[A-Za-z]+(?:[-'][A-Za-z]+)*")
 _CITATION_LABEL = re.compile(
     r"\[[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\]"
 )
-_ANSWER_UNIT_SPLIT = re.compile(
-    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
-)
-
-
 class AnswerLanguage(StrEnum):
     CHINESE = "Chinese"
     ENGLISH = "English"
 
 
-def detect_answer_language(question: str) -> AnswerLanguage | None:
-    if _HAN_CHARACTER.search(question):
+def detect_question_language(question: str) -> AnswerLanguage | None:
+    han_count = len(_HAN_CHARACTER.findall(question))
+    latin_word_count = len(_LATIN_WORD.findall(question))
+    if han_count and han_count > latin_word_count:
         return AnswerLanguage.CHINESE
-    if _LATIN_CHARACTER.search(question):
+    if latin_word_count:
         return AnswerLanguage.ENGLISH
+    if han_count:
+        return AnswerLanguage.CHINESE
     return None
 
 
 def answer_language_instruction(question: str) -> str:
-    language = detect_answer_language(question)
+    language = detect_question_language(question)
     if language is AnswerLanguage.CHINESE:
         return (
             "The question language is Chinese. Write every answer claim in Chinese, even when "
@@ -46,16 +47,13 @@ def answer_language_instruction(question: str) -> str:
 
 
 def answer_matches_question_language(*, question: str, answer: str) -> bool:
-    language = detect_answer_language(question)
+    language = detect_question_language(question)
     if language is None:
         return True
     claim_text = _CITATION_LABEL.sub("", answer)
-    units = [unit.strip() for unit in _ANSWER_UNIT_SPLIT.split(claim_text) if unit.strip()]
+    units = split_answer_units(claim_text)
     if not units:
         return False
     if language is AnswerLanguage.CHINESE:
         return all(_HAN_CHARACTER.search(unit) is not None for unit in units)
-    return all(
-        _LATIN_CHARACTER.search(unit) is not None and _HAN_CHARACTER.search(unit) is None
-        for unit in units
-    )
+    return all(detect_question_language(unit) is AnswerLanguage.ENGLISH for unit in units)
