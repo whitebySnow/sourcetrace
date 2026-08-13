@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "dataset_id": "agentic-rag-foundations",
-  "dataset_version": "1.1.0",
+  "dataset_version": "1.2.0",
   "planner_version": "two-stage-evidence-slots-v5",
   "cases": [
     {

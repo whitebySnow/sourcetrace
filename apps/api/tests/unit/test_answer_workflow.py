@@ -9,7 +9,14 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
     RetrievedEvidence,
 )
-from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
+from sourcetrace.rag.ports import (
+    CitationValidationFeedback,
+    ClaimSupportDecision,
+    ClaimSupportValidationError,
+    EvidenceDecision,
+    GroundedClaim,
+    RetrievalCandidate,
+)
 from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowRequest, WorkflowTrace
 from tests.helpers import PreserveOrderReranker
 
@@ -154,10 +161,44 @@ class RecordingCitationRepairer:
     def __init__(self, repaired_answer: str) -> None:
         self.repaired_answer = repaired_answer
         self.answers: list[str] = []
+        self.validation_feedbacks: list[CitationValidationFeedback] = []
 
     async def repair(self, **kwargs: object) -> str:
         self.answers.append(str(kwargs["answer"]))
+        feedback = kwargs["validation_feedback"]
+        assert isinstance(feedback, CitationValidationFeedback)
+        self.validation_feedbacks.append(feedback)
         return self.repaired_answer
+
+
+class RecordingClaimSupportVerifier:
+    def __init__(self, decision: ClaimSupportDecision) -> None:
+        self.decision = decision
+        self.answers: list[str] = []
+
+    async def verify(self, **kwargs: object) -> ClaimSupportDecision:
+        self.answers.append(str(kwargs["answer"]))
+        return self.decision
+
+
+class CitationPreservingClaimSupportVerifier:
+    async def verify(
+        self,
+        *,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+        **kwargs: object,
+    ) -> ClaimSupportDecision:
+        return ClaimSupportDecision(
+            claims=(
+                GroundedClaim(text=answer, citation_ids=(evidence[0].citation_id,)),
+            )
+        )
+
+
+class RejectingClaimSupportVerifier:
+    async def verify(self, **kwargs: object) -> ClaimSupportDecision:
+        raise ClaimSupportValidationError
 
 
 class ActiveRunControl:
@@ -175,6 +216,181 @@ class ActiveRunControl:
 
     async def is_cancel_requested(self, run_id: UUID) -> bool:
         return False
+
+
+async def test_workflow_rewrites_claims_that_expand_beyond_the_evidence() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = str(uuid5(run_id, str(evidence.chunk_id)))
+    expanded = (
+        "RAG achieved state-of-the-art results on Natural Questions, TriviaQA, "
+        f"WebQuestions, and CuratedTREC [{citation_id}]."
+    )
+    verifier = RecordingClaimSupportVerifier(
+        ClaimSupportDecision(
+            claims=(
+                GroundedClaim(
+                    text=(
+                        "RAG achieved state-of-the-art results on Natural Questions, "
+                        "WebQuestions, and CuratedTREC."
+                    ),
+                    citation_ids=(citation_id,),
+                ),
+                GroundedClaim(
+                    text=(
+                        "On TriviaQA, RAG strongly outperformed approaches using "
+                        "specialized pre-training objectives."
+                    ),
+                    citation_ids=(citation_id,),
+                ),
+            )
+        )
+    )
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator(expanded),
+        claim_support_verifier=verifier,
+        citation_repairer=UnusedCitationRepairer(),
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(
+                run_id,
+                uuid4(),
+                "RAG reported leading results on which open-domain QA datasets?",
+                (),
+            )
+        )
+    ]
+
+    assert verifier.answers == [expanded]
+    assert events[-1].type == "answered"
+    assert "state-of-the-art results on Natural Questions, TriviaQA" not in events[-1].answer
+    assert "state-of-the-art results on Natural Questions, WebQuestions" in events[-1].answer
+    assert "On TriviaQA, RAG strongly outperformed" in events[-1].answer
+
+
+async def test_workflow_cites_each_sentence_in_a_supported_claim() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = str(uuid5(run_id, str(evidence.chunk_id)))
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator(f"Initial supported sentence [{citation_id}]"),
+        claim_support_verifier=RecordingClaimSupportVerifier(
+            ClaimSupportDecision(
+                claims=(
+                    GroundedClaim(
+                        text="First supported sentence. Second supported sentence.",
+                        citation_ids=(citation_id,),
+                    ),
+                )
+            )
+        ),
+        citation_repairer=UnusedCitationRepairer(),
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(run_id, uuid4(), "Question", ())
+        )
+    ]
+
+    assert events[-1].type == "answered"
+    assert events[-1].answer == (
+        f"First supported sentence. [{citation_id}]\n"
+        f"Second supported sentence. [{citation_id}]"
+    )
+
+
+async def test_workflow_refuses_when_no_supported_claim_remains() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = uuid5(run_id, str(evidence.chunk_id))
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator(f"Unsupported expansion [{citation_id}]"),
+        claim_support_verifier=RecordingClaimSupportVerifier(
+            ClaimSupportDecision(claims=())
+        ),
+        citation_repairer=UnusedCitationRepairer(),
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(run_id, uuid4(), "Question", ())
+        )
+    ]
+
+    assert events[-1].type == "refused"
+    assert events[-1].code == "CLAIM_SUPPORT_VALIDATION_FAILED"
+
+
+async def test_workflow_fails_closed_without_a_claim_support_verifier() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = uuid5(run_id, str(evidence.chunk_id))
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator(f"Supported draft [{citation_id}]"),
+        citation_repairer=UnusedCitationRepairer(),
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(run_id, uuid4(), "Question", ())
+        )
+    ]
+
+    assert events[-1].type == "refused"
+    assert events[-1].code == "CLAIM_SUPPORT_VALIDATION_FAILED"
+
+
+async def test_workflow_refuses_an_over_broad_claim_rejected_by_the_verifier() -> None:
+    run_id = uuid4()
+    evidence = _evidence()
+    citation_id = uuid5(run_id, str(evidence.chunk_id))
+    workflow = AnswerWorkflow(
+        retrieval=RecordingRetrieval([evidence]),
+        assessor=SelectingAssessor(evidence.chunk_id),
+        generator=RecordingGenerator(f"TriviaQA reached state-of-the-art [{citation_id}]"),
+        claim_support_verifier=RejectingClaimSupportVerifier(),
+        citation_repairer=UnusedCitationRepairer(),
+        run_control=ActiveRunControl(),
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    events = [
+        event
+        async for event in workflow.run(
+            WorkflowRequest(run_id, uuid4(), "Question", ())
+        )
+    ]
+
+    assert events[-1].type == "refused"
+    assert events[-1].code == "CLAIM_SUPPORT_VALIDATION_FAILED"
 
 
 class CancellingRunControl(ActiveRunControl):
@@ -199,6 +415,7 @@ async def test_workflow_answers_from_only_the_assessor_selected_evidence() -> No
         retrieval=retrieval,
         assessor=SelectingAssessor(selected.chunk_id),
         generator=generator,
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
         citation_repairer=UnusedCitationRepairer(),
         run_control=control,
         minimum_score=0.5,
@@ -226,6 +443,8 @@ async def test_workflow_answers_from_only_the_assessor_selected_evidence() -> No
         "status",
         "status",
         "delta",
+        "status",
+        "status",
         "status",
         "answered",
     ]
@@ -274,6 +493,7 @@ async def test_workflow_performs_only_one_supplemental_retrieval() -> None:
         retrieval=retrieval,
         assessor=assessor,
         generator=generator,
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
         citation_repairer=UnusedCitationRepairer(),
         run_control=control,
         minimum_score=0.5,
@@ -325,6 +545,7 @@ async def test_workflow_repairs_invalid_citations_once_before_answering() -> Non
         retrieval=RecordingRetrieval([evidence]),
         assessor=SelectingAssessor(evidence.chunk_id),
         generator=RecordingGenerator("Bounded workflows prevent unbounded loops"),
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
         citation_repairer=repairer,
         run_control=ActiveRunControl(),
         minimum_score=0.5,
@@ -386,6 +607,7 @@ async def test_workflow_returns_only_evidence_actually_cited_by_the_answer() -> 
         retrieval=RecordingRetrieval([cited, selected_but_uncited]),
         assessor=SelectingManyAssessor([cited.chunk_id, selected_but_uncited.chunk_id]),
         generator=RecordingGenerator(f"Supported statement [{citation_id}]"),
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
         citation_repairer=UnusedCitationRepairer(),
         run_control=ActiveRunControl(),
         minimum_score=0.5,
@@ -462,6 +684,7 @@ async def test_workflow_refuses_when_the_single_citation_repair_is_still_invalid
         retrieval=RecordingRetrieval([evidence]),
         assessor=SelectingAssessor(evidence.chunk_id),
         generator=RecordingGenerator("Initial answer without citation"),
+        claim_support_verifier=CitationPreservingClaimSupportVerifier(),
         citation_repairer=repairer,
         run_control=control,
         minimum_score=0.5,
@@ -479,6 +702,18 @@ async def test_workflow_refuses_when_the_single_citation_repair_is_still_invalid
         "uncited_claim",
         "uncited_claim",
     ]
+    initial, repaired = control.traces[-1].citation_validations
+    assert initial.attempt == "initial"
+    assert repaired.attempt == "repair"
+    assert initial.unit_count == repaired.unit_count == 1
+    assert initial.citation_count == repaired.citation_count == 0
+    assert initial.uncited_unit_indices == repaired.uncited_unit_indices == (0,)
+    assert initial.unknown_label_unit_indices == repaired.unknown_label_unit_indices == ()
+    feedback = repairer.validation_feedbacks[0]
+    assert feedback.issue == "uncited_claim"
+    assert feedback.unit_count == 1
+    assert feedback.uncited_unit_indices == (0,)
+    assert feedback.unknown_label_unit_indices == ()
 
 
 async def test_workflow_rejects_an_assessment_that_selects_unknown_chunks() -> None:

@@ -1,6 +1,11 @@
 from collections.abc import Sequence
 
-from sourcetrace.rag.ports import RerankerIdentity
+from sourcetrace.rag.ports import (
+    ClaimSupportDecision,
+    GroundedClaim,
+    RerankerIdentity,
+    RetrievalCandidate,
+)
 
 
 class PreserveOrderReranker:
@@ -18,3 +23,18 @@ class PreserveOrderReranker:
         passages: Sequence[str],
     ) -> Sequence[float]:
         return tuple(float(len(passages) - index) for index in range(len(passages)))
+
+
+class CitationPreservingClaimSupportVerifier:
+    async def verify(
+        self,
+        *,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+        **kwargs: object,
+    ) -> ClaimSupportDecision:
+        return ClaimSupportDecision(
+            claims=(
+                GroundedClaim(text=answer, citation_ids=(evidence[0].citation_id,)),
+            )
+        )

@@ -2,6 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Literal
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -10,11 +11,16 @@ from sourcetrace.rag.llm import (
     LlmProviderError,
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleCitationRepairer,
+    OpenAICompatibleClaimSupportVerifier,
     OpenAICompatibleConfig,
     OpenAICompatibleEvidenceAssessor,
     OpenAICompatibleQuestionPlanner,
 )
-from sourcetrace.rag.ports import RetrievalCandidate
+from sourcetrace.rag.ports import (
+    CitationValidationFeedback,
+    ClaimSupportValidationError,
+    RetrievalCandidate,
+)
 
 
 class RecordingResponseStream(httpx.AsyncByteStream):
@@ -54,6 +60,15 @@ class BrokenResponseStream(httpx.AsyncByteStream):
         return None
 
 
+class BrokenAfterContentResponseStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b'data: {"choices":[{"delta":{"content":"Partial"}}]}\n\n'
+        raise httpx.RemoteProtocolError("private upstream disconnect")
+
+    async def aclose(self) -> None:
+        return None
+
+
 def _evidence() -> list[RetrievalCandidate]:
     return [
         RetrievalCandidate(
@@ -65,10 +80,37 @@ def _evidence() -> list[RetrievalCandidate]:
     ]
 
 
+def _validation_feedback() -> CitationValidationFeedback:
+    return CitationValidationFeedback(
+        issue="uncited_claim",
+        unit_count=1,
+        citation_count=0,
+        uncited_unit_indices=(0,),
+        unknown_label_unit_indices=(),
+    )
+
+
+def _uuid_evidence() -> tuple[list[RetrievalCandidate], str]:
+    citation_id = str(uuid4())
+    return (
+        [
+            RetrievalCandidate(
+                chunk_id="chunk-uuid",
+                content="The claim is supported.",
+                score=0.9,
+                citation_id=citation_id,
+            )
+        ],
+        citation_id,
+    )
+
+
 def _config(
     *,
-    structured_output_mode: Literal["text", "json_object"] = "text",
-    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default",
+    answer_output_thinking: Literal["default", "enabled", "disabled"] = "disabled",
+    structured_output_mode: Literal["text", "json_object"] = "json_object",
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled",
+    structured_output_max_tokens: int = 2048,
 ) -> OpenAICompatibleConfig:
     return OpenAICompatibleConfig(
         base_url="https://gateway.example/v1",
@@ -76,8 +118,10 @@ def _config(
         model="gpt-5.6-luna",
         timeout_seconds=30,
         prompt_version="grounded-answer-v1",
+        answer_output_thinking=answer_output_thinking,
         structured_output_mode=structured_output_mode,
         structured_output_thinking=structured_output_thinking,
+        structured_output_max_tokens=structured_output_max_tokens,
     )
 
 
@@ -98,6 +142,8 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
             content=(
                 b'data: {"choices":[{"delta":{"content":"Vectors "}}]}\n\n'
                 b'data: {"choices":[{"delta":{"content":"are normalized."}}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}]}\n\n'
                 b"data: [DONE]\n\n"
             ),
         )
@@ -119,10 +165,71 @@ async def test_provider_streams_openai_chat_deltas_with_configured_model() -> No
     assert isinstance(payload, dict)
     assert payload["model"] == "gpt-5.6-luna"
     assert payload["stream"] is True
+    assert payload["thinking"] == {"type": "disabled"}
     assert "citation-1" in payload["messages"][0]["content"]
     assert "BGE-M3 dense vectors" in payload["messages"][0]["content"]
     assert "ASCII square brackets" in payload["messages"][0]["content"]
+    assert "headings" in payload["messages"][0]["content"]
     assert "[citation_id]" in payload["messages"][0]["content"]
+
+
+async def test_provider_ignores_stream_metadata_and_reasoning_content() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b": keep-alive\n\n"
+                b'data: {"choices":[{"delta":{"reasoning_content":"private '
+                b'reasoning","content":null},"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"Grounded answer"},'
+                b'"finish_reason":null}],"usage":null}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}],"usage":null}\n\n'
+                b'data: {"choices":[],"usage":{"prompt_tokens":12,'
+                b'"completion_tokens":3,"total_tokens":15}}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Grounded answer"]
+
+
+async def test_provider_omits_thinking_for_a_generic_compatible_api() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Answer"},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(
+            _config(answer_output_thinking="default"),
+            client=client,
+        )
+
+        assert await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        ) == ["Answer"]
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert "thinking" not in payload
 
 
 @pytest.mark.parametrize(
@@ -148,6 +255,88 @@ async def test_provider_maps_upstream_failures_without_leaking_details(
     assert "private" not in str(error.value)
 
 
+async def test_provider_retries_a_transient_http_error_before_content_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503, text="private overloaded response")
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"},'
+                b'"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Recovered"]
+    assert attempts == 2
+
+
+async def test_provider_does_not_retry_a_nonretryable_http_error() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(401, text="private authentication response")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == "LLM_AUTHENTICATION_FAILED"
+    assert error.value.reason == "provider_http_authentication_failed"
+    assert "private" not in str(error.value)
+    assert attempts == 1
+
+
+async def test_provider_retries_a_network_error_before_content_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("private network detail", request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"},'
+                b'"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Recovered"]
+    assert attempts == 2
+
+
 async def test_provider_rejects_a_stream_that_ends_without_completion() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -165,6 +354,52 @@ async def test_provider_rejects_a_stream_that_ends_without_completion() -> None:
     assert error.value.code == "LLM_INVALID_RESPONSE"
 
 
+async def test_provider_rejects_done_without_a_stop_finish_reason() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Partial"},'
+                b'"finish_reason":null}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.reason == "provider_stream_missing_stop"
+
+
+async def test_provider_rejects_content_after_the_stop_finish_reason() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Complete"},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"Unexpected"},'
+                b'"finish_reason":null}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.reason == "provider_stream_content_after_stop"
+
+
 async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:
     attempts = 0
 
@@ -180,7 +415,12 @@ async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
-            content=(b'data: {"choices":[{"delta":{"content":"Recovered"}}]}\n\ndata: [DONE]\n\n'),
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"}}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -189,6 +429,30 @@ async def test_provider_reconnects_once_before_the_first_stream_delta() -> None:
 
     assert deltas == ["Recovered"]
     assert attempts == 2
+
+
+async def test_provider_does_not_reconnect_after_stream_content() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=BrokenAfterContentResponseStream(),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert error.value.reason == "provider_network_error"
+    assert "private" not in str(error.value)
+    assert attempts == 1
 
 
 async def test_provider_rejects_a_length_truncated_completion() -> None:
@@ -210,6 +474,99 @@ async def test_provider_rejects_a_length_truncated_completion() -> None:
             await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert error.value.code == "LLM_INCOMPLETE_RESPONSE"
+    assert error.value.reason == "provider_finish_length"
+
+
+async def test_provider_retries_insufficient_system_resource_before_content_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=(
+                    b'data: {"choices":[{"delta":{"content":""},'
+                    b'"finish_reason":"insufficient_system_resource"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Recovered"},'
+                b'"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":""},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        deltas = await _collect(
+            provider.stream_answer(question="Question", evidence=_evidence())
+        )
+
+    assert deltas == ["Recovered"]
+    assert attempts == 2
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "expected_code", "expected_reason", "expected_attempts"),
+    [
+        (
+            "content_filter",
+            "LLM_CONTENT_FILTERED",
+            "provider_finish_content_filter",
+            1,
+        ),
+        ("tool_calls", "LLM_INVALID_RESPONSE", "provider_finish_tool_calls", 1),
+        ("future_reason", "LLM_INVALID_RESPONSE", "provider_finish_unknown", 1),
+        (
+            "insufficient_system_resource",
+            "LLM_PROVIDER_UNAVAILABLE",
+            "provider_finish_insufficient_system_resource",
+            2,
+        ),
+    ],
+)
+async def test_provider_classifies_failed_stream_finish_reasons(
+    finish_reason: str,
+    expected_code: str,
+    expected_reason: str,
+    expected_attempts: int,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"private":"discarded","choices":[{"delta":{"content":""},'
+                + f'"finish_reason":"{finish_reason}"'.encode()
+                + b"}]}\n\n"
+                + b"data: [DONE]\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
+
+    assert error.value.code == expected_code
+    assert error.value.reason == expected_reason
+    assert "private" not in str(error.value)
+    assert attempts == expected_attempts
 
 
 async def test_provider_times_out_a_keep_alive_only_stream() -> None:
@@ -271,6 +628,281 @@ async def test_evidence_assessor_times_out_a_keep_alive_only_response() -> None:
 
     assert error.value.code == "LLM_TIMEOUT"
     assert upstream.closed is True
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_code", "expected_reason", "expected_message"),
+    [
+        (
+            400,
+            "LLM_INVALID_REQUEST",
+            "provider_http_invalid_format",
+            "Language model request was invalid",
+        ),
+        (
+            401,
+            "LLM_AUTHENTICATION_FAILED",
+            "provider_http_authentication_failed",
+            "Language model authentication failed",
+        ),
+        (
+            402,
+            "LLM_INSUFFICIENT_BALANCE",
+            "provider_http_insufficient_balance",
+            "Language model account has insufficient balance",
+        ),
+        (
+            422,
+            "LLM_INVALID_REQUEST",
+            "provider_http_invalid_parameters",
+            "Language model request was invalid",
+        ),
+    ],
+)
+async def test_evidence_assessor_classifies_nonretryable_http_errors(
+    status_code: int,
+    expected_code: str,
+    expected_reason: str,
+    expected_message: str,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(status_code, text="private provider response")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == expected_code
+    assert error.value.reason == expected_reason
+    assert error.value.safe_message == expected_message
+    assert "private" not in str(error.value)
+    assert attempts == 1
+
+
+@pytest.mark.parametrize("status_code", [429, 500, 503])
+async def test_evidence_assessor_retries_transient_http_errors_once(
+    status_code: int,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(status_code, text="private transient response")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert attempts == 2
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_reason"),
+    [
+        (429, "provider_http_rate_limited"),
+        (500, "provider_http_server_error"),
+        (503, "provider_http_overloaded"),
+    ],
+)
+async def test_evidence_assessor_stops_after_repeated_transient_http_errors(
+    status_code: int,
+    expected_reason: str,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(status_code, text="private transient response")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert error.value.reason == expected_reason
+    assert "private" not in str(error.value)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_retries_a_network_error_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("private network detail", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert attempts == 2
+
+
+async def test_evidence_assessor_stops_after_repeated_network_errors() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectError("private network detail", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert error.value.reason == "provider_network_error"
+    assert "private" not in str(error.value)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_retries_a_request_timeout_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadTimeout("private timeout detail", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert attempts == 2
+
+
+async def test_evidence_assessor_stops_after_repeated_request_timeouts() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadTimeout("private timeout detail", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_TIMEOUT"
+    assert error.value.reason == "provider_request_timeout"
+    assert "private" not in str(error.value)
+    assert attempts == 2
 
 
 async def test_consumer_cancellation_closes_the_upstream_response_stream() -> None:
@@ -345,6 +977,10 @@ async def test_question_planner_uses_only_recent_user_questions() -> None:
     assert isinstance(messages, list)
     assert [message["role"] for message in messages] == ["system", "user"]
     system_prompt = messages[0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in system_prompt
+    assert '{"evidence_groups": [' in system_prompt
+    assert '"query": "Method A distinctive mechanism"' in system_prompt
+    assert '"document_title": "Method A.pdf"' in system_prompt
     assert "zero to three evidence groups" in system_prompt
     assert "whole-run budget" in system_prompt
     assert "not broad bags of keywords" in system_prompt
@@ -471,6 +1107,13 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
     assert "expected answers" in react_payload
     assert "must differ from the proposed query" in react_payload
     assert "do not satisfy refinement" in react_payload
+    refinement_messages = refinement_payloads["ReAct.pdf"]["messages"]
+    assert isinstance(refinement_messages, list)
+    refinement_system_prompt = refinement_messages[0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in refinement_system_prompt
+    assert '{"evidence_group": {' in refinement_system_prompt
+    assert '"query": "Method A distinctive mechanism"' in refinement_system_prompt
+    assert '"document_title": "Method A.pdf"' in refinement_system_prompt
 
 
 async def test_question_planner_discards_refinement_that_changes_document() -> None:
@@ -935,11 +1578,19 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert payload["stream"] is False
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["max_tokens"] == 2048
     serialized = json.dumps(payload["messages"])
     assert "chunk-1" in serialized
     assert "BGE-M3 dense vectors" in serialized
     assert "supplemental_query_limit" in serialized
     assert "retrieval_queries" in serialized
+    system_prompt = payload["messages"][0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in system_prompt
+    assert '"sufficient": false' in system_prompt
+    assert '"selected_chunk_ids": []' in system_prompt
+    assert '"supplemental_queries": ["missing evidence component"]' in system_prompt
 
 
 async def test_evidence_assessor_does_not_invite_unsupported_query_associations() -> None:
@@ -1093,6 +1744,193 @@ async def test_evidence_assessor_retries_an_empty_json_mode_response_once() -> N
     assert all(payload["thinking"] == {"type": "disabled"} for payload in payloads)
 
 
+async def test_evidence_assessor_retries_insufficient_system_resource_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": ""},
+                            "finish_reason": "insufficient_system_resource",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="How are vectors indexed?",
+            queries=("How are vectors indexed?",),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.sufficient is True
+    assert decision.selected_chunk_ids == ("chunk-1",)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_stops_after_repeated_system_resource_shortage() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "discarded private output"},
+                        "finish_reason": "insufficient_system_resource",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="How are vectors indexed?",
+                queries=("How are vectors indexed?",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert error.value.reason == "provider_finish_insufficient_system_resource"
+    assert "private" not in str(error.value)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_classifies_length_without_retrying() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": '{"sufficient": true'},
+                        "finish_reason": "length",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="How are vectors indexed?",
+                queries=("How are vectors indexed?",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_INCOMPLETE_RESPONSE"
+    assert error.value.reason == "provider_finish_length"
+    assert error.value.safe_message == "Language model did not complete the response"
+    assert attempts == 1
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "expected_code", "expected_reason", "expected_message"),
+    [
+        (
+            "content_filter",
+            "LLM_CONTENT_FILTERED",
+            "provider_finish_content_filter",
+            "Language model response was blocked",
+        ),
+        (
+            "tool_calls",
+            "LLM_INVALID_RESPONSE",
+            "provider_finish_tool_calls",
+            "Language model returned an invalid response",
+        ),
+        (
+            "future_reason",
+            "LLM_INVALID_RESPONSE",
+            "provider_finish_unknown",
+            "Language model returned an invalid response",
+        ),
+    ],
+)
+async def test_evidence_assessor_classifies_nonrecoverable_finish_reasons(
+    finish_reason: str,
+    expected_code: str,
+    expected_reason: str,
+    expected_message: str,
+) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "discarded private output"},
+                        "finish_reason": finish_reason,
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="How are vectors indexed?",
+                queries=("How are vectors indexed?",),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == expected_code
+    assert error.value.reason == expected_reason
+    assert error.value.safe_message == expected_message
+    assert "private" not in str(error.value)
+    assert attempts == 1
+
+
 async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     captured: dict[str, object] = {}
 
@@ -1104,7 +1942,16 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps({"answer": "Vectors are normalized [citation-1]"})
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "Vectors are normalized",
+                                            "citation_ids": ["citation-1"],
+                                        }
+                                    ]
+                                }
+                            )
                         },
                         "finish_reason": "stop",
                     }
@@ -1119,6 +1966,7 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
             question="How are vectors stored?",
             answer="Vectors are normalized.",
             evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
         )
 
     assert answer == "Vectors are normalized [citation-1]"
@@ -1128,8 +1976,129 @@ async def test_citation_repairer_returns_only_the_repaired_answer() -> None:
     serialized = json.dumps(payload["messages"])
     assert "Vectors are normalized." in serialized
     assert "citation-1" in serialized
-    assert "ASCII square brackets" in payload["messages"][0]["content"]
-    assert "[citation_id]" in payload["messages"][0]["content"]
+    assert "claims" in payload["messages"][0]["content"]
+    assert "citation_ids" in payload["messages"][0]["content"]
+    assert "EXAMPLE JSON OUTPUT" in payload["messages"][0]["content"]
+    assert '"text": "Evidence-supported claim"' in payload["messages"][0]["content"]
+    assert '"citation_ids": ["allowed-citation-id"]' in payload["messages"][0]["content"]
+    serialized_user_message = payload["messages"][1]["content"]
+    assert '"uncited_unit_indices": [0]' in serialized_user_message
+    assert "headings" in payload["messages"][0]["content"]
+
+
+async def test_claim_support_verifier_preserves_evidence_qualifiers() -> None:
+    captured: dict[str, object] = {}
+    evidence = [
+        RetrievalCandidate(
+            chunk_id="rag-results",
+            content=(
+                "RAG models achieve state-of-the-art results on Natural Questions, "
+                "WebQuestions and CuratedTrec and strongly outperform recent approaches "
+                "using specialised pre-training objectives on TriviaQA."
+            ),
+            score=0.9,
+            citation_id="citation-1",
+        )
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": (
+                                                "RAG achieved state-of-the-art results on "
+                                                "Natural Questions, WebQuestions, and CuratedTREC."
+                                            ),
+                                            "citation_ids": ["citation-1"],
+                                        },
+                                        {
+                                            "text": (
+                                                "On TriviaQA, RAG strongly outperformed approaches "
+                                                "using specialized pre-training objectives."
+                                            ),
+                                            "citation_ids": ["citation-1"],
+                                        },
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        verifier = OpenAICompatibleClaimSupportVerifier(_config(), client=client)
+        decision = await verifier.verify(
+            question="RAG reported leading results on which open-domain QA datasets?",
+            answer=(
+                "RAG achieved state-of-the-art results on Natural Questions, TriviaQA, "
+                "WebQuestions, and CuratedTREC [citation-1]."
+            ),
+            evidence=evidence,
+        )
+
+    assert [claim.text for claim in decision.claims] == [
+        (
+            "RAG achieved state-of-the-art results on Natural Questions, WebQuestions, "
+            "and CuratedTREC."
+        ),
+        (
+            "On TriviaQA, RAG strongly outperformed approaches using specialized "
+            "pre-training objectives."
+        ),
+    ]
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    system_prompt = payload["messages"][0]["content"]
+    assert "never strengthen" in system_prompt
+    assert "outperforming a named baseline into state-of-the-art" in system_prompt
+    assert "Split a mixed claim" in system_prompt
+
+
+async def test_claim_support_verifier_rejects_unknown_citation_safely() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "Private unsupported expansion",
+                                            "citation_ids": ["unknown-private-id"],
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        verifier = OpenAICompatibleClaimSupportVerifier(_config(), client=client)
+        with pytest.raises(ClaimSupportValidationError):
+            await verifier.verify(
+                question="Question",
+                answer="Draft [citation-1]",
+                evidence=_evidence(),
+            )
+
 
 
 async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> None:
@@ -1141,7 +2110,8 @@ async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> 
                     {
                         "message": {
                             "content": (
-                                '{"answer":"Vectors are normalized [citation-1]"}'
+                                '{"claims":[{"text":"Vectors are normalized",'
+                                '"citation_ids":["citation-1"]}]}'
                                 "\n\nThe citation has been repaired."
                             )
                         },
@@ -1158,6 +2128,7 @@ async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> 
             question="How are vectors stored?",
             answer="Vectors are normalized.",
             evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
         )
 
     assert answer == "Vectors are normalized [citation-1]"
@@ -1171,7 +2142,10 @@ async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() 
                 "choices": [
                     {
                         "message": {
-                            "content": ('{"answer":"The objective is \\(x + y\\) [citation-1]"}')
+                            "content": (
+                                '{"claims":[{"text":"The objective is \\(x + y\\)",'
+                                '"citation_ids":["citation-1"]}]}'
+                            )
                         },
                         "finish_reason": "stop",
                     }
@@ -1186,9 +2160,178 @@ async def test_citation_repairer_recovers_literal_backslashes_in_json_strings() 
             question="What is the objective?",
             answer="The objective is x + y.",
             evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
         )
 
     assert answer == r"The objective is \(x + y\) [citation-1]"
+
+
+async def test_citation_repairer_replaces_allowed_inline_uuid_citation() -> None:
+    evidence, citation_id = _uuid_evidence()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": f"The claim is supported [{citation_id}]",
+                                            "citation_ids": [citation_id],
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        answer = await repairer.repair(
+            question="Question",
+            answer="Draft",
+            evidence=evidence,
+            validation_feedback=_validation_feedback(),
+        )
+
+    assert answer == f"The claim is supported [{citation_id}]"
+
+
+async def test_citation_repairer_rejects_unknown_inline_uuid_with_safe_reason() -> None:
+    evidence, citation_id = _uuid_evidence()
+    unknown_id = str(uuid4())
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": f"Unsupported [{unknown_id}]",
+                                            "citation_ids": [citation_id],
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        with pytest.raises(LlmProviderError) as error:
+            await repairer.repair(
+                question="Question",
+                answer="Draft",
+                evidence=evidence,
+                validation_feedback=_validation_feedback(),
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.reason == "citation_repair_unknown_inline_citation"
+    assert "citation_repair_unknown_inline_citation" in str(error.value)
+    assert error.value.safe_message == "Language model returned an invalid response"
+    assert unknown_id not in str(error.value)
+
+
+async def test_citation_repairer_retries_empty_citations_once() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        citation_ids = [] if attempts == 1 else ["citation-1"]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "text": "Vectors are normalized",
+                                            "citation_ids": citation_ids,
+                                        }
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        answer = await repairer.repair(
+            question="Question",
+            answer="Draft",
+            evidence=_evidence(),
+            validation_feedback=_validation_feedback(),
+        )
+
+    assert answer == "Vectors are normalized [citation-1]"
+    assert attempts == 2
+
+
+async def test_citation_repairer_rejects_repeated_empty_citations_with_safe_reason() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "claims": [
+                                        {"text": "No citation", "citation_ids": []}
+                                    ]
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repairer = OpenAICompatibleCitationRepairer(_config(), client=client)
+        with pytest.raises(LlmProviderError) as error:
+            await repairer.repair(
+                question="Question",
+                answer="Draft",
+                evidence=_evidence(),
+                validation_feedback=_validation_feedback(),
+            )
+
+    assert attempts == 2
+    assert error.value.reason == "citation_repair_empty_citations"
+    assert "citation_repair_empty_citations" in str(error.value)
 
 
 async def test_evidence_assessor_rejects_unstructured_output() -> None:
@@ -1224,7 +2367,7 @@ async def test_evidence_assessor_rejects_unstructured_output() -> None:
     assert attempts == 2
 
 
-async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> None:
+async def test_evidence_assessor_deduplicates_selected_chunk_ids_in_order() -> None:
     attempts = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -1238,9 +2381,50 @@ async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> No
                         "message": {
                             "content": json.dumps(
                                 {
+                                    "sufficient": True,
+                                    "selected_chunk_ids": ["chunk-1", "chunk-1"],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question",),
+            evidence=_evidence(),
+            supplemental_query_limit=2,
+        )
+
+    assert decision.selected_chunk_ids == ("chunk-1",)
+    assert attempts == 1
+
+
+async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        supplemental_queries = ["first", "second"] if attempts == 1 else ["first"]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
                                     "sufficient": False,
                                     "selected_chunk_ids": [],
-                                    "supplemental_queries": ["first", "second"],
+                                    "supplemental_queries": supplemental_queries,
                                 }
                             )
                         },
@@ -1253,16 +2437,15 @@ async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> No
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
 
-        with pytest.raises(LlmProviderError) as error:
-            await assessor.assess(
-                question="Question",
-                queries=("Question", "initial expansion"),
-                evidence=_evidence(),
-                supplemental_query_limit=1,
-            )
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question", "initial expansion"),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
 
-    assert error.value.code == "LLM_INVALID_RESPONSE"
-    assert attempts == 1
+    assert decision.supplemental_queries == ("first",)
+    assert attempts == 2
 
 
 @pytest.mark.parametrize(
@@ -1322,6 +2505,7 @@ async def test_citation_repairer_maps_timeout_without_leaking_details() -> None:
                 question="Question",
                 answer="Draft",
                 evidence=_evidence(),
+                validation_feedback=_validation_feedback(),
             )
 
     assert error.value.code == "LLM_TIMEOUT"

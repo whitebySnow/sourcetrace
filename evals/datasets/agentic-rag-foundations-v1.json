@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "dataset_id": "agentic-rag-foundations",
-  "dataset_version": "1.1.0",
+  "dataset_version": "1.2.0",
   "knowledge_base_id": "c5557289-002a-4631-86c2-f53bfec90706",
   "document_version_ids": [
     "c9b7c41e-4716-403f-a115-3cdaa3a86741",
@@ -11,7 +11,7 @@
   "review": {
     "status": "reviewed",
     "reviewed_by": "whitebySnow",
-    "reviewed_at": "2026-08-11T11:38:53.761Z"
+    "reviewed_at": "2026-08-13T04:21:31Z"
   },
   "cases": [
     {
@@ -22,7 +22,19 @@
         "outcome": "answered",
         "reference_answer": "预训练模型的参数化记忆与外部索引提供的非参数化记忆。",
         "evidence": [
-          {"document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741", "page_number": 1, "text": "parametric and non-parametric memory for language generation"}
+          {
+            "claim_id": "rag-memory-types",
+            "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+            "page_number": 1,
+            "text": "parametric and non-parametric memory for language generation",
+            "approved_alternatives": [
+              {
+                "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+                "page_number": 2,
+                "text": "parametric memory is a pre-trained seq2seq transformer, and the\nnon-parametric memory is a dense vector index of Wikipedia"
+              }
+            ]
+          }
         ]
       }
     },
@@ -60,7 +72,19 @@
         "outcome": "answered",
         "reference_answer": "使用编码器把查询和文档表示为稠密向量，然后通过最大内积搜索近似求出 top-K 文档。",
         "evidence": [
-          {"document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741", "page_number": 3, "text": "Product Search (MIPS) problem"}
+          {
+            "claim_id": "rag-dense-mips-retrieval",
+            "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+            "page_number": 3,
+            "text": "Product Search (MIPS) problem",
+            "approved_alternatives": [
+              {
+                "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+                "page_number": 4,
+                "text": "document encoder to compute an\nembedding for each document, and build a single MIPS index"
+              }
+            ]
+          }
         ]
       }
     },
@@ -108,7 +132,19 @@
         "outcome": "answered",
         "reference_answer": "评估者认为 RAG 更符合事实的比例为 42.7%，认为 BART 更符合事实的比例为 7.1%。",
         "evidence": [
-          {"document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741", "page_number": 6, "text": "RAG was more factual in 42.7% of cases"}
+          {
+            "claim_id": "rag-jeopardy-factuality",
+            "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+            "page_number": 6,
+            "text": "RAG was more factual in 42.7% of cases",
+            "approved_alternatives": [
+              {
+                "document_version_id": "c9b7c41e-4716-403f-a115-3cdaa3a86741",
+                "page_number": 8,
+                "text": "BART better 7.1% 16.8%\nRAG better 42.7% 37.4%"
+              }
+            ]
+          }
         ]
       }
     },
@@ -157,7 +193,19 @@
         "outcome": "answered",
         "reference_answer": "HotpotQA 问答和 FEVER 事实核验。",
         "evidence": [
-          {"document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760", "page_number": 1, "text": "answering (HotpotQA) and fact veriﬁcation (Fever)"}
+          {
+            "claim_id": "react-knowledge-benchmarks",
+            "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+            "page_number": 1,
+            "text": "answering (HotpotQA) and fact veriﬁcation (Fever)",
+            "approved_alternatives": [
+              {
+                "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+                "page_number": 3,
+                "text": "question answering (HotPotQA, Yang et al., 2018), fact veriﬁcation (Fever"
+              }
+            ]
+          }
         ]
       }
     },
@@ -169,8 +217,32 @@
         "outcome": "answered",
         "reference_answer": "ALFWorld 和 WebShop。",
         "evidence": [
-          {"document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760", "page_number": 1, "text": "interactive decision making benchmarks (ALFWorld and"},
-          {"document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760", "page_number": 1, "text": "WebShop), ReAct outperforms imitation and reinforcement learning methods"}
+          {
+            "claim_id": "react-alfworld-benchmark",
+            "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+            "page_number": 1,
+            "text": "interactive decision making benchmarks (ALFWorld and",
+            "approved_alternatives": [
+              {
+                "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+                "page_number": 3,
+                "text": "text-based game (ALFWorld, Shridhar et al., 2020b)"
+              }
+            ]
+          },
+          {
+            "claim_id": "react-webshop-benchmark",
+            "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+            "page_number": 1,
+            "text": "WebShop), ReAct outperforms imitation and reinforcement learning methods",
+            "approved_alternatives": [
+              {
+                "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+                "page_number": 3,
+                "text": "webpage navigation (WebShop, Yao\net al., 2022)"
+              }
+            ]
+          }
         ]
       }
     },
@@ -195,7 +267,19 @@
         "outcome": "answered",
         "reference_answer": "ReAct 在动作之间包含稀疏的语言推理轨迹；Act 使用相同任务轨迹但移除推理内容，只保留动作。",
         "evidence": [
-          {"document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760", "page_number": 7, "text": "same trajectories, but without thoughts"}
+          {
+            "claim_id": "react-act-reasoning-difference",
+            "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+            "page_number": 7,
+            "text": "same trajectories, but without thoughts",
+            "approved_alternatives": [
+              {
+                "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+                "page_number": 3,
+                "text": "a thought or a\nreasoning trace, does not affect the external environment, thus leading to no observation feedback.\nInstead, a thought ˆat aims to compose useful information by reasoning over the current contextct,\nand update the contextct+1 = (ct, ˆat) to support future reasoning or acting"
+              }
+            ]
+          }
         ]
       }
     },
@@ -232,8 +316,32 @@
         "outcome": "answered",
         "reference_answer": "用于决定是否检索，并评价检索内容的相关性、回答受到证据支持的程度以及回答的整体效用。",
         "evidence": [
-          {"document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d", "page_number": 3, "text": "signal the need for retrieval"},
-          {"document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d", "page_number": 3, "text": "relevance, support, or completeness"}
+          {
+            "claim_id": "self-rag-retrieval-control",
+            "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+            "page_number": 3,
+            "text": "signal the need for retrieval",
+            "approved_alternatives": [
+              {
+                "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+                "page_number": 4,
+                "text": "Retrieve x / x, y {yes, no, continue} Decides when to retrieve with R"
+              }
+            ]
+          },
+          {
+            "claim_id": "self-rag-output-evaluation",
+            "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+            "page_number": 3,
+            "text": "relevance, support, or completeness",
+            "approved_alternatives": [
+              {
+                "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+                "page_number": 4,
+                "text": "Rank yt based on ISREL , ISSUP , ISUSE"
+              }
+            ]
+          }
         ]
       }
     },
@@ -326,8 +434,25 @@
         "outcome": "answered",
         "reference_answer": "ReAct 交错生成语言推理轨迹和环境动作；Self-RAG 生成检索与评价 token，用于决定是否检索、评价证据并选择输出。",
         "evidence": [
-          {"document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760", "page_number": 1, "text": "generate both reasoning traces and task-speciﬁc actions"},
-          {"document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d", "page_number": 3, "text": "signal the need for retrieval"}
+          {
+            "claim_id": "react-intermediate-signals",
+            "document_version_id": "eb8f384b-d03b-42da-b813-4dedc1c39760",
+            "page_number": 1,
+            "text": "generate both reasoning traces and task-speciﬁc actions"
+          },
+          {
+            "claim_id": "self-rag-intermediate-signals",
+            "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+            "page_number": 3,
+            "text": "signal the need for retrieval",
+            "approved_alternatives": [
+              {
+                "document_version_id": "41f20261-5c9e-4856-a5ff-9dc37da4203d",
+                "page_number": 1,
+                "text": "Reflection tokens are categorized into retrieval and critique tokens to\nindicate the need for retrieval and its generation quality respectively"
+              }
+            ]
+          }
         ]
       }
     },

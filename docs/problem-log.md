@@ -365,3 +365,158 @@ Self-RAG 两个槽位，但在同一上下文中不会稳定补出 `top-k docume
 ARF-026 聚焦及完整 30 题运行均使 ReAct 声明命中 `approved_alternative`，检索状态由 failed
 变为 passed。全量检索为 25 passed、2 failed、3 not applicable，上一轮 24 个检索通过项零
 退化。引用维度仍存在独立波动，不属于本问题的完成声明。
+
+## 22. 证据充分但自由文本引用修复仍不稳定
+
+**症状**：固定真实评测中，一批 Answer Run 已通过 Retrieval 和最终 Evidence Decision，但初稿
+与唯一一次 Citation Repair 都以 `uncited_claim` 被确定性校验拒绝。旧轨迹只记录一个失败类别，
+无法判断是全部结构单元、开头单元还是中间单元缺少引用，也无法比较初稿与修复稿是否以同一
+方式失败。
+
+**根因**：提示词要求模型直接生成或重写带 UUID 引用的自由文本，供应商既要保持声明语义，又要
+精确复制标签并放到每个事实单元中。模型有时原样返回草稿、只给部分句子加引用，或返回正文中
+已有 UUID 与结构字段不一致的结果。继续增加自然语言强调无法把格式正确性变成稳定契约。
+
+**修复**：决策轨迹现在按 `initial` 和 `repair` 阶段记录结构单元总数、引用数、未引用单元索引
+和未知标签单元索引，不保存被拒绝正文。Citation Repair 改为结构化 `claims`：每项只接受
+`text` 与允许的 `citation_ids`，服务端移除允许的行内重复标签后确定性渲染引用。未知 UUID、
+空 claim、空引用、错误字段集合和重复证据选择继续拒绝；只有第一次空引用允许一次严格纠错，
+渲染结果仍必须重新通过原有确定性门禁。
+
+**验证**：单元测试通过公开 `AnswerWorkflow.run` 接缝稳定复现“证据充分 -> 初稿无引用 -> 一次
+修复仍无引用 -> Refusal”，并区分两次校验的失败单元；供应商契约覆盖结构声明、重复允许标签、
+未知 UUID、空引用纠错和非法 Schema。该修复没有降低 Knowledge Base、Evidence Decision、
+Citation 或 Refusal 门禁。可单独运行以下回归命令：
+
+```powershell
+uv run --project apps/api --extra cpu pytest `
+  apps/api/tests/unit/test_answer_workflow.py::test_workflow_refuses_when_the_single_citation_repair_is_still_invalid -q
+```
+
+新增阶段化诊断断言在修复前失败，修复后命令通过；测试不调用网络或数据库。行为稳定化前的
+`c1aefe4` 真实报告提供了三类代表性持续失败，以下分类只使用结构计数和索引，不保留回答正文：
+
+- `ARF-003`：初稿与修复稿都是 5 个单元、0 个引用，未引用索引始终为 0 至 4。假设是自由文本
+  修复没有执行引用任务而是近似原样返回；若结构化 claims 能生成非空允许引用并通过确定性
+  校验，则该假设得到支持，若仍为全零引用则被证伪。
+- `ARF-015`：两次都是 8 个单元、7 个引用，仅索引 0 持续未引用。假设是开头结构单元容易被
+  模型视为标题或引言而跳过；若服务端按 claim 的每个确定性单元渲染后索引 0 仍缺失，则该
+  假设被证伪。
+- `ARF-021`：两次都是 7 个单元，引用数从 8 增至 9，但索引 3 持续未引用。该 case 证伪了
+  “问题只发生在首单元”的单一解释，并支持自由文本修复可能遗漏任意中间单元；若结构化渲染
+  后仍只遗漏索引 3，则应转向单元切分或 claim 覆盖假设。
+
+随后在提交 `fb5ea7c7e14747c27f1678475eaa0d74b0ee40d8` 上使用
+`agentic-rag-foundations@1.1.0`、`deepseek-v4-flash`、生产混合检索和固定 BGE reranker
+完成新的 30 题真实回归。原始报告 SHA-256 为
+`d62a2cd90b2892a8164c2ad4d85be768edbad1738eafaa00a211502291d3a34b`。旧报告中 9 个
+“最终证据充分、初稿与修复稿仍因 `uncited_claim` 拒答”的 answerable case，在新报告中降为
+0；新报告没有任何 answerable case 因引用校验失败而拒答，验证结构化声明与服务端确定性渲染
+解决了本问题描述的缺陷。
+
+用户逐条审核全部 13 个待审回答，其中 12 个通过；`ARF-011` 内容正确但未跟随中文问题的语言，
+判定失败。绑定原始报告的 judgment 位于
+`evals/judgments/agentic-rag-foundations-v1-fb5ea7c-deepseek-v4-flash.json`。审核后端到端结果为
+15 passed、15 failed、0 pending review。该结果不能泛化为产品准确率；14 个自动引用失败表示
+版本化期望证据覆盖或预期拒答不满足，不等同于本条问题的引用格式缺陷。4 个 answerable refusal
+发生在证据充分性阶段，也应与引用修复问题分开处理。
+
+## 23. DeepSeek 兼容响应的终态、重试和 thinking 语义不稳定
+
+**症状**：真实 DeepSeek 调用先后出现非 `stop` 终态、结构化空正文、额外字段、网络断连和供应商
+错误。旧适配器把多种原因合并为格式错误或供应商不可用，难以判断是否可恢复；DeepSeek V4 又
+默认开启 thinking，可能改变结构化 JSON 与最终流式回答的响应形态和 token 成本。
+
+**根因**：OpenAI-compatible 只描述传输外形，不保证不同平台具有相同的终态、错误码、JSON
+Output、thinking 和 SSE 细节。适配器此前没有把 DeepSeek 官方五类 `finish_reason`、HTTP 状态、
+流式输出前后断连、keep-alive、usage-only chunk 和 `[DONE]` 完整性建模为明确契约。
+
+**修复**：结构化调用默认显式发送 `response_format.type=json_object`、
+`thinking.type=disabled` 和有限 `max_tokens`，四类结构提示词包含与业务 Schema 对齐的 JSON
+示例；结果必须依次通过 `stop`、非空、JSON 和精确 Schema。最终流式回答使用独立 thinking
+配置，DeepSeek 基线默认关闭，不支持该扩展的平台可设为 `default` 以省略字段。适配器分类五类
+官方终态与 400、401、402、422、429、500、503；瞬态 HTTP、网络、协议和资源不足只在尚未输出
+正文时有界重试一次。流式解析忽略 keep-alive、reasoning content 和 usage-only chunk，要求
+明确 `stop`，拒绝终态后正文和 `[DONE]` 前断连。
+
+**验证**：供应商契约 fake 覆盖正常结构化和流式响应、空正文、Schema 偏差、五类终态、各类
+HTTP 状态、输出前后断连、keep-alive、usage-only chunk、reasoning content、thinking 省略回退
+和安全错误信息；完整静态检查、后端与前端测试和生产构建通过。当前仍使用覆盖整个调用生命周期
+的单一应用 deadline；connect、等待首 token 和 read timeout 的拆分属于后续独立问题。
+
+## 24. 引用评分失败缺少可复用的去敏诊断
+
+**症状**：`fb5ea7c` 真实报告有 10 个实际已回答但引用评分失败的 case。原报告包含完整问题、回答、
+候选和论文片段，手工解析既难以重放，也不适合提交或直接用于 Issue 诊断；现有
+`diagnose-retrieval` 只覆盖检索失败，无法判断目标证据是否已召回但未被最终 Citation 使用。
+
+**修复**：新增纯离线 `diagnose-citations` 命令和 `citation-diagnostics-v1` Schema。工具复用统一
+声明级证据匹配，只输出 case/claim ID、文档版本 ID、页码、检索/引用匹配状态、失败机制、源
+Report SHA-256 和原运行配置。问题、参考答案、模型回答、提示词及文档正文均不进入诊断产物；
+命令不批准替代证据，也不修改 Dataset、Report 或线上门禁。
+
+**验证**：使用 `agentic-rag-foundations@1.1.0` 和 reviewed report SHA-256
+`4d0b9361951ca1c5bbcf5606d43e32d62831a6b70f23800179bff059636ea0b5` 离线生成两次诊断；两份
+产物字节相同，SHA-256 均为
+`8709094a18d3bf7375321307c57faf38dbce8e830f8de508b234169819f0c9f0`。诊断得到 10 个 failed
+answered case：
+
+- `ARF-001`、`ARF-004`、`ARF-006`、`ARF-008`、`ARF-012`、`ARF-013`、`ARF-015`、
+  `ARF-018` 共 8 个为 `retrieved_but_not_cited`，即所有目标声明的规范证据已召回，但最终引用
+  没有命中规范证据或已批准替代证据。
+- `ARF-025` 为 `partial_claim_coverage`：两个目标声明均召回规范证据，但最终只引用第一个声明
+  的规范证据。
+- `ARF-024` 为 `expected_evidence_not_retrieved`：第一个声明召回规范证据，第二个声明未召回，
+  两个声明的最终引用都未命中目标证据。
+
+该分类证伪了“10 个失败都来自 embedding”的单一解释，也不能证明实际引用都是可批准的等价
+证据。后续应分开处理：先人工核验 8 个完全偏移和 1 个部分覆盖 case 的实际引用是否语义等价；
+只有通过核验的片段才能作为声明级 `approved_alternatives`。`ARF-024` 的缺失声明继续进入独立
+检索诊断。若实际引用不等价，再单独修改 Evidence Decision 或声明覆盖策略，并重新运行真实
+评测，不能在本诊断 Issue 中直接放宽匹配规则。
+
+## 25. 等价引用未进入声明级评测真值
+
+**症状**：Issue #61 的离线诊断发现 9 个 answerable case 已引用同一论文中的其他片段，但
+`agentic-rag-foundations@1.1.0` 只接受最初选定的规范片段。仅凭词面不匹配无法判断实际引用是
+等价证据、较弱证据还是错误声明；自动把模型引用写入 Dataset 会污染评测真值。
+
+**审核**：用户逐项对照问题、实际回答、规范页/片段和实际引用页/片段。审核绑定 reviewed report
+SHA-256 `4d0b9361951ca1c5bbcf5606d43e32d62831a6b70f23800179bff059636ea0b5`，结论如下：
+
+- `ARF-001`、`ARF-004`、`ARF-008`、`ARF-012`、`ARF-013`、`ARF-015` 和 `ARF-025`
+  的对应实际引用获批为声明级等价证据。
+- `ARF-018` 的证据获批；回答语言与中文问题不一致仍是独立失败，不能由证据替代掩盖。
+- `ARF-006` 的引用不获批：实际回答把 TriviaQA 扩展为“领先结果”，原文只支持在该数据集上
+  强于特定预训练方法。该 case 保持原评分真值，并转入回答范围控制问题。
+
+**修复**：Dataset 升级为 `agentic-rag-foundations@1.2.0`。只把 8 个获批 case 的最小连续原文
+加入对应 `claim_id` 的 `approved_alternatives`；多声明 case 为每个证据补充稳定 claim ID。
+`ARF-006` 不增加替代项。绑定查询计划同步到 1.2.0，但检索查询、模型配置和线上 Citation、
+Evidence Decision、Refusal 门禁均不变。
+
+**验证边界**：本次只更新人工审核后的评测真值，不调用真实供应商，也不把 1.1.0 历史报告的
+15/30 结果重写成 1.2.0 分数。离线证据匹配用于确认获批片段确实存在于该 reviewed report 的
+实际引用中；新版端到端结果必须由后续绑定 1.2.0 的独立真实评测产生。
+
+## 26. 合法引用仍可能扩大证据声明强度
+
+**症状**：`ARF-006` 的回答使用了本轮允许的 Citation，但把论文中“在三个数据集达到
+state-of-the-art”与“在 TriviaQA 上强于一类特定预训练方法”合并为四个数据集都取得领先结果。
+引用格式和来源归属都合法，原有确定性 Citation 校验因此无法识别语义强度被扩大。
+
+**修复**：在生成与引用校验之间新增结构化声明支持度校验。校验器只能读取原问题、草稿和
+Evidence Decision 已选中的片段，必须逐项保留证据限定词和比较强度；混合声明拆为证据分别
+支持的最窄表述。服务端只接受非空 claim 和本轮允许的 citation ID，并确定性渲染引用后继续
+执行原 Citation 校验。Citation Repair 后再次执行同一支持度校验；空 claim、未知引用、非法
+结构或无法形成受支持声明时安全拒答。生成提示词包版本升级为 `grounded-answer-v5`，Evidence
+Decision、Citation 和 Refusal 门禁未降低。
+
+**失败关闭边界**：声明支持度适配器未配置、返回非法 JSON 或包含未知引用时，工作流以
+`CLAIM_SUPPORT_VALIDATION_FAILED` 结束并持久化拒答，不得把未校验草稿作为最终答案。该门禁是
+只向模型发送选中证据的受限语义校验，不把模型判断伪装成确定性自然语言蕴含证明；其结果仍须
+经过服务端确定性引用校验。
+
+**验证边界**：确定性工作流 fake 复现越界草稿，并验证最终输出分别保留三个数据集的
+state-of-the-art 与 TriviaQA 的特定基线优势。供应商契约 fake 验证结构化 Schema、限定词提示
+和未知引用的安全错误。本修复不调用真实供应商，也不填写新的 Dataset 1.2.0 端到端结果。

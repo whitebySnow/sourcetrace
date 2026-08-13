@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +16,30 @@ class EvidenceDecision:
     sufficient: bool
     selected_chunk_ids: tuple[str, ...]
     supplemental_queries: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CitationValidationFeedback:
+    issue: Literal["empty_answer", "uncited_claim", "unknown_label"]
+    unit_count: int
+    citation_count: int
+    uncited_unit_indices: tuple[int, ...]
+    unknown_label_unit_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GroundedClaim:
+    text: str
+    citation_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimSupportDecision:
+    claims: tuple[GroundedClaim, ...]
+
+
+class ClaimSupportValidationError(Exception):
+    """Raised when a claim-support decision cannot be safely used."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +91,18 @@ class CitationRepairer(Protocol):
         question: str,
         answer: str,
         evidence: Sequence[RetrievalCandidate],
+        validation_feedback: CitationValidationFeedback,
     ) -> str: ...
+
+
+class ClaimSupportVerifier(Protocol):
+    async def verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> ClaimSupportDecision: ...
 
 
 class QuestionPlanner(Protocol):

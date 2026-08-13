@@ -217,7 +217,7 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
     )
 
     assert plan == RetrievalPlan(
-        version="two-stage-evidence-slots-v5",
+        version="two-stage-evidence-slots-v6",
         queries=(
             "What does ReAct combine?",
             "ReAct reasoning and acting interaction",
@@ -254,7 +254,7 @@ async def test_plan_keeps_at_most_two_unique_evidence_slot_queries() -> None:
     )
 
     assert plan == RetrievalPlan(
-        version="two-stage-evidence-slots-v5",
+        version="two-stage-evidence-slots-v6",
         queries=(
             "Compare RAG, ReAct, and Self-RAG components",
             "ReAct task-specific environment actions",

@@ -3,7 +3,7 @@ import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from typing import Literal, Protocol, TypedDict, cast
+from typing import Literal, NoReturn, Protocol, TypedDict, cast
 from uuid import UUID, uuid5
 
 from langgraph.config import get_stream_writer
@@ -17,6 +17,9 @@ from sourcetrace.modules.retrieval.service import (
 from sourcetrace.rag.ports import (
     AnswerGenerator,
     CitationRepairer,
+    CitationValidationFeedback,
+    ClaimSupportValidationError,
+    ClaimSupportVerifier,
     EvidenceAssessor,
     RetrievalCandidate,
 )
@@ -25,6 +28,23 @@ _CITATION_LABEL = re.compile(
     r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
 )
+_ANSWER_UNIT_SPLIT = re.compile(
+    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
+)
+
+
+class _FailClosedClaimSupportVerifier:
+    async def verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> NoReturn:
+        raise ClaimSupportValidationError
+
+
+_FAIL_CLOSED_CLAIM_SUPPORT_VERIFIER = _FailClosedClaimSupportVerifier()
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,11 +71,24 @@ class EvidenceAssessmentTrace:
 
 @dataclass(frozen=True, slots=True)
 class CitationValidationTrace:
+    attempt: Literal["initial", "repair"]
     valid: bool
     issue: Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]
+    unit_count: int
+    citation_count: int
+    uncited_unit_indices: tuple[int, ...]
+    unknown_label_unit_indices: tuple[int, ...]
 
-    def to_payload(self) -> dict[str, str | bool]:
-        return {"valid": self.valid, "issue": self.issue}
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "attempt": self.attempt,
+            "valid": self.valid,
+            "issue": self.issue,
+            "unit_count": self.unit_count,
+            "citation_count": self.citation_count,
+            "uncited_unit_indices": list(self.uncited_unit_indices),
+            "unknown_label_unit_indices": list(self.unknown_label_unit_indices),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +299,7 @@ class _WorkflowState(TypedDict, total=False):
     selected_evidence: list[RetrievedEvidence]
     cited_evidence: list[RetrievedEvidence]
     answer: str
+    claim_support_valid: bool
     citation_valid: bool
     repair_attempts: int
     refusal_code: str
@@ -284,6 +318,7 @@ class AnswerWorkflow:
         run_control: WorkflowRunControl,
         minimum_score: float,
         minimum_evidence: int,
+        claim_support_verifier: ClaimSupportVerifier = _FAIL_CLOSED_CLAIM_SUPPORT_VERIFIER,
     ) -> None:
         if not -1.0 <= minimum_score <= 1.0:
             raise ValueError("minimum retrieval score must be between -1 and 1")
@@ -292,6 +327,7 @@ class AnswerWorkflow:
         self._retrieval = retrieval
         self._assessor = assessor
         self._generator = generator
+        self._claim_support_verifier = claim_support_verifier
         self._citation_repairer = citation_repairer
         self._run_control = run_control
         self._minimum_score = minimum_score
@@ -304,6 +340,7 @@ class AnswerWorkflow:
         graph.add_node("evidence_assessment", self._assess)
         graph.add_node("supplemental_retrieval", self._retrieve_supplemental)
         graph.add_node("generation", self._generate)
+        graph.add_node("claim_support_validation", self._validate_claim_support)
         graph.add_node("citation_validation", self._validate_citations)
         graph.add_node("citation_repair", self._repair_citations)
         graph.add_node("answer", self._answer)
@@ -325,7 +362,17 @@ class AnswerWorkflow:
         graph.add_conditional_edges(
             "citation_validation",
             self._after_validation,
-            {"answer": "answer", "repair": "citation_repair", "refuse": "refusal"},
+            {
+                "answer": "answer",
+                "repair": "citation_repair",
+                "support": "claim_support_validation",
+                "refuse": "refusal",
+            },
+        )
+        graph.add_conditional_edges(
+            "claim_support_validation",
+            self._after_claim_support,
+            {"validate": "citation_validation", "refuse": "refusal"},
         )
         graph.add_edge("citation_repair", "citation_validation")
         graph.add_edge("answer", END)
@@ -485,13 +532,17 @@ class AnswerWorkflow:
             for item in state["selected_evidence"]
         }
         cited = _CITATION_LABEL.findall(state["answer"])
-        issue = self._citation_validation_issue(state["answer"], set(allowed))
-        citation_valid = issue == "valid"
+        validation = self._citation_validation_trace(
+            state["answer"],
+            set(allowed),
+            attempt="repair" if state["repair_attempts"] else "initial",
+        )
+        citation_valid = validation.valid
         trace = replace(
             state["workflow_trace"],
             citation_validations=(
                 *state["workflow_trace"].citation_validations,
-                CitationValidationTrace(valid=citation_valid, issue=issue),
+                validation,
             ),
         )
         await self._record_trace(state["run_id"], trace)
@@ -511,6 +562,51 @@ class AnswerWorkflow:
             workflow_trace=trace,
         )
 
+    async def _validate_claim_support(self, state: _WorkflowState) -> _WorkflowState:
+        await self._ensure_active(state["run_id"])
+        get_stream_writer()(WorkflowStatus(stage="validating"))
+        candidates = self._candidates(state["run_id"], state["selected_evidence"])
+        try:
+            decision = await self._claim_support_verifier.verify(
+                question=state["question"],
+                answer=state["answer"],
+                evidence=candidates,
+            )
+        except ClaimSupportValidationError:
+            return self._refusal_state(
+                "CLAIM_SUPPORT_VALIDATION_FAILED",
+                "The generated answer included a claim not supported by the evidence.",
+                trace=state["workflow_trace"],
+            )
+        allowed = {item.citation_id for item in candidates}
+        rendered: list[str] = []
+        for claim in decision.claims:
+            text = _CITATION_LABEL.sub("", claim.text).strip()
+            citation_ids = tuple(dict.fromkeys(claim.citation_ids))
+            if (
+                not text
+                or not citation_ids
+                or any(item not in allowed for item in citation_ids)
+            ):
+                return self._refusal_state(
+                    "CLAIM_SUPPORT_VALIDATION_FAILED",
+                    "The generated answer included a claim not supported by the evidence.",
+                    trace=state["workflow_trace"],
+            )
+            labels = " ".join(f"[{item}]" for item in citation_ids)
+            units = [unit.strip() for unit in _ANSWER_UNIT_SPLIT.split(text) if unit.strip()]
+            rendered.extend(f"{unit} {labels}" for unit in units)
+        if not rendered:
+            return self._refusal_state(
+                "CLAIM_SUPPORT_VALIDATION_FAILED",
+                "The generated answer included a claim not supported by the evidence.",
+                trace=state["workflow_trace"],
+            )
+        return _WorkflowState(
+            answer="\n".join(rendered),
+            claim_support_valid=True,
+        )
+
     async def _repair_citations(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="repairing"))
@@ -519,13 +615,24 @@ class AnswerWorkflow:
             citation_repair_attempts=1,
         )
         await self._record_trace(state["run_id"], trace)
+        validation = trace.citation_validations[-1]
+        if validation.issue == "valid":
+            raise RuntimeError("citation repair requires an invalid validation result")
         repaired = await self._citation_repairer.repair(
             question=state["question"],
             answer=state["answer"],
             evidence=self._candidates(state["run_id"], state["selected_evidence"]),
+            validation_feedback=CitationValidationFeedback(
+                issue=validation.issue,
+                unit_count=validation.unit_count,
+                citation_count=validation.citation_count,
+                uncited_unit_indices=validation.uncited_unit_indices,
+                unknown_label_unit_indices=validation.unknown_label_unit_indices,
+            ),
         )
         return _WorkflowState(
             answer=repaired.strip(),
+            claim_support_valid=False,
             repair_attempts=1,
             workflow_trace=trace,
         )
@@ -563,10 +670,16 @@ class AnswerWorkflow:
     @staticmethod
     def _after_validation(
         state: _WorkflowState,
-    ) -> Literal["answer", "repair", "refuse"]:
+    ) -> Literal["answer", "repair", "refuse", "support"]:
+        if state["citation_valid"] and not state.get("claim_support_valid", False):
+            return "support"
         if state["citation_valid"]:
             return "answer"
         return "refuse" if state["repair_attempts"] >= 1 else "repair"
+
+    @staticmethod
+    def _after_claim_support(state: _WorkflowState) -> Literal["validate", "refuse"]:
+        return "validate" if state.get("claim_support_valid", False) else "refuse"
 
     @staticmethod
     def _refusal_state(
@@ -648,22 +761,56 @@ class AnswerWorkflow:
         answer: str,
         allowed: set[str],
     ) -> Literal["empty_answer", "uncited_claim", "unknown_label", "valid"]:
+        return AnswerWorkflow._citation_validation_trace(
+            answer,
+            allowed,
+            attempt="initial",
+        ).issue
+
+    @staticmethod
+    def _citation_validation_trace(
+        answer: str,
+        allowed: set[str],
+        *,
+        attempt: Literal["initial", "repair"],
+    ) -> CitationValidationTrace:
         if not answer.strip():
-            return "empty_answer"
+            return CitationValidationTrace(
+                attempt=attempt,
+                valid=False,
+                issue="empty_answer",
+                unit_count=0,
+                citation_count=0,
+                uncited_unit_indices=(),
+                unknown_label_unit_indices=(),
+            )
         units = [
             unit.strip()
-            for unit in re.split(
-                r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+",
-                answer,
-            )
+            for unit in _ANSWER_UNIT_SPLIT.split(answer)
             if unit.strip()
         ]
         if not units:
-            return "empty_answer"
+            return CitationValidationTrace(
+                attempt=attempt,
+                valid=False,
+                issue="empty_answer",
+                unit_count=0,
+                citation_count=0,
+                uncited_unit_indices=(),
+                unknown_label_unit_indices=(),
+            )
+        issue: Literal["uncited_claim", "unknown_label", "valid"] = "valid"
+        citation_count = 0
+        uncited_unit_indices: list[int] = []
+        unknown_label_unit_indices: list[int] = []
         for index, unit in enumerate(units):
             labels = _CITATION_LABEL.findall(unit)
+            citation_count += len(labels)
             if any(label not in allowed for label in labels):
-                return "unknown_label"
+                unknown_label_unit_indices.append(index)
+                if issue == "valid":
+                    issue = "unknown_label"
+                continue
             if AnswerWorkflow._is_citation_only(unit):
                 continue
             if labels:
@@ -671,8 +818,18 @@ class AnswerWorkflow:
             if index + 1 >= len(units) or not AnswerWorkflow._is_citation_only(
                 units[index + 1], allowed
             ):
-                return "uncited_claim"
-        return "valid"
+                uncited_unit_indices.append(index)
+                if issue == "valid":
+                    issue = "uncited_claim"
+        return CitationValidationTrace(
+            attempt=attempt,
+            valid=issue == "valid",
+            issue=issue,
+            unit_count=len(units),
+            citation_count=citation_count,
+            uncited_unit_indices=tuple(uncited_unit_indices),
+            unknown_label_unit_indices=tuple(unknown_label_unit_indices),
+        )
 
     @staticmethod
     def _is_citation_only(unit: str, allowed: set[str] | None = None) -> bool:

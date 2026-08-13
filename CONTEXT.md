@@ -65,7 +65,7 @@ A structured Agent decision declaring whether retrieved chunks are sufficient an
 _Avoid_: Model reasoning, relevance score
 
 **Supplemental Retrieval**:
-The single optional second retrieval allowed after an insufficient Evidence Decision, using one standalone rewritten query against the same knowledge base.
+The single optional second retrieval stage allowed after an insufficient Evidence Decision, using up to the remaining two-query budget as independent standalone Retrieval Queries against the same Knowledge Base.
 _Avoid_: Retry loop, web search
 
 **Citation Repair**:
@@ -107,3 +107,7 @@ _Avoid_: Ground truth, score
 **Evaluation Report**:
 A replayable artifact that keeps retrieval, citation, refusal, and end-to-end results separate and binds them to dataset, code, model, workflow, chunking, embedding, and retrieval versions.
 _Avoid_: Accuracy claim, benchmark without provenance
+
+**Citation Diagnostics Report**:
+A sanitized, replayable classification of failed answer citations, bound to one Evaluation Dataset and one Evaluation Report without retaining questions, answers, prompts, or evidence text.
+_Avoid_: Alternative-evidence approval, corrected evaluation result

@@ -168,9 +168,11 @@ dependency；迁移容器继续使用 CPU 镜像。两个 extra 互斥，禁止�
 非流式结构化调用遇到连接或协议级瞬时异常时也会在同一总时限内最多重试一次；HTTP 状态错误
 和已收到的无效业务响应不会被当作可无限重放的请求。
 
-`LLM_STRUCTURED_OUTPUT_THINKING` 默认为 `default`，不向供应商发送 thinking 控制参数。仅当供应商
-明确支持该 OpenAI 兼容扩展时，可以设为 `enabled` 或 `disabled`；它只影响格式化的内部决策调用，
-不改变面向用户的流式回答生成。
+DeepSeek V4 默认开启 thinking，因此项目默认将 `LLM_ANSWER_OUTPUT_THINKING` 和
+`LLM_STRUCTURED_OUTPUT_THINKING` 都设为 `disabled`，分别控制最终流式回答与结构化内部决策。
+供应商不支持该扩展时，将对应配置设为 `default` 可省略请求中的 `thinking` 字段；只有明确支持
+该 OpenAI 兼容扩展时才使用 `enabled` 或 `disabled`。流式解析器只输出 `delta.content`，不会把
+`reasoning_content` 暴露或持久化为答案。
 
 有界查询规划使用同一供应商，并由 `LLM_RETRIEVAL_PLAN_PROMPT_VERSION` 记录提示词版本。
 原始用户问题始终是第一个检索查询。初始规划器固定使用 `temperature=0`，只为需要主动寻找
@@ -190,7 +192,7 @@ Reciprocal Rank Fusion 合并，`RETRIEVAL_RRF_RANK_CONSTANT` 配置融合排名
 证据判断和引用修复同样使用 OpenAI 兼容供应商，但通过独立端口和严格 JSON 契约接入。
 `LLM_EVIDENCE_ASSESSMENT_PROMPT_VERSION` 与 `LLM_CITATION_REPAIR_PROMPT_VERSION` 分别记录
 两个决策提示词版本。每个 Answer Run 会同时保存这些版本以及
-`ANSWER_WORKFLOW_VERSION=langgraph-bounded-multi-query-v3`，用于重放时识别完整决策配置。
+`ANSWER_WORKFLOW_VERSION=langgraph-bounded-multi-query-v4`，用于重放时识别完整决策配置。
 
 可使用以下命令做最小连通性检查：
 

@@ -3,7 +3,9 @@ import asyncio
 import hashlib
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol
 
+from sourcetrace.evaluation.citation_diagnostics import build_citation_diagnostics
 from sourcetrace.evaluation.dataset import (
     load_dataset,
     load_hybrid_query_plan,
@@ -18,6 +20,10 @@ from sourcetrace.evaluation.harness import EvaluationHarness
 from sourcetrace.evaluation.models import EvaluationRunMetadata
 from sourcetrace.evaluation.retrieval_diagnostics import build_retrieval_diagnostics
 from sourcetrace.evaluation.review import apply_judgments
+
+
+class _JsonArtifact(Protocol):
+    def model_dump_json(self, *, indent: int) -> str: ...
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -46,6 +52,10 @@ def _parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--dataset", type=Path, required=True)
     diagnose.add_argument("--report", type=Path, required=True)
     diagnose.add_argument("--output", type=Path, required=True)
+    diagnose_citations = subparsers.add_parser("diagnose-citations")
+    diagnose_citations.add_argument("--dataset", type=Path, required=True)
+    diagnose_citations.add_argument("--report", type=Path, required=True)
+    diagnose_citations.add_argument("--output", type=Path, required=True)
     rerank = subparsers.add_parser("rerank")
     rerank.add_argument("--dataset", type=Path, required=True)
     rerank.add_argument("--report", type=Path, required=True)
@@ -166,8 +176,22 @@ def _run_diagnose_retrieval(args: argparse.Namespace) -> None:
         load_report(args.report),
         report_sha256=hashlib.sha256(report_bytes).hexdigest(),
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(diagnostics.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    _write_json_artifact(args.output, diagnostics)
+
+
+def _run_diagnose_citations(args: argparse.Namespace) -> None:
+    report_bytes = args.report.read_bytes()
+    diagnostics = build_citation_diagnostics(
+        load_dataset(args.dataset),
+        load_report(args.report),
+        report_sha256=hashlib.sha256(report_bytes).hexdigest(),
+    )
+    _write_json_artifact(args.output, diagnostics)
+
+
+def _write_json_artifact(output: Path, artifact: _JsonArtifact) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(artifact.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -183,6 +207,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.mode == "diagnose-retrieval":
         _run_diagnose_retrieval(args)
+        return 0
+    if args.mode == "diagnose-citations":
+        _run_diagnose_citations(args)
         return 0
     if args.mode == "rerank":
         asyncio.run(_run_rerank(args))

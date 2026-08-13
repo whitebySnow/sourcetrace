@@ -13,7 +13,7 @@ from sourcetrace.modules.retrieval.service import (
 )
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow
-from tests.helpers import PreserveOrderReranker
+from tests.helpers import CitationPreservingClaimSupportVerifier, PreserveOrderReranker
 
 
 class StaticRetrieval:
@@ -121,8 +121,9 @@ async def test_workflow_subject_captures_retrieval_and_final_citations() -> None
         retrieval=StaticRetrieval(evidence),
         workflow_factory=lambda retrieval, run_control: AnswerWorkflow(
             retrieval=retrieval,
-            assessor=SelectingAssessor(evidence.chunk_id),
-            generator=CitingGenerator(),
+                assessor=SelectingAssessor(evidence.chunk_id),
+                generator=CitingGenerator(),
+                claim_support_verifier=CitationPreservingClaimSupportVerifier(),
             citation_repairer=UnusedRepairer(),
             run_control=run_control,
             minimum_score=0.5,

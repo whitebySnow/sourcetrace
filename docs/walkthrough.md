@@ -31,7 +31,7 @@ flowchart LR
 | `modules/knowledge_bases` | 知识库边界、分页和删除 |
 | `modules/documents` | 上传、不可变版本、摄取状态、解析、切分、索引 |
 | `modules/conversations` | 会话作用域和不可变问题历史 |
-| `modules/retrieval` | 查询改写和知识库内 pgvector 召回 |
+| `modules/retrieval` | 有界查询规划、混合召回、RRF、reranker 和证据集合 |
 | `modules/answers` | Answer Run 生命周期、SSE、引用/拒答持久化、取消 |
 | `rag/workflow.py` | 有界 Agent 状态机和最终证据门禁 |
 | `evaluation` | 数据集契约、分维度评分、离线与真实评测入口 |
@@ -120,14 +120,21 @@ SSE 是服务器到浏览器的单向长连接，适合“发起一次请求后�
 `cancel_requested`；工作流在节点边界和模型分片之间检查，再写入 `cancelled`。如果完成和
 取消竞争，数据库条件更新决定唯一终态，前端随后从历史记录对账。
 
-## 6. 检索与 embedding 原理
+## 6. 检索、embedding 与 reranker 原理
 
-BGE-M3 把查询和 chunk 映射到 1024 维 dense 向量并归一化。pgvector 用余弦距离排序，但查询
-还必须同时过滤：会话所属知识库、文档的 active searchable version，以及 completed 摄取
-状态。相似度高不代表证据充分，因此召回之后还有结构化证据判断和最终引用门禁。
+BGE-M3 把查询和 chunk 映射到 1024 维 dense 向量并归一化。生产 repository 同时提供
+pgvector cosine dense 通道和按查询条件启用的 PostgreSQL `english` lexical 通道；两个通道
+各自有界召回，再通过版本化 RRF 融合。查询还必须同时过滤会话所属 Knowledge Base、Document
+的 Active Searchable Version 和 completed 摄取状态。
 
-首版只做 dense retrieval，没有加入 BM25 或 reranker。原因不是它们无用，而是当前没有
-reviewed 评测证明召回是主要瓶颈；先保持链路可解释，再用数据决定是否增加复杂度。
+复杂问题不会进入无限查询循环。原始 Question 始终执行；规划器最多增加两条有文档标题约束的
+Retrieval Query，Evidence Decision 只能消耗剩余预算进行一次 Supplemental Retrieval。每条查询
+的融合候选分别由固定 revision 的 `BAAI/bge-reranker-v2-m3` 交叉编码重排，再执行查询覆盖、
+页面多样性和同页邻居扩展，最终主候选仍受 Top 8 限制。
+
+为什么不能只换 embedding 或只加 reranker：reranker 只能调整已召回候选的顺序，无法恢复从未
+进入候选池的 Chunk；lexical 通道适合精确术语，dense 通道适合语义表达，两者互补。相似度和
+重排分数也不等于证据充分，因此召回之后仍有结构化 Evidence Decision 和最终 Citation 门禁。
 
 ## 7. 评测设计
 
@@ -189,11 +196,12 @@ Dramatiq actor 和全局连接池生命周期冲突，最后使用官方 AsyncIO
 
 ### 当前项目最大的效果风险是什么？
 
-首个 30 题 reviewed 真实报告显示，27 个应回答样本中只有 3 个生成答案，24 个被错误拒答。
-其中 14 个样本已检索到预期证据却仍被证据判断拒答，10 个样本没有通过检索召回。3 个应拒答
-样本全部正确，说明安全边界有效但回答召回明显不足。下一步应先基于固定失败 case 校准证据
-判断提示词、阈值和选择策略，再单独处理检索召回，并通过同一版本化数据集回归，而不是凭
-演示效果调参。
+检索侧已通过有界查询规划、dense/lexical RRF 和 BGE reranker 缩小固定数据集中的漏召回范围，
+声明级结构化引用修复、阶段化诊断和 DeepSeek 契约防护也已完成同一版本化 30 题真实回归与
+逐条人工审核。旧报告中 9 个“证据充分但仍因 `uncited_claim` 拒答”的 case 在新报告中降为 0，
+但系统仍有独立风险：`ARF-011` 未跟随中文问题的语言，4 个 answerable case 在证据充分性阶段
+拒答，另有期望证据覆盖失败。15/30 的 reviewed 端到端结果只适用于该固定数据集与绑定配置，
+不能泛化为产品准确率，也不能通过放宽 Citation 或 Refusal 门禁换取更高通过数。
 
 ## 10. 简历表达边界
 

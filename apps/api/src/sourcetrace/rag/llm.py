@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -7,17 +8,39 @@ from typing import Any, Literal
 import httpx
 
 from sourcetrace.rag.ports import (
+    CitationValidationFeedback,
+    ClaimSupportDecision,
+    ClaimSupportValidationError,
     EvidenceDecision,
+    GroundedClaim,
     RetrievalCandidate,
     RetrievalPlanProposal,
 )
 
+_UUID_CITATION_LABEL = re.compile(
+    r"\[[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\]"
+)
+_ANSWER_UNIT_SPLIT = re.compile(
+    r"(?<=[.!?;])\s+|(?<=[\u3002\uff01\uff1f\uff1b])\s*|\n+"
+)
+_TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 503})
+_PROVIDER_RETRY_DELAY_SECONDS = 0.1
+
 
 class LlmProviderError(Exception):
-    def __init__(self, code: str, safe_message: str) -> None:
-        super().__init__(safe_message)
+    def __init__(self, code: str, safe_message: str, *, reason: str | None = None) -> None:
+        diagnostic_message = f"{safe_message} [{reason}]" if reason is not None else safe_message
+        super().__init__(diagnostic_message)
         self.code = code
         self.safe_message = safe_message
+        self.reason = reason
+
+
+class _CitationRepairValidationError(ValueError):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,8 +50,10 @@ class OpenAICompatibleConfig:
     model: str
     timeout_seconds: float
     prompt_version: str
-    structured_output_mode: Literal["text", "json_object"] = "text"
-    structured_output_thinking: Literal["default", "enabled", "disabled"] = "default"
+    answer_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
+    structured_output_mode: Literal["text", "json_object"] = "json_object"
+    structured_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
+    structured_output_max_tokens: int = 2048
 
     def __post_init__(self) -> None:
         if not self.base_url.startswith(("http://", "https://")):
@@ -39,6 +64,8 @@ class OpenAICompatibleConfig:
             raise ValueError("LLM model is required")
         if self.timeout_seconds <= 0:
             raise ValueError("LLM timeout must be positive")
+        if self.structured_output_max_tokens <= 0:
+            raise ValueError("LLM structured output max tokens must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +88,10 @@ def _grounded_prompt(
                 "or immediately after every sentence or list item that makes a factual claim. "
                 "Every citation must use ASCII square brackets in exactly this form: "
                 "[citation_id]. Replace citation_id with a supplied label copied verbatim. "
-                "Do not use bare IDs, full-width brackets, footnotes, or a sources section. "
+                "Use only plain paragraphs or bullet list items. Do not add standalone headings, "
+                "tables, prefaces, conclusions, or a sources section. Put each citation in the "
+                "same sentence or list item as its claim. Do not use bare IDs, full-width "
+                "brackets, or footnotes. "
                 "Use the same language as the question. Do not use outside knowledge. If the "
                 f"evidence cannot answer the question, say so.\n\n{evidence_text}"
             ),
@@ -134,7 +164,9 @@ def _retrieval_plan_prompt(
                 "by sources' and whose document_title exactly matches a supplied title; preserve "
                 "what is unsupported and what provides support. "
                 "Use recent questions only to resolve references. Do not answer, add conclusions, "
-                "or include facts that are not needed to retrieve one slot."
+                "or include facts that are not needed to retrieve one slot. "
+                'EXAMPLE JSON OUTPUT: {"evidence_groups": [{"query": "Method A '
+                'distinctive mechanism", "document_title": "Method A.pdf"}]}'
             ),
         },
         {
@@ -179,7 +211,9 @@ def _retrieval_slot_refinement_prompt(
                 "or invent a different paper association. Use recent questions only to resolve "
                 "references. Searchable titles constrain associations but are not evidence. This "
                 "request contains no retrieved chunks, expected answers, evaluation evidence, or "
-                "labels, and you must not infer that they were supplied."
+                "labels, and you must not infer that they were supplied. "
+                'EXAMPLE JSON OUTPUT: {"evidence_group": {"query": "Method A '
+                'distinctive mechanism", "document_title": "Method A.pdf"}}'
             ),
         },
         {
@@ -227,7 +261,9 @@ def _evidence_assessment_prompt(
                 "term and the candidates do not establish that association, use wording from the "
                 "question without adding an owner. "
                 "Return JSON with exactly: sufficient (boolean), selected_chunk_ids (array of "
-                "strings), and supplemental_queries (array of strings)."
+                "strings), and supplemental_queries (array of strings). "
+                'EXAMPLE JSON OUTPUT: {"sufficient": false, "selected_chunk_ids": [], '
+                '"supplemental_queries": ["missing evidence component"]}'
             ),
         },
         {
@@ -256,6 +292,7 @@ def _citation_repair_prompt(
     question: str,
     answer: str,
     evidence: Sequence[RetrievalCandidate],
+    validation_feedback: CitationValidationFeedback,
 ) -> list[dict[str, str]]:
     return [
         {
@@ -263,11 +300,71 @@ def _citation_repair_prompt(
             "content": (
                 "Repair the draft so every factual claim is supported by the supplied evidence "
                 "and cites only its allowed citation labels. Do not add claims or use outside "
-                "knowledge. Every factual sentence or list item must cite an allowed label with "
-                "ASCII square brackets in exactly this form: [citation_id]. Replace citation_id "
-                "with a supplied label copied verbatim; do not use bare IDs, full-width brackets, "
-                "footnotes, or a sources section. Keep the question's language. Return JSON with "
-                "exactly one string field named answer."
+                "knowledge. Return JSON with exactly one array field named claims. Each claim "
+                "must contain exactly two fields: text and citation_ids. text must contain only "
+                "the claim text without citations; citation_ids must contain one or more supplied "
+                "citation IDs copied verbatim. Use only evidence-supported claims, do not add "
+                "outside knowledge, headings, tables, prefaces, conclusions, or a sources section. "
+                "The application will deterministically place each claim's citations after every "
+                "sentence or list item in text. The validation feedback contains zero-based "
+                "indexes of draft units that failed; rewrite the entire draft. Keep the question's "
+                "language. "
+                'EXAMPLE JSON OUTPUT: {"claims": [{"text": "Evidence-supported claim", '
+                '"citation_ids": ["allowed-citation-id"]}]}'
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": question,
+                    "draft_answer": answer,
+                    "validation_feedback": {
+                        "issue": validation_feedback.issue,
+                        "unit_count": validation_feedback.unit_count,
+                        "citation_count": validation_feedback.citation_count,
+                        "uncited_unit_indices": list(
+                            validation_feedback.uncited_unit_indices
+                        ),
+                        "unknown_label_unit_indices": list(
+                            validation_feedback.unknown_label_unit_indices
+                        ),
+                    },
+                    "evidence": [
+                        {
+                            "citation_id": item.citation_id,
+                            "content": item.content,
+                        }
+                        for item in evidence
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def _claim_support_prompt(
+    question: str,
+    answer: str,
+    evidence: Sequence[RetrievalCandidate],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Check each factual claim in the draft against only the supplied evidence. "
+                "Preserve distinctions and qualifiers from the evidence; never strengthen "
+                "outperforming a named baseline into state-of-the-art, best, all, always, or "
+                "similar stronger wording. Split a mixed claim when the evidence supports its "
+                "parts with different qualifiers. Rewrite unsupported or over-broad claims into "
+                "the narrowest evidence-supported wording, or omit them. Return JSON with exactly "
+                "one array field named claims. Each claim must contain exactly text and "
+                "citation_ids. "
+                "Every claim must be non-empty and cite one or more supplied IDs copied verbatim. "
+                "Keep the question language and do not add outside knowledge. "
+                'EXAMPLE JSON OUTPUT: {"claims":[{"text":"Supported claim",'
+                '"citation_ids":["citation-id"]}]}'
             ),
         },
         {
@@ -277,10 +374,7 @@ def _citation_repair_prompt(
                     "question": question,
                     "draft_answer": answer,
                     "evidence": [
-                        {
-                            "citation_id": item.citation_id,
-                            "content": item.content,
-                        }
+                        {"citation_id": item.citation_id, "content": item.content}
                         for item in evidence
                     ],
                 },
@@ -319,6 +413,88 @@ def _finish_reason(payload: Any) -> object | None:
     return reason
 
 
+def _finish_reason_error(finish_reason: object) -> LlmProviderError:
+    if finish_reason == "insufficient_system_resource":
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_finish_insufficient_system_resource",
+        )
+    if finish_reason == "length":
+        return LlmProviderError(
+            "LLM_INCOMPLETE_RESPONSE",
+            "Language model did not complete the response",
+            reason="provider_finish_length",
+        )
+    if finish_reason == "content_filter":
+        return LlmProviderError(
+            "LLM_CONTENT_FILTERED",
+            "Language model response was blocked",
+            reason="provider_finish_content_filter",
+        )
+    if finish_reason == "tool_calls":
+        return LlmProviderError(
+            "LLM_INVALID_RESPONSE",
+            "Language model returned an invalid response",
+            reason="provider_finish_tool_calls",
+        )
+    return LlmProviderError(
+        "LLM_INVALID_RESPONSE",
+        "Language model returned an invalid response",
+        reason="provider_finish_unknown",
+    )
+
+
+def _http_status_error(status_code: int) -> LlmProviderError:
+    if status_code == 400:
+        return LlmProviderError(
+            "LLM_INVALID_REQUEST",
+            "Language model request was invalid",
+            reason="provider_http_invalid_format",
+        )
+    if status_code == 401:
+        return LlmProviderError(
+            "LLM_AUTHENTICATION_FAILED",
+            "Language model authentication failed",
+            reason="provider_http_authentication_failed",
+        )
+    if status_code == 402:
+        return LlmProviderError(
+            "LLM_INSUFFICIENT_BALANCE",
+            "Language model account has insufficient balance",
+            reason="provider_http_insufficient_balance",
+        )
+    if status_code == 422:
+        return LlmProviderError(
+            "LLM_INVALID_REQUEST",
+            "Language model request was invalid",
+            reason="provider_http_invalid_parameters",
+        )
+    if status_code == 429:
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_http_rate_limited",
+        )
+    if status_code == 500:
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_http_server_error",
+        )
+    if status_code == 503:
+        return LlmProviderError(
+            "LLM_PROVIDER_UNAVAILABLE",
+            "Language model is temporarily unavailable",
+            reason="provider_http_overloaded",
+        )
+    return LlmProviderError(
+        "LLM_PROVIDER_UNAVAILABLE",
+        "Language model is temporarily unavailable",
+        reason="provider_http_unavailable",
+    )
+
+
 class OpenAICompatibleAnswerGenerator:
     def __init__(
         self,
@@ -352,16 +528,39 @@ class OpenAICompatibleAnswerGenerator:
                                 "model": self.config.model,
                                 "messages": _grounded_prompt(question, evidence),
                                 "stream": True,
+                                **(
+                                    {
+                                        "thinking": {
+                                            "type": self.config.answer_output_thinking
+                                        }
+                                    }
+                                    if self.config.answer_output_thinking != "default"
+                                    else {}
+                                ),
                             },
                             timeout=self.config.timeout_seconds,
                         ) as response:
-                            response.raise_for_status()
+                            if response.status_code in _TRANSIENT_HTTP_STATUS_CODES:
+                                if attempt == 0:
+                                    await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                                    continue
+                                raise _http_status_error(response.status_code)
+                            if not response.is_success:
+                                raise _http_status_error(response.status_code)
+                            completed = False
+                            retry_after_resource_shortage = False
                             async for line in response.aiter_lines():
                                 if not line.startswith("data:"):
                                     continue
                                 data = line.removeprefix("data:").strip()
                                 if data == "[DONE]":
-                                    return
+                                    if completed:
+                                        return
+                                    raise LlmProviderError(
+                                        "LLM_INVALID_RESPONSE",
+                                        "Language model returned an incomplete response",
+                                        reason="provider_stream_missing_stop",
+                                    )
                                 try:
                                     payload = json.loads(data)
                                 except (json.JSONDecodeError, TypeError) as error:
@@ -370,24 +569,43 @@ class OpenAICompatibleAnswerGenerator:
                                         "Language model returned an invalid response",
                                     ) from error
                                 content = _delta_content(payload)
+                                if completed and content is not None:
+                                    raise LlmProviderError(
+                                        "LLM_INVALID_RESPONSE",
+                                        "Language model returned an invalid response",
+                                        reason="provider_stream_content_after_stop",
+                                    )
                                 if content is not None:
                                     emitted_content = True
                                     yield content
                                 finish_reason = _finish_reason(payload)
                                 if finish_reason is not None:
                                     if finish_reason == "stop":
-                                        return
-                                    raise LlmProviderError(
-                                        "LLM_INCOMPLETE_RESPONSE",
-                                        "Language model did not complete the response",
-                                    )
+                                        completed = True
+                                        continue
+                                    if finish_reason == "insufficient_system_resource":
+                                        if not emitted_content and attempt == 0:
+                                            retry_after_resource_shortage = True
+                                            break
+                                    raise _finish_reason_error(finish_reason)
+                            if retry_after_resource_shortage:
+                                continue
+                            if completed:
+                                return
                             raise LlmProviderError(
                                 "LLM_INVALID_RESPONSE",
                                 "Language model returned an incomplete response",
+                                reason="provider_stream_missing_stop",
                             )
-                    except httpx.RemoteProtocolError:
+                    except httpx.TimeoutException:
                         if emitted_content or attempt == 1:
                             raise
+                        await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                        continue
+                    except (httpx.NetworkError, httpx.ProtocolError):
+                        if emitted_content or attempt == 1:
+                            raise
+                        await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
                         continue
         except LlmProviderError:
             raise
@@ -395,11 +613,15 @@ class OpenAICompatibleAnswerGenerator:
             raise LlmProviderError(
                 "LLM_TIMEOUT",
                 "Language model request timed out",
+                reason="provider_request_timeout",
             ) from error
+        except httpx.HTTPStatusError as error:
+            raise _http_status_error(error.response.status_code) from error
         except httpx.HTTPError as error:
             raise LlmProviderError(
                 "LLM_PROVIDER_UNAVAILABLE",
                 "Language model is temporarily unavailable",
+                reason="provider_network_error",
             ) from error
 
 
@@ -602,6 +824,7 @@ async def _structured_completion(
                     "model": config.model,
                     "messages": messages,
                     "stream": False,
+                    "max_tokens": config.structured_output_max_tokens,
                 }
                 if temperature is not None:
                     request["temperature"] = temperature
@@ -616,11 +839,23 @@ async def _structured_completion(
                         json=request,
                         timeout=config.timeout_seconds,
                     )
+                except httpx.TimeoutException:
+                    if attempt == 1:
+                        raise
+                    await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                    continue
                 except (httpx.NetworkError, httpx.ProtocolError):
                     if attempt == 1:
                         raise
+                    await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
                     continue
-                response.raise_for_status()
+                if response.status_code in _TRANSIENT_HTTP_STATUS_CODES:
+                    if attempt == 0:
+                        await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
+                        continue
+                    raise _http_status_error(response.status_code)
+                if not response.is_success:
+                    raise _http_status_error(response.status_code)
                 payload = response.json()
                 if not isinstance(payload, dict):
                     raise ValueError
@@ -628,8 +863,15 @@ async def _structured_completion(
                 if not isinstance(choices, list) or len(choices) != 1:
                     raise ValueError
                 choice = choices[0]
-                if not isinstance(choice, dict) or choice.get("finish_reason") != "stop":
+                if not isinstance(choice, dict):
                     raise ValueError
+                finish_reason = choice.get("finish_reason")
+                if finish_reason == "insufficient_system_resource":
+                    if attempt == 0:
+                        continue
+                    raise _finish_reason_error(finish_reason)
+                if finish_reason != "stop":
+                    raise _finish_reason_error(finish_reason)
                 message = choice.get("message")
                 if not isinstance(message, dict):
                     raise ValueError
@@ -651,11 +893,15 @@ async def _structured_completion(
         raise LlmProviderError(
             "LLM_TIMEOUT",
             "Language model request timed out",
+            reason="provider_request_timeout",
         ) from error
+    except httpx.HTTPStatusError as error:
+        raise _http_status_error(error.response.status_code) from error
     except httpx.HTTPError as error:
         raise LlmProviderError(
             "LLM_PROVIDER_UNAVAILABLE",
             "Language model is temporarily unavailable",
+            reason="provider_network_error",
         ) from error
 
 
@@ -764,42 +1010,62 @@ class OpenAICompatibleEvidenceAssessor:
                     },
                 ],
             )
-        try:
-            if set(parsed) != expected_fields:
-                raise ValueError
-            sufficient = parsed["sufficient"]
-            selected = parsed["selected_chunk_ids"]
-            supplemental_queries = parsed["supplemental_queries"]
-            if not isinstance(sufficient, bool):
-                raise ValueError
-            if not isinstance(selected, list) or any(
-                not isinstance(item, str) or not item for item in selected
-            ):
-                raise ValueError
-            if len(set(selected)) != len(selected):
-                raise ValueError
-            if not isinstance(supplemental_queries, list) or any(
-                not isinstance(item, str) or not item.strip()
-                for item in supplemental_queries
-            ):
-                raise ValueError
-            normalized_supplemental = tuple(item.strip() for item in supplemental_queries)
-            if len(set(normalized_supplemental)) != len(normalized_supplemental):
-                raise ValueError
-            if not 0 <= supplemental_query_limit <= 2:
-                raise ValueError
-            if len(normalized_supplemental) > supplemental_query_limit:
-                raise ValueError
-            return EvidenceDecision(
-                sufficient=sufficient,
-                selected_chunk_ids=tuple(selected),
-                supplemental_queries=normalized_supplemental,
-            )
-        except (TypeError, ValueError) as error:
-            raise LlmProviderError(
-                "LLM_INVALID_RESPONSE",
-                "Language model returned an invalid response",
-            ) from error
+        budget_retry_used = False
+        while True:
+            try:
+                if set(parsed) != expected_fields:
+                    raise ValueError
+                sufficient = parsed["sufficient"]
+                selected = parsed["selected_chunk_ids"]
+                supplemental_queries = parsed["supplemental_queries"]
+                if not isinstance(sufficient, bool):
+                    raise ValueError
+                if not isinstance(selected, list) or any(
+                    not isinstance(item, str) or not item for item in selected
+                ):
+                    raise ValueError
+                normalized_selected = tuple(dict.fromkeys(selected))
+                if not isinstance(supplemental_queries, list) or any(
+                    not isinstance(item, str) or not item.strip()
+                    for item in supplemental_queries
+                ):
+                    raise ValueError
+                normalized_supplemental = tuple(item.strip() for item in supplemental_queries)
+                if len(set(normalized_supplemental)) != len(normalized_supplemental):
+                    raise ValueError
+                if not 0 <= supplemental_query_limit <= 2:
+                    raise ValueError
+                if len(normalized_supplemental) > supplemental_query_limit:
+                    if budget_retry_used:
+                        raise ValueError
+                    budget_retry_used = True
+                    parsed = await _structured_completion(
+                        self.config,
+                        self._client,
+                        [
+                            *messages,
+                            {
+                                "role": "system",
+                                "content": (
+                                    "The previous response exceeded the remaining supplemental "
+                                    f"query capacity ({supplemental_query_limit}). Retry once "
+                                    "with no more than that many unique, non-empty queries. "
+                                    "Return exactly the required three fields."
+                                ),
+                            },
+                        ],
+                    )
+                    continue
+                return EvidenceDecision(
+                    sufficient=sufficient,
+                    selected_chunk_ids=normalized_selected,
+                    supplemental_queries=normalized_supplemental,
+                )
+            except (TypeError, ValueError) as error:
+                raise LlmProviderError(
+                    "LLM_INVALID_RESPONSE",
+                    "Language model returned an invalid response",
+                ) from error
 
 
 class OpenAICompatibleCitationRepairer:
@@ -818,21 +1084,141 @@ class OpenAICompatibleCitationRepairer:
         question: str,
         answer: str,
         evidence: Sequence[RetrievalCandidate],
+        validation_feedback: CitationValidationFeedback,
     ) -> str:
+        messages = _citation_repair_prompt(question, answer, evidence, validation_feedback)
         parsed = await _structured_completion(
             self.config,
             self._client,
-            _citation_repair_prompt(question, answer, evidence),
+            messages,
+        )
+        empty_citations_retry_used = False
+        while True:
+            try:
+                return self._render_claims(parsed, evidence)
+            except _CitationRepairValidationError as error:
+                if (
+                    error.reason == "citation_repair_empty_citations"
+                    and not empty_citations_retry_used
+                ):
+                    empty_citations_retry_used = True
+                    parsed = await _structured_completion(
+                        self.config,
+                        self._client,
+                        [
+                            *messages,
+                            {
+                                "role": "system",
+                                "content": (
+                                    "The previous response included a claim without citation_ids. "
+                                    "Retry once. Every claim must include one or more supplied "
+                                    "citation IDs copied verbatim. Return exactly the claims field "
+                                    "and its required claim fields."
+                                ),
+                            },
+                        ],
+                    )
+                    continue
+                raise LlmProviderError(
+                    "LLM_INVALID_RESPONSE",
+                    "Language model returned an invalid response",
+                    reason=error.reason,
+                ) from error
+
+    @staticmethod
+    def _render_claims(
+        parsed: dict[str, Any],
+        evidence: Sequence[RetrievalCandidate],
+    ) -> str:
+        try:
+            if set(parsed) != {"claims"}:
+                raise _CitationRepairValidationError("citation_repair_invalid_fields")
+            claims = parsed["claims"]
+            if not isinstance(claims, list) or not claims:
+                raise _CitationRepairValidationError("citation_repair_invalid_claims")
+            allowed = {item.citation_id for item in evidence}
+            rendered: list[str] = []
+            for claim in claims:
+                if not isinstance(claim, dict) or set(claim) != {"text", "citation_ids"}:
+                    raise _CitationRepairValidationError("citation_repair_invalid_claim_fields")
+                text = claim["text"]
+                citation_ids = claim["citation_ids"]
+                if not isinstance(text, str) or not text.strip():
+                    raise _CitationRepairValidationError("citation_repair_empty_text")
+                if not isinstance(citation_ids, list) or any(
+                    not isinstance(item, str) for item in citation_ids
+                ):
+                    raise _CitationRepairValidationError("citation_repair_invalid_citations")
+                normalized_ids = tuple(dict.fromkeys(citation_ids))
+                if not normalized_ids:
+                    raise _CitationRepairValidationError("citation_repair_empty_citations")
+                if any(item not in allowed for item in normalized_ids):
+                    raise _CitationRepairValidationError("citation_repair_unknown_citation")
+                inline_ids = tuple(
+                    label[1:-1] for label in _UUID_CITATION_LABEL.findall(text)
+                )
+                if any(item not in allowed for item in inline_ids):
+                    raise _CitationRepairValidationError(
+                        "citation_repair_unknown_inline_citation"
+                    )
+                normalized_text = _UUID_CITATION_LABEL.sub("", text).strip()
+                units = [
+                    unit.strip()
+                    for unit in _ANSWER_UNIT_SPLIT.split(normalized_text)
+                    if unit.strip()
+                ]
+                if not units:
+                    raise _CitationRepairValidationError("citation_repair_empty_text")
+                labels = " ".join(f"[{item}]" for item in normalized_ids)
+                rendered.extend(f"{unit} {labels}" for unit in units)
+            return "\n".join(rendered)
+        except (KeyError, TypeError) as error:
+            raise _CitationRepairValidationError("citation_repair_invalid_claims") from error
+
+
+class OpenAICompatibleClaimSupportVerifier:
+    def __init__(
+        self,
+        config: OpenAICompatibleConfig,
+        *,
+        client: httpx.AsyncClient,
+    ) -> None:
+        self.config = config
+        self._client = client
+
+    async def verify(
+        self,
+        *,
+        question: str,
+        answer: str,
+        evidence: Sequence[RetrievalCandidate],
+    ) -> ClaimSupportDecision:
+        parsed = await _structured_completion(
+            self.config,
+            self._client,
+            _claim_support_prompt(question, answer, evidence),
         )
         try:
-            if set(parsed) != {"answer"}:
+            if set(parsed) != {"claims"}:
                 raise ValueError
-            repaired = parsed["answer"]
-            if not isinstance(repaired, str) or not repaired.strip():
+            claims = parsed["claims"]
+            allowed = {item.citation_id for item in evidence}
+            if not isinstance(claims, list) or not claims:
                 raise ValueError
-            return repaired.strip()
-        except (TypeError, ValueError) as error:
-            raise LlmProviderError(
-                "LLM_INVALID_RESPONSE",
-                "Language model returned an invalid response",
-            ) from error
+            result: list[GroundedClaim] = []
+            for claim in claims:
+                if not isinstance(claim, dict) or set(claim) != {"text", "citation_ids"}:
+                    raise ValueError
+                text = claim["text"]
+                citation_ids = claim["citation_ids"]
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError
+                if not isinstance(citation_ids, list) or not citation_ids:
+                    raise ValueError
+                normalized_ids = tuple(dict.fromkeys(citation_ids))
+                if any(not isinstance(item, str) or item not in allowed for item in normalized_ids):
+                    raise ValueError
+                result.append(GroundedClaim(text=text.strip(), citation_ids=normalized_ids))
+            return ClaimSupportDecision(claims=tuple(result))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ClaimSupportValidationError from error

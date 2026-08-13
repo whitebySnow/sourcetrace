@@ -761,6 +761,8 @@ export interface components {
         };
         /** WorkflowCitationValidationTrace */
         WorkflowCitationValidationTrace: {
+            /** Attempt */
+            attempt?: ("initial" | "repair") | null;
             /** Valid */
             valid: boolean;
             /**
@@ -768,6 +770,20 @@ export interface components {
              * @enum {string}
              */
             issue: "empty_answer" | "uncited_claim" | "unknown_label" | "valid";
+            /**
+             * Unit Count
+             * @default 0
+             */
+            unit_count: number;
+            /**
+             * Citation Count
+             * @default 0
+             */
+            citation_count: number;
+            /** Uncited Unit Indices */
+            uncited_unit_indices?: number[];
+            /** Unknown Label Unit Indices */
+            unknown_label_unit_indices?: number[];
         };
         /** WorkflowEvidenceAssessmentTrace */
         WorkflowEvidenceAssessmentTrace: {

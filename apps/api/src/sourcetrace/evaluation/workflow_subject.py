@@ -280,8 +280,15 @@ class WorkflowEvaluationSubject:
             ),
             citation_validations=tuple(
                 ObservedCitationValidation(
+                    attempt=validation.attempt,
                     valid=validation.valid,
                     issue=validation.issue,
+                    unit_count=validation.unit_count,
+                    citation_count=validation.citation_count,
+                    uncited_unit_indices=validation.uncited_unit_indices,
+                    unknown_label_unit_indices=(
+                        validation.unknown_label_unit_indices
+                    ),
                 )
                 for validation in trace.citation_validations
             ),
