@@ -46,10 +46,11 @@ def test_embedding_replay_rejects_a_different_runtime_revision() -> None:
 
 
 def test_real_evaluation_uses_the_structured_output_contract() -> None:
-    settings = Settings()
+    settings = Settings(llm_api_key="test-api-key")
 
     config = _llm_config(settings, prompt_version="test-structured-contract")
 
+    assert config.api_key == "test-api-key"
     assert config.answer_output_thinking == "disabled"
     assert config.structured_output_mode == "json_object"
     assert config.structured_output_thinking == "disabled"
