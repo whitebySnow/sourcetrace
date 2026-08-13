@@ -67,10 +67,10 @@ class AnswerRun(UUIDPrimaryKeyMixin, Base):
     )
     citation_repair_prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     workflow_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    provider_connect_timeout_seconds: Mapped[float] = mapped_column(nullable=False)
-    provider_read_timeout_seconds: Mapped[float] = mapped_column(nullable=False)
-    provider_request_timeout_seconds: Mapped[float] = mapped_column(nullable=False)
-    provider_operation_deadline_seconds: Mapped[float] = mapped_column(nullable=False)
+    provider_connect_timeout_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    provider_read_timeout_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    provider_request_timeout_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    provider_operation_deadline_seconds: Mapped[float | None] = mapped_column(nullable=True)
     workflow_trace: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

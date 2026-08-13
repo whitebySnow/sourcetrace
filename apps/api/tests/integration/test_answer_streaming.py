@@ -686,10 +686,6 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
                 evidence_assessment_prompt_version=("legacy-no-evidence-assessment"),
                 citation_repair_prompt_version="legacy-no-citation-repair",
                 workflow_version="linear-grounded-v1",
-                provider_connect_timeout_seconds=60,
-                provider_read_timeout_seconds=60,
-                provider_request_timeout_seconds=60,
-                provider_operation_deadline_seconds=60,
                 workflow_trace={
                     "retrieval_queries": ["What is the Moon made of?"],
                     "assessments": [],
@@ -722,6 +718,15 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
     )
     assert current["outcome"] == "refused"
     assert current["answer"] is None
+    prior = next(
+        item
+        for item in history_response.json()["items"]
+        if item["question_content"] == "What is the Moon made of?"
+    )
+    assert prior["provider_connect_timeout_seconds"] is None
+    assert prior["provider_read_timeout_seconds"] is None
+    assert prior["provider_request_timeout_seconds"] is None
+    assert prior["provider_operation_deadline_seconds"] is None
 
 
 async def test_follow_up_answer_uses_question_language_and_preserves_source_text(

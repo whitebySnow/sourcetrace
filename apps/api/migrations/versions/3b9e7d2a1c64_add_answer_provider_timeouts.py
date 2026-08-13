@@ -27,14 +27,8 @@ def upgrade() -> None:
     for column_name in _COLUMNS:
         op.add_column(
             "answer_runs",
-            sa.Column(
-                column_name,
-                sa.Float(),
-                nullable=False,
-                server_default="60",
-            ),
+            sa.Column(column_name, sa.Float(), nullable=True),
         )
-        op.alter_column("answer_runs", column_name, server_default=None)
 
 
 def downgrade() -> None:

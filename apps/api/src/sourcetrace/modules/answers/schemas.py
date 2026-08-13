@@ -193,10 +193,10 @@ class AnswerHistoryItem(BaseModel):
     evidence_assessment_prompt_version: str
     citation_repair_prompt_version: str
     workflow_version: str
-    provider_connect_timeout_seconds: float
-    provider_read_timeout_seconds: float
-    provider_request_timeout_seconds: float
-    provider_operation_deadline_seconds: float
+    provider_connect_timeout_seconds: float | None
+    provider_read_timeout_seconds: float | None
+    provider_request_timeout_seconds: float | None
+    provider_operation_deadline_seconds: float | None
     workflow_trace: AnswerWorkflowTrace
     created_at: datetime
     completed_at: datetime | None

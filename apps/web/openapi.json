@@ -1544,19 +1544,47 @@
             "title": "Workflow Version"
           },
           "provider_connect_timeout_seconds": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Provider Connect Timeout Seconds"
           },
           "provider_read_timeout_seconds": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Provider Read Timeout Seconds"
           },
           "provider_request_timeout_seconds": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Provider Request Timeout Seconds"
           },
           "provider_operation_deadline_seconds": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Provider Operation Deadline Seconds"
           },
           "workflow_trace": {
