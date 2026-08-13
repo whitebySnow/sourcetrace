@@ -50,7 +50,10 @@ class OpenAICompatibleConfig:
     base_url: str
     api_key: str = field(repr=False)
     model: str
-    timeout_seconds: float
+    connect_timeout_seconds: float
+    read_timeout_seconds: float
+    request_timeout_seconds: float
+    operation_deadline_seconds: float
     prompt_version: str
     answer_output_thinking: Literal["default", "enabled", "disabled"] = "disabled"
     structured_output_mode: Literal["text", "json_object"] = "json_object"
@@ -64,8 +67,21 @@ class OpenAICompatibleConfig:
             raise ValueError("LLM API key is required")
         if not self.model:
             raise ValueError("LLM model is required")
-        if self.timeout_seconds <= 0:
-            raise ValueError("LLM timeout must be positive")
+        timeout_values = (
+            self.connect_timeout_seconds,
+            self.read_timeout_seconds,
+            self.request_timeout_seconds,
+            self.operation_deadline_seconds,
+        )
+        if any(value <= 0 for value in timeout_values):
+            raise ValueError("LLM timeouts must be positive")
+        if self.connect_timeout_seconds > self.request_timeout_seconds:
+            raise ValueError("LLM connect timeout cannot exceed the request timeout")
+        if self.read_timeout_seconds > self.request_timeout_seconds:
+            raise ValueError("LLM read timeout cannot exceed the request timeout")
+        minimum_deadline = self.request_timeout_seconds * 2 + _PROVIDER_RETRY_DELAY_SECONDS
+        if self.operation_deadline_seconds < minimum_deadline:
+            raise ValueError("LLM operation deadline must allow two requests and retry delay")
         if self.structured_output_max_tokens <= 0:
             raise ValueError("LLM structured output max tokens must be positive")
 
@@ -74,6 +90,16 @@ class OpenAICompatibleConfig:
 class _PlannedEvidenceGroup:
     query: str
     document_title: str
+
+
+def _http_timeout(config: OpenAICompatibleConfig) -> httpx.Timeout:
+    return httpx.Timeout(
+        timeout=config.request_timeout_seconds,
+        connect=config.connect_timeout_seconds,
+        read=config.read_timeout_seconds,
+        write=config.request_timeout_seconds,
+        pool=config.connect_timeout_seconds,
+    )
 
 
 def _grounded_prompt(
@@ -518,91 +544,92 @@ class OpenAICompatibleAnswerGenerator:
     ) -> AsyncIterator[str]:
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         try:
-            async with asyncio.timeout(self.config.timeout_seconds):
+            async with asyncio.timeout(self.config.operation_deadline_seconds):
                 emitted_content = False
                 for attempt in range(2):
                     try:
-                        async with self._client.stream(
-                            "POST",
-                            url,
-                            headers={
-                                "Authorization": f"Bearer {self.config.api_key}",
-                                "Accept": "text/event-stream",
-                            },
-                            json={
-                                "model": self.config.model,
-                                "messages": _grounded_prompt(question, evidence),
-                                "stream": True,
-                                **(
-                                    {
-                                        "thinking": {
-                                            "type": self.config.answer_output_thinking
+                        async with asyncio.timeout(self.config.request_timeout_seconds):
+                            async with self._client.stream(
+                                "POST",
+                                url,
+                                headers={
+                                    "Authorization": f"Bearer {self.config.api_key}",
+                                    "Accept": "text/event-stream",
+                                },
+                                json={
+                                    "model": self.config.model,
+                                    "messages": _grounded_prompt(question, evidence),
+                                    "stream": True,
+                                    **(
+                                        {
+                                            "thinking": {
+                                                "type": self.config.answer_output_thinking
+                                            }
                                         }
-                                    }
-                                    if self.config.answer_output_thinking != "default"
-                                    else {}
-                                ),
-                            },
-                            timeout=self.config.timeout_seconds,
-                        ) as response:
-                            if response.status_code in _TRANSIENT_HTTP_STATUS_CODES:
-                                if attempt == 0:
-                                    await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
-                                    continue
-                                raise _http_status_error(response.status_code)
-                            if not response.is_success:
-                                raise _http_status_error(response.status_code)
-                            completed = False
-                            retry_after_resource_shortage = False
-                            async for line in response.aiter_lines():
-                                if not line.startswith("data:"):
-                                    continue
-                                data = line.removeprefix("data:").strip()
-                                if data == "[DONE]":
-                                    if completed:
-                                        return
-                                    raise LlmProviderError(
-                                        "LLM_INVALID_RESPONSE",
-                                        "Language model returned an incomplete response",
-                                        reason="provider_stream_missing_stop",
-                                    )
-                                try:
-                                    payload = json.loads(data)
-                                except (json.JSONDecodeError, TypeError) as error:
-                                    raise LlmProviderError(
-                                        "LLM_INVALID_RESPONSE",
-                                        "Language model returned an invalid response",
-                                    ) from error
-                                content = _delta_content(payload)
-                                if completed and content is not None:
-                                    raise LlmProviderError(
-                                        "LLM_INVALID_RESPONSE",
-                                        "Language model returned an invalid response",
-                                        reason="provider_stream_content_after_stop",
-                                    )
-                                if content is not None:
-                                    emitted_content = True
-                                    yield content
-                                finish_reason = _finish_reason(payload)
-                                if finish_reason is not None:
-                                    if finish_reason == "stop":
-                                        completed = True
+                                        if self.config.answer_output_thinking != "default"
+                                        else {}
+                                    ),
+                                },
+                                timeout=_http_timeout(self.config),
+                            ) as response:
+                                if response.status_code in _TRANSIENT_HTTP_STATUS_CODES:
+                                    if attempt == 0:
+                                        await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
                                         continue
-                                    if finish_reason == "insufficient_system_resource":
-                                        if not emitted_content and attempt == 0:
-                                            retry_after_resource_shortage = True
-                                            break
-                                    raise _finish_reason_error(finish_reason)
-                            if retry_after_resource_shortage:
-                                continue
-                            if completed:
-                                return
-                            raise LlmProviderError(
-                                "LLM_INVALID_RESPONSE",
-                                "Language model returned an incomplete response",
-                                reason="provider_stream_missing_stop",
-                            )
-                    except httpx.TimeoutException:
+                                    raise _http_status_error(response.status_code)
+                                if not response.is_success:
+                                    raise _http_status_error(response.status_code)
+                                completed = False
+                                retry_after_resource_shortage = False
+                                async for line in response.aiter_lines():
+                                    if not line.startswith("data:"):
+                                        continue
+                                    data = line.removeprefix("data:").strip()
+                                    if data == "[DONE]":
+                                        if completed:
+                                            return
+                                        raise LlmProviderError(
+                                            "LLM_INVALID_RESPONSE",
+                                            "Language model returned an incomplete response",
+                                            reason="provider_stream_missing_stop",
+                                        )
+                                    try:
+                                        payload = json.loads(data)
+                                    except (json.JSONDecodeError, TypeError) as error:
+                                        raise LlmProviderError(
+                                            "LLM_INVALID_RESPONSE",
+                                            "Language model returned an invalid response",
+                                        ) from error
+                                    content = _delta_content(payload)
+                                    if completed and content is not None:
+                                        raise LlmProviderError(
+                                            "LLM_INVALID_RESPONSE",
+                                            "Language model returned an invalid response",
+                                            reason="provider_stream_content_after_stop",
+                                        )
+                                    if content is not None:
+                                        emitted_content = True
+                                        yield content
+                                    finish_reason = _finish_reason(payload)
+                                    if finish_reason is not None:
+                                        if finish_reason == "stop":
+                                            completed = True
+                                            continue
+                                        if finish_reason == "insufficient_system_resource":
+                                            if not emitted_content and attempt == 0:
+                                                retry_after_resource_shortage = True
+                                                break
+                                        raise _finish_reason_error(finish_reason)
+                                if retry_after_resource_shortage:
+                                    continue
+                                if completed:
+                                    return
+                                raise LlmProviderError(
+                                    "LLM_INVALID_RESPONSE",
+                                    "Language model returned an incomplete response",
+                                    reason="provider_stream_missing_stop",
+                                )
+                    except (httpx.TimeoutException, TimeoutError):
                         if emitted_content or attempt == 1:
                             raise
                         await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)
@@ -823,7 +850,7 @@ async def _structured_completion(
 ) -> dict[str, Any]:
     url = f"{config.base_url.rstrip('/')}/chat/completions"
     try:
-        async with asyncio.timeout(config.timeout_seconds):
+        async with asyncio.timeout(config.operation_deadline_seconds):
             for attempt in range(2):
                 request: dict[str, Any] = {
                     "model": config.model,
@@ -838,13 +865,14 @@ async def _structured_completion(
                 if config.structured_output_thinking != "default":
                     request["thinking"] = {"type": config.structured_output_thinking}
                 try:
-                    response = await client.post(
-                        url,
-                        headers={"Authorization": f"Bearer {config.api_key}"},
-                        json=request,
-                        timeout=config.timeout_seconds,
-                    )
-                except httpx.TimeoutException:
+                    async with asyncio.timeout(config.request_timeout_seconds):
+                        response = await client.post(
+                            url,
+                            headers={"Authorization": f"Bearer {config.api_key}"},
+                            json=request,
+                            timeout=_http_timeout(config),
+                        )
+                except (httpx.TimeoutException, TimeoutError):
                     if attempt == 1:
                         raise
                     await asyncio.sleep(_PROVIDER_RETRY_DELAY_SECONDS)

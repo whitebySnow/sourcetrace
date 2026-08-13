@@ -55,3 +55,7 @@ def test_real_evaluation_uses_the_structured_output_contract() -> None:
     assert config.structured_output_mode == "json_object"
     assert config.structured_output_thinking == "disabled"
     assert config.structured_output_max_tokens == 2048
+    assert config.connect_timeout_seconds == 10
+    assert config.read_timeout_seconds == 120
+    assert config.request_timeout_seconds == 180
+    assert config.operation_deadline_seconds == 361

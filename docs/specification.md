@@ -250,6 +250,9 @@ LangGraph 是首版 Agent 编排核心。固定工作流为：
 - 当前默认模型为 `deepseek-v4-flash`，必须配置化。模型名称是供应商侧标识，评测结果必须
   同时绑定供应商、模型名称和代码版本，不能泛化到其他模型或兼容平台。
 - 接入前必须通过能力探测验证流式响应、结构化输出、超时、取消和错误格式。
+- 供应商 timeout 必须分别定义 connect、read、单次 request lifecycle 和包含一次有界重试的
+  operation deadline。总 deadline 必须足以容纳两次单次请求和退避；单次 timeout 只能在尚未
+  输出正文时重试一次，任何路径都不能无限等待或在已有正文后重放请求。
 - 最终流式生成和结构化内部决策必须分别配置 thinking；当前 DeepSeek 配置基线显式关闭两者，
   不支持该扩展的兼容平台必须能省略参数。
 - 结构化结果只有在 `finish_reason=stop`、正文非空、JSON 解码和精确业务 Schema 全部通过时

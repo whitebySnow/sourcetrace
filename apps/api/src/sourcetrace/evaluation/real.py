@@ -59,7 +59,10 @@ def _llm_config(settings: Settings, *, prompt_version: str) -> OpenAICompatibleC
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key.get_secret_value(),
         model=settings.llm_model,
-        timeout_seconds=settings.llm_timeout_seconds,
+        connect_timeout_seconds=settings.llm_connect_timeout_seconds,
+        read_timeout_seconds=settings.llm_read_timeout_seconds,
+        request_timeout_seconds=settings.llm_request_timeout_seconds,
+        operation_deadline_seconds=settings.llm_operation_deadline_seconds,
         prompt_version=prompt_version,
         answer_output_thinking=settings.llm_answer_output_thinking,
         structured_output_mode=settings.llm_structured_output_mode,
@@ -192,5 +195,11 @@ async def run_real_evaluation(
                     settings.llm_evidence_assessment_prompt_version
                 ),
                 citation_repair_prompt_version=(settings.llm_citation_repair_prompt_version),
+                provider_connect_timeout_seconds=(settings.llm_connect_timeout_seconds),
+                provider_read_timeout_seconds=settings.llm_read_timeout_seconds,
+                provider_request_timeout_seconds=settings.llm_request_timeout_seconds,
+                provider_operation_deadline_seconds=(
+                    settings.llm_operation_deadline_seconds
+                ),
             ),
         )
