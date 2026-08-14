@@ -465,3 +465,32 @@ SHA-256；应用后 reviewed report SHA-256 为
 失败仍包含期望证据覆盖、预期回答和拒答行为等独立失败；`ARF-011` 暴露的回答语言一致性问题也
 尚未修复。case 级原始与 reviewed 报告包含本地论文摘录，继续保留在被 Git 忽略的
 `output/evals/`，不提交。
+
+### Dataset 1.2.0 DeepSeek 回归
+
+2026-08-14，提交 `cfdc08bafdf6679c8ebf896f2ae95f9ea041cc3b` 上的首次授权运行因旧的
+共享 60 秒 operation deadline 中止，没有生成 Report 或分数。PR #69 合并 Issue #68 后，使用
+合并提交 `4c6aaaf69bb26950ac844aeba3188e15ac993df9`、人工审核的
+`agentic-rag-foundations@1.2.0`、`deepseek-v4-flash`、工作流 v6、生产混合检索 v7、本地
+BGE-M3 与固定 `BAAI/bge-reranker-v2-m3` 重新运行同一 30 题评测。模型调用使用 10 秒 connect、
+120 秒 read、180 秒单次 request lifecycle 和 361 秒 operation deadline；运行完成且没有基础设施
+错误。原始报告 SHA-256 为
+`0462d97b9aaa9d32500293618c1ea6e4a0f4027ab58567397468c4a8c0d1ee43`。
+
+| 维度 | 人工审核前结果 |
+|---|---|
+| 检索 | 25 passed，2 failed，3 not applicable |
+| 引用 | 17 passed，10 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 3 passed，10 failed，17 pending review |
+
+用户逐条审核全部 17 个待审回答并判定通过。judgment 位于
+`evals/judgments/agentic-rag-foundations-v1.2.0-4c6aaaf-deepseek-v4-flash-timeout-v6.json`，
+只覆盖本轮 `pending_review` case，并绑定上述原始报告 SHA-256；应用后的 reviewed report
+SHA-256 为 `9691ade49662bed8f468bbed5438ea727ae0e2a8c073d884418f6812f5924d18`。最终端到端
+结果为 20 passed、10 failed、0 pending review，检索、引用和拒答三个客观维度保持不变。
+
+该结果只描述固定三篇论文、固定 30 题、上述代码与供应商配置。10 个最终失败均来自自动检索、
+引用或严格拒答路径，人工审核没有覆盖或改写它们；20/30 不能泛化为产品准确率。剩余检索失败为
+`ARF-023`、`ARF-024`；引用失败为 `ARF-006`、`ARF-009`、`ARF-012`、`ARF-013`、
+`ARF-017`、`ARF-020`、`ARF-023`、`ARF-024`、`ARF-026`、`ARF-030`。
