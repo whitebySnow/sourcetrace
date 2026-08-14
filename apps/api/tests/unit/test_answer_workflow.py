@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Sequence
+from typing import cast
 from uuid import UUID, uuid4, uuid5
 
 from sourcetrace.modules.retrieval.service import (
@@ -121,9 +122,18 @@ class SequentialAssessor:
     def __init__(self, decisions: Sequence[EvidenceDecision]) -> None:
         self.decisions = list(decisions)
         self.supplemental_query_limits: list[int] = []
+        self.previously_selected_chunk_ids: list[tuple[str, ...]] = []
+        self.evidence_query_matches: list[tuple[tuple[str, tuple[str, ...]], ...]] = []
 
     async def assess(self, **kwargs: object) -> EvidenceDecision:
         self.supplemental_query_limits.append(int(kwargs["supplemental_query_limit"]))
+        self.previously_selected_chunk_ids.append(
+            tuple(kwargs.get("previously_selected_chunk_ids", ()))  # type: ignore[arg-type]
+        )
+        evidence = cast(Sequence[RetrievalCandidate], kwargs["evidence"])
+        self.evidence_query_matches.append(
+            tuple((candidate.chunk_id, candidate.matched_queries) for candidate in evidence)
+        )
         return self.decisions.pop(0)
 
 
@@ -190,9 +200,7 @@ class CitationPreservingClaimSupportVerifier:
         **kwargs: object,
     ) -> ClaimSupportDecision:
         return ClaimSupportDecision(
-            claims=(
-                GroundedClaim(text=answer, citation_ids=(evidence[0].citation_id,)),
-            )
+            claims=(GroundedClaim(text=answer, citation_ids=(evidence[0].citation_id,)),)
         )
 
 
@@ -301,16 +309,12 @@ async def test_workflow_cites_each_sentence_in_a_supported_claim() -> None:
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(run_id, uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(run_id, uuid4(), "Question", ()))
     ]
 
     assert events[-1].type == "answered"
     assert events[-1].answer == (
-        f"First supported sentence. [{citation_id}]\n"
-        f"Second supported sentence. [{citation_id}]"
+        f"First supported sentence. [{citation_id}]\nSecond supported sentence. [{citation_id}]"
     )
 
 
@@ -322,9 +326,7 @@ async def test_workflow_refuses_when_no_supported_claim_remains() -> None:
         retrieval=RecordingRetrieval([evidence]),
         assessor=SelectingAssessor(evidence.chunk_id),
         generator=RecordingGenerator(f"Unsupported expansion [{citation_id}]"),
-        claim_support_verifier=RecordingClaimSupportVerifier(
-            ClaimSupportDecision(claims=())
-        ),
+        claim_support_verifier=RecordingClaimSupportVerifier(ClaimSupportDecision(claims=())),
         citation_repairer=UnusedCitationRepairer(),
         run_control=ActiveRunControl(),
         minimum_score=0.5,
@@ -332,10 +334,7 @@ async def test_workflow_refuses_when_no_supported_claim_remains() -> None:
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(run_id, uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(run_id, uuid4(), "Question", ()))
     ]
 
     assert events[-1].type == "refused"
@@ -357,10 +356,7 @@ async def test_workflow_fails_closed_without_a_claim_support_verifier() -> None:
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(run_id, uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(run_id, uuid4(), "Question", ()))
     ]
 
     assert events[-1].type == "refused"
@@ -383,10 +379,7 @@ async def test_workflow_refuses_an_over_broad_claim_rejected_by_the_verifier() -
     )
 
     events = [
-        event
-        async for event in workflow.run(
-            WorkflowRequest(run_id, uuid4(), "Question", ())
-        )
+        event async for event in workflow.run(WorkflowRequest(run_id, uuid4(), "Question", ()))
     ]
 
     assert events[-1].type == "refused"
@@ -477,7 +470,7 @@ async def test_workflow_performs_only_one_supplemental_retrieval() -> None:
         [
             EvidenceDecision(
                 sufficient=False,
-                selected_chunk_ids=(),
+                selected_chunk_ids=(str(initial.chunk_id),),
                 supplemental_queries=("bounded agent maximum retrieval attempts",),
             ),
             EvidenceDecision(
@@ -520,17 +513,34 @@ async def test_workflow_performs_only_one_supplemental_retrieval() -> None:
         ),
     ]
     assert assessor.supplemental_query_limits == [2, 0]
+    assert assessor.previously_selected_chunk_ids == [(), (str(initial.chunk_id),)]
+    assert assessor.evidence_query_matches == [
+        ((str(initial.chunk_id), ("What is the retry limit?",)),),
+        (
+            ((str(initial.chunk_id)), ("What is the retry limit?",)),
+            (
+                str(supplemental.chunk_id),
+                (
+                    "What is the retry limit?",
+                    "bounded agent maximum retrieval attempts",
+                ),
+            ),
+        ),
+    ]
     assert control.traces[-1].retrieval_queries == (
         "What is the retry limit?",
         "bounded agent maximum retrieval attempts",
     )
     assert [assessment.selected_chunk_ids for assessment in control.traces[-1].assessments] == [
-        (),
-        (str(supplemental.chunk_id),),
+        (str(initial.chunk_id),),
+        (str(initial.chunk_id), str(supplemental.chunk_id)),
     ]
     assert control.traces[-1].supplemental_retrieval_attempts == 1
     assert control.traces[-1].citation_repair_attempts == 0
-    assert [candidate.chunk_id for candidate in generator.evidence] == [str(supplemental.chunk_id)]
+    assert [candidate.chunk_id for candidate in generator.evidence] == [
+        str(initial.chunk_id),
+        str(supplemental.chunk_id),
+    ]
     assert events[-1].type == "answered"
 
 
@@ -610,9 +620,7 @@ async def test_workflow_keeps_chinese_after_citation_repair() -> None:
     run_id = uuid4()
     evidence = _evidence()
     citation_id = str(uuid5(run_id, str(evidence.chunk_id)))
-    repairer = RecordingCitationRepairer(
-        f"Agent workflows must remain bounded. [{citation_id}]"
-    )
+    repairer = RecordingCitationRepairer(f"Agent workflows must remain bounded. [{citation_id}]")
     workflow = AnswerWorkflow(
         retrieval=RecordingRetrieval([evidence]),
         assessor=SelectingAssessor(evidence.chunk_id),
@@ -643,9 +651,7 @@ async def test_workflow_can_render_english_evidence_as_a_grounded_chinese_answer
     workflow = AnswerWorkflow(
         retrieval=RecordingRetrieval([evidence]),
         assessor=SelectingAssessor(evidence.chunk_id),
-        generator=RecordingGenerator(
-            f"Agent workflows must remain bounded. [{citation_id}]"
-        ),
+        generator=RecordingGenerator(f"Agent workflows must remain bounded. [{citation_id}]"),
         claim_support_verifier=RecordingClaimSupportVerifier(
             ClaimSupportDecision(
                 claims=(

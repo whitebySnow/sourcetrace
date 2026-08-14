@@ -76,6 +76,9 @@ def _evidence() -> list[RetrievalCandidate]:
             content="BGE-M3 dense vectors are normalized before indexing.",
             score=0.91,
             citation_id="citation-1",
+            document_title="BGE-M3.pdf",
+            page_number=7,
+            matched_queries=("How are vectors indexed?", "vector indexing"),
         )
     ]
 
@@ -99,6 +102,9 @@ def _uuid_evidence() -> tuple[list[RetrievalCandidate], str]:
                 content="The claim is supported.",
                 score=0.9,
                 citation_id=citation_id,
+                document_title="Support.pdf",
+                page_number=1,
+                matched_queries=(),
             )
         ],
         citation_id,
@@ -251,9 +257,7 @@ async def test_provider_ignores_stream_metadata_and_reasoning_content() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
 
-        deltas = await _collect(
-            provider.stream_answer(question="Question", evidence=_evidence())
-        )
+        deltas = await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert deltas == ["Grounded answer"]
 
@@ -334,9 +338,7 @@ async def test_provider_retries_a_transient_http_error_before_content_once() -> 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
 
-        deltas = await _collect(
-            provider.stream_answer(question="Question", evidence=_evidence())
-        )
+        deltas = await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert deltas == ["Recovered"]
     assert attempts == 2
@@ -385,9 +387,7 @@ async def test_provider_retries_a_network_error_before_content_once() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
 
-        deltas = await _collect(
-            provider.stream_answer(question="Question", evidence=_evidence())
-        )
+        deltas = await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert deltas == ["Recovered"]
     assert attempts == 2
@@ -564,9 +564,7 @@ async def test_provider_retries_insufficient_system_resource_before_content_once
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAICompatibleAnswerGenerator(_config(), client=client)
 
-        deltas = await _collect(
-            provider.stream_answer(question="Question", evidence=_evidence())
-        )
+        deltas = await _collect(provider.stream_answer(question="Question", evidence=_evidence()))
 
     assert deltas == ["Recovered"]
     assert attempts == 2
@@ -1682,6 +1680,7 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
             question="How are vectors indexed?",
             queries=("How are vectors indexed?", "vector indexing"),
             evidence=_evidence(),
+            previously_selected_chunk_ids=("chunk-1",),
             supplemental_query_limit=2,
         )
 
@@ -1697,6 +1696,20 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     serialized = json.dumps(payload["messages"])
     assert "chunk-1" in serialized
     assert "BGE-M3 dense vectors" in serialized
+    assert "BGE-M3.pdf" in serialized
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    user_message = messages[1]
+    assert isinstance(user_message, dict)
+    user_input = json.loads(user_message["content"])
+    assert user_input["candidates"][0]["document_title"] == "BGE-M3.pdf"
+    assert user_input["candidates"][0]["page_number"] == 7
+    assert user_input["candidates"][0]["previously_selected"] is True
+    assert user_input["candidates"][0]["matched_retrieval_queries"] == [
+        "How are vectors indexed?",
+        "vector indexing",
+    ]
+    assert user_input["previously_selected_chunk_ids"] == ["chunk-1"]
     assert "supplemental_query_limit" in serialized
     assert "retrieval_queries" in serialized
     system_prompt = payload["messages"][0]["content"]
@@ -1704,6 +1717,11 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     assert '"sufficient": false' in system_prompt
     assert '"selected_chunk_ids": []' in system_prompt
     assert '"supplemental_queries": ["missing evidence component"]' in system_prompt
+    assert "Keep them selected" in system_prompt
+    assert "source identity and location metadata" in system_prompt
+    assert "never treat query text as evidence" in system_prompt
+    assert "explicitly gives a counterexample or limitation" in system_prompt
+    assert "every requested component is covered" in system_prompt
 
 
 async def test_evidence_assessor_does_not_invite_unsupported_query_associations() -> None:
@@ -2197,6 +2215,9 @@ async def test_claim_support_verifier_preserves_evidence_qualifiers() -> None:
             ),
             score=0.9,
             citation_id="citation-1",
+            document_title="RAG.pdf",
+            page_number=1,
+            matched_queries=(),
         )
     ]
 
@@ -2342,7 +2363,6 @@ async def test_claim_support_verifier_rejects_unknown_citation_safely() -> None:
                 answer="Draft [citation-1]",
                 evidence=_evidence(),
             )
-
 
 
 async def test_citation_repairer_accepts_json_followed_by_explanatory_text() -> None:
@@ -2550,11 +2570,7 @@ async def test_citation_repairer_rejects_repeated_empty_citations_with_safe_reas
                     {
                         "message": {
                             "content": json.dumps(
-                                {
-                                    "claims": [
-                                        {"text": "No citation", "citation_ids": []}
-                                    ]
-                                }
+                                {"claims": [{"text": "No citation", "citation_ids": []}]}
                             )
                         },
                         "finish_reason": "stop",
@@ -2689,6 +2705,88 @@ async def test_evidence_assessor_rejects_queries_over_remaining_capacity() -> No
         )
 
     assert decision.supplemental_queries == ("first",)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_corrects_query_that_was_already_executed() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        supplemental_query = "  QUESTION  " if attempts == 1 else "new evidence query"
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": [supplemental_query],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        decision = await assessor.assess(
+            question="Question",
+            queries=("Question", "initial expansion"),
+            evidence=_evidence(),
+            supplemental_query_limit=1,
+        )
+
+    assert decision.supplemental_queries == ("new evidence query",)
+    assert attempts == 2
+
+
+async def test_evidence_assessor_rejects_persistently_repeated_executed_query() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": ["question"],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+
+        with pytest.raises(LlmProviderError) as error:
+            await assessor.assess(
+                question="Question",
+                queries=("Question", "initial expansion"),
+                evidence=_evidence(),
+                supplemental_query_limit=1,
+            )
+
+    assert error.value.code == "LLM_INVALID_RESPONSE"
     assert attempts == 2
 
 

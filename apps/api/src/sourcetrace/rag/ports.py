@@ -9,6 +9,9 @@ class RetrievalCandidate:
     content: str
     score: float
     citation_id: str
+    document_title: str
+    page_number: int
+    matched_queries: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +83,7 @@ class EvidenceAssessor(Protocol):
         question: str,
         queries: Sequence[str],
         evidence: Sequence[RetrievalCandidate],
+        previously_selected_chunk_ids: Sequence[str],
         supplemental_query_limit: int,
     ) -> EvidenceDecision: ...
 

@@ -585,3 +585,45 @@ Citation/Refusal 门禁来修正。
 **边界**：人工 judgment 只处理 17 个 `pending_review` 回答，不覆盖自动失败。后续应把“完整证据
 未召回”“等价证据未被评测真值覆盖”和“证据已到达但错误拒答”分成独立诊断，不在同一实验中
 同时调整检索、生成和评分标准。
+
+## 30. 已召回标准证据仍被 Evidence Assessment 拒绝
+
+**症状**：Issue #71 针对 `ARF-009`、`ARF-026`、`ARF-030` 的既有 reviewed report 做只读
+诊断。三题的规范证据都已经进入最终候选，位置分别为第 2、3/6/8、7，但 Evidence Decision
+仍判定不足。`ARF-009` 还提出了与已执行查询相同的补充查询，去重后没有发生 Supplemental
+Retrieval；`ARF-030` 第一轮已经选中直接限制性证据，第二轮加入候选后反而清空选择。
+
+**可证伪探针**：经用户单独授权，使用当前 DeepSeek 官方配置分别只发送三题及其 Dataset 规范
+证据，不执行检索、生成或评分。`ARF-009` 与 `ARF-030` 在单一规范证据下判定充分；
+`ARF-026` 在四条规范摘录下仍判定不足。后者的摘录只包含 `is based on DPR`、`BART-large`、
+`task-specific actions` 和 `three types of Critique tokens` 等局部文本，而旧候选接口不提供文档
+标题或页码；在“不得使用模型内部知识”的约束下，评估器无法证明这些术语分别属于哪篇论文。
+该探针只用于区分接口、噪声和状态假设，不构成 Evaluation Report 或产品准确率。
+
+**修复**：`RetrievalCandidate` 增加已有的文档标题和 PDF 页码，Evidence Assessor 把它们作为
+来源身份与位置元数据使用。工作流在首次不足判断后保留已选证据，补充检索时把它们与新候选
+去重合并并显式传入评估器，最终允许集合采用稳定并集；最终充分性门禁不变。适配器按与
+Retrieval Plan 相同的空白折叠和大小写无关语义识别历史重复查询，最多纠正一次，持续重复则
+安全失败。首次定向重放使用的版本为 `evidence-assessment-v5` 和
+`langgraph-bounded-multi-query-v7`。针对仍在首轮选择为空的否定性问题，候选进一步携带实际
+命中查询，提示明确逐槽检查候选正文，并规定明确反例或限制足以反驳绝对化声明；查询文本本身
+仍不是证据。该后续版本为 `evidence-assessment-v6` 和 `langgraph-bounded-multi-query-v8`。
+
+**首次定向重放**：经授权仅以内存子集运行三题，不写入报告。`ARF-009` 从拒答变为回答，说明
+来源上下文与证据判断已解除该错误拒答；其 Citation 轴仍失败，属于独立引用匹配问题。
+`ARF-026` 本轮 Retrieval 轴失败，未满足“规范证据已到达”的诊断前提，不能用来判断来源元数据
+修复是否有效。`ARF-030` Retrieval 通过但两轮均选择 0 个片段并拒答，证明仅保留上一轮选择
+无法处理首轮即选空的情况，因此增加上述查询来源与反例判定规则。
+
+**后续定向重放**：经再次授权，只运行 `ARF-026` 与 `ARF-030`，使用
+`evidence-assessment-v6` 和 `langgraph-bounded-multi-query-v8`，并只保存不含问题、回答和证据
+正文的本地去敏摘要。`ARF-030` 的 Retrieval 通过，第二轮保留 17 个已选片段并判定充分，最终
+从错误拒答变为回答；Citation 轴仍失败，不能据此宣称端到端通过。`ARF-026` 召回了 RAG 与
+Self-RAG 的三项规范证据，但缺少 ReAct 的规范证据，因此 Retrieval 轴先失败；两轮评估均判定
+不足符合严格门禁，不能用该次运行判断“完整四项证据到达时”的来源归属能力。这个残余应进入
+独立的多来源检索稳定性诊断，不能通过放宽 Evidence Decision 解决。
+
+**验证边界**：供应商 HTTP fake 覆盖来源元数据和历史重复查询纠正；工作流 fake 覆盖上一轮
+证据即使未进入第二轮检索结果也不会丢失。修复不扩大查询预算、候选上限或 Citation/Refusal
+门禁，不修改 Dataset 与既有 Evaluation Report。两次定向重放均不构成完整 Evaluation Report，
+不能据此填写产品准确率或改写绑定评测结果。

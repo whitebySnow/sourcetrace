@@ -194,9 +194,7 @@ def _answer_app():
     app.dependency_overrides[get_question_planner] = NoAdditionalQueryPlanner
     app.dependency_overrides[get_evidence_assessor] = SelectingAllEvidenceAssessor
     app.dependency_overrides[get_citation_repairer] = NoOpCitationRepairer
-    app.dependency_overrides[
-        get_claim_support_verifier
-    ] = CitationPreservingClaimSupportVerifier
+    app.dependency_overrides[get_claim_support_verifier] = CitationPreservingClaimSupportVerifier
     app.dependency_overrides[get_reranker] = PreserveOrderReranker
     return app
 
@@ -467,9 +465,11 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["llm_model"] == get_settings().llm_model
         assert persisted["prompt_version"] == get_settings().llm_prompt_version
         assert persisted["retrieval_version"] == get_settings().retrieval_config_version
-        assert persisted["evidence_assessment_prompt_version"] == ("evidence-assessment-v4")
+        assert persisted["evidence_assessment_prompt_version"] == (
+            get_settings().llm_evidence_assessment_prompt_version
+        )
         assert persisted["citation_repair_prompt_version"] == "citation-repair-v7"
-        assert persisted["workflow_version"] == "langgraph-bounded-multi-query-v6"
+        assert persisted["workflow_version"] == get_settings().answer_workflow_version
         assert persisted["provider_connect_timeout_seconds"] == 10
         assert persisted["provider_read_timeout_seconds"] == 120
         assert persisted["provider_request_timeout_seconds"] == 180

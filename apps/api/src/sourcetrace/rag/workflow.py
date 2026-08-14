@@ -1,6 +1,6 @@
 import asyncio
 import re
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import Literal, NoReturn, Protocol, TypedDict, cast
@@ -30,6 +30,8 @@ _CITATION_LABEL = re.compile(
     r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
 )
+
+
 class _FailClosedClaimSupportVerifier:
     async def verify(
         self,
@@ -291,6 +293,8 @@ class _WorkflowState(TypedDict, total=False):
     recent_questions: Sequence[str]
     retrieval_plan: RetrievalPlan
     evidence: list[RetrievedEvidence]
+    evidence_query_matches: dict[UUID, tuple[str, ...]]
+    previously_selected_evidence: list[RetrievedEvidence]
     supplemental_attempts: int
     supplemental_queries: tuple[str, ...]
     selected_evidence: list[RetrievedEvidence]
@@ -303,6 +307,40 @@ class _WorkflowState(TypedDict, total=False):
     refusal_code: str
     refusal_message: str
     workflow_trace: WorkflowTrace
+
+
+def _unique_evidence(evidence: Sequence[RetrievedEvidence]) -> list[RetrievedEvidence]:
+    unique: list[RetrievedEvidence] = []
+    seen: set[UUID] = set()
+    for item in evidence:
+        if item.chunk_id in seen:
+            continue
+        seen.add(item.chunk_id)
+        unique.append(item)
+    return unique
+
+
+def _query_matches(result: RetrievalResult) -> dict[UUID, tuple[str, ...]]:
+    matches: dict[UUID, list[str]] = {}
+    for query_result in result.query_results:
+        for candidate in query_result.candidates:
+            queries = matches.setdefault(candidate.evidence.chunk_id, [])
+            if query_result.query not in queries:
+                queries.append(query_result.query)
+    return {chunk_id: tuple(queries) for chunk_id, queries in matches.items()}
+
+
+def _merge_query_matches(
+    existing: Mapping[UUID, Sequence[str]],
+    current: Mapping[UUID, Sequence[str]],
+) -> dict[UUID, tuple[str, ...]]:
+    merged = {chunk_id: list(queries) for chunk_id, queries in existing.items()}
+    for chunk_id, queries in current.items():
+        accepted = merged.setdefault(chunk_id, [])
+        for query in queries:
+            if query not in accepted:
+                accepted.append(query)
+    return {chunk_id: tuple(queries) for chunk_id, queries in merged.items()}
 
 
 class AnswerWorkflow:
@@ -431,13 +469,21 @@ class AnswerWorkflow:
         await self._record_trace(state["run_id"], trace)
         return _WorkflowState(
             evidence=[item for item in result.evidence if item.score >= self._minimum_score],
+            evidence_query_matches=_query_matches(result),
             workflow_trace=trace,
         )
 
     async def _assess(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="assessing"))
-        candidates = self._candidates(state["run_id"], state["evidence"])
+        previously_selected = state.get("previously_selected_evidence", [])
+        assessment_evidence = _unique_evidence((*previously_selected, *state["evidence"]))
+        candidates = self._candidates(
+            state["run_id"],
+            assessment_evidence,
+            query_matches=state.get("evidence_query_matches", {}),
+        )
+        previously_selected_ids = tuple(str(item.chunk_id) for item in previously_selected)
         supplemental_query_limit = (
             max(0, 3 - len(state["retrieval_plan"].queries))
             if state["supplemental_attempts"] == 0
@@ -447,7 +493,11 @@ class AnswerWorkflow:
             question=state["question"],
             queries=state["retrieval_plan"].queries,
             evidence=candidates,
+            previously_selected_chunk_ids=previously_selected_ids,
             supplemental_query_limit=supplemental_query_limit,
+        )
+        selected_ids = tuple(
+            dict.fromkeys((*previously_selected_ids, *decision.selected_chunk_ids))
         )
         trace = replace(
             state["workflow_trace"],
@@ -455,21 +505,21 @@ class AnswerWorkflow:
                 *state["workflow_trace"].assessments,
                 EvidenceAssessmentTrace(
                     sufficient=decision.sufficient,
-                    selected_chunk_ids=decision.selected_chunk_ids,
+                    selected_chunk_ids=selected_ids,
                     supplemental_queries=decision.supplemental_queries,
                 ),
             ),
         )
         await self._record_trace(state["run_id"], trace)
-        selected_ids = set(decision.selected_chunk_ids)
-        available_ids = {str(item.chunk_id) for item in state["evidence"]}
-        if not selected_ids <= available_ids:
+        selected_id_set = set(selected_ids)
+        available_ids = {str(item.chunk_id) for item in assessment_evidence}
+        if not selected_id_set <= available_ids:
             return self._refusal_state(
                 "INSUFFICIENT_EVIDENCE",
                 "The knowledge base does not contain enough evidence to answer.",
                 trace=trace,
             )
-        selected = [item for item in state["evidence"] if str(item.chunk_id) in selected_ids]
+        selected = [item for item in assessment_evidence if str(item.chunk_id) in selected_id_set]
         if decision.sufficient and len(selected) >= self._minimum_evidence:
             return _WorkflowState(selected_evidence=selected, workflow_trace=trace)
         supplemental_queries = decision.supplemental_queries[:supplemental_query_limit]
@@ -478,6 +528,7 @@ class AnswerWorkflow:
             return _WorkflowState(
                 supplemental_queries=supplemental_queries,
                 retrieval_plan=expanded_plan,
+                previously_selected_evidence=selected,
                 workflow_trace=trace,
             )
         return self._refusal_state(
@@ -501,6 +552,10 @@ class AnswerWorkflow:
         await self._record_trace(state["run_id"], trace)
         return _WorkflowState(
             evidence=[item for item in result.evidence if item.score >= self._minimum_score],
+            evidence_query_matches=_merge_query_matches(
+                state.get("evidence_query_matches", {}),
+                _query_matches(result),
+            ),
             supplemental_attempts=1,
             workflow_trace=trace,
         )
@@ -587,16 +642,12 @@ class AnswerWorkflow:
         for claim in decision.claims:
             text = _CITATION_LABEL.sub("", claim.text).strip()
             citation_ids = tuple(dict.fromkeys(claim.citation_ids))
-            if (
-                not text
-                or not citation_ids
-                or any(item not in allowed for item in citation_ids)
-            ):
+            if not text or not citation_ids or any(item not in allowed for item in citation_ids):
                 return self._refusal_state(
                     "CLAIM_SUPPORT_VALIDATION_FAILED",
                     "The generated answer included a claim not supported by the evidence.",
                     trace=state["workflow_trace"],
-            )
+                )
             labels = " ".join(f"[{item}]" for item in citation_ids)
             units = split_answer_units(text)
             rendered.extend(f"{unit} {labels}" for unit in units)
@@ -745,9 +796,7 @@ class AnswerWorkflow:
                             channel_fused_score=candidate.channel_fused_score,
                             reranker_score=cast(float, candidate.reranker_score),
                             reranked_rank=cast(int, candidate.reranked_rank),
-                            selected_for_query_coverage=(
-                                candidate.selected_for_query_coverage
-                            ),
+                            selected_for_query_coverage=(candidate.selected_for_query_coverage),
                         )
                         for candidate in item.candidates
                     ),
@@ -910,13 +959,19 @@ class AnswerWorkflow:
     def _candidates(
         run_id: UUID,
         evidence: Sequence[RetrievedEvidence],
+        *,
+        query_matches: Mapping[UUID, Sequence[str]] | None = None,
     ) -> tuple[RetrievalCandidate, ...]:
+        query_matches = query_matches or {}
         return tuple(
             RetrievalCandidate(
                 chunk_id=str(item.chunk_id),
                 content=item.text,
                 score=item.score,
                 citation_id=str(uuid5(run_id, str(item.chunk_id))),
+                document_title=item.document_name,
+                page_number=item.page_number,
+                matched_queries=tuple(query_matches.get(item.chunk_id, ())),
             )
             for item in evidence
         )
