@@ -268,8 +268,10 @@ def _evidence_assessment_prompt(
     queries: Sequence[str],
     evidence: Sequence[RetrievalCandidate],
     *,
+    previously_selected_chunk_ids: Sequence[str],
     supplemental_query_limit: int,
 ) -> list[dict[str, str]]:
+    previously_selected = set(previously_selected_chunk_ids)
     return [
         {
             "role": "system",
@@ -277,6 +279,19 @@ def _evidence_assessment_prompt(
                 "Judge whether the candidate evidence is sufficient to answer the question. "
                 "Use only the candidates, select only candidate chunk IDs, and do not answer "
                 "the question or use outside knowledge. If evidence is insufficient and "
+                "previously_selected_chunk_ids is non-empty, those candidates were already "
+                "identified as useful evidence in the earlier bounded assessment. Keep them "
+                "selected while deciding whether new candidates fill the remaining gaps. "
+                "Use document_title and page_number only as source identity and location "
+                "metadata for the candidate content. matched_retrieval_queries only explain "
+                "why a candidate was retrieved: use them to group candidates by the requested "
+                "evidence component, but never treat query text as evidence. Before declaring "
+                "insufficiency, check every candidate against each named component in the "
+                "question. For a correctness check, negated claim, or absolute claim, candidate "
+                "content that explicitly gives a counterexample or limitation is sufficient to "
+                "refute that claim; do not require evidence for both sides. For multi-component "
+                "questions, sufficient may be true only when every requested component is "
+                "covered by selected candidate content and source identity. "
                 "supplemental retrieval capacity remains, provide at most that many standalone "
                 "supplemental queries, ordered by importance. Each query must target one missing "
                 "evidence component and must not repeat an executed query. Each supplemental "
@@ -301,10 +316,15 @@ def _evidence_assessment_prompt(
                 {
                     "question": question,
                     "retrieval_queries": list(queries),
+                    "previously_selected_chunk_ids": list(previously_selected_chunk_ids),
                     "supplemental_query_limit": supplemental_query_limit,
                     "candidates": [
                         {
                             "chunk_id": item.chunk_id,
+                            "document_title": item.document_title,
+                            "page_number": item.page_number,
+                            "matched_retrieval_queries": list(item.matched_queries),
+                            "previously_selected": item.chunk_id in previously_selected,
                             "content": item.content,
                             "score": item.score,
                         }
@@ -353,9 +373,7 @@ def _citation_repair_prompt(
                         "issue": validation_feedback.issue,
                         "unit_count": validation_feedback.unit_count,
                         "citation_count": validation_feedback.citation_count,
-                        "uncited_unit_indices": list(
-                            validation_feedback.uncited_unit_indices
-                        ),
+                        "uncited_unit_indices": list(validation_feedback.uncited_unit_indices),
                         "unknown_label_unit_indices": list(
                             validation_feedback.unknown_label_unit_indices
                         ),
@@ -561,11 +579,7 @@ class OpenAICompatibleAnswerGenerator:
                                     "messages": _grounded_prompt(question, evidence),
                                     "stream": True,
                                     **(
-                                        {
-                                            "thinking": {
-                                                "type": self.config.answer_output_thinking
-                                            }
-                                        }
+                                        {"thinking": {"type": self.config.answer_output_thinking}}
                                         if self.config.answer_output_thinking != "default"
                                         else {}
                                     ),
@@ -1008,6 +1022,7 @@ class OpenAICompatibleEvidenceAssessor:
         question: str,
         queries: Sequence[str],
         evidence: Sequence[RetrievalCandidate],
+        previously_selected_chunk_ids: Sequence[str] = (),
         supplemental_query_limit: int,
     ) -> EvidenceDecision:
         expected_fields = {
@@ -1019,14 +1034,17 @@ class OpenAICompatibleEvidenceAssessor:
             question,
             queries,
             evidence,
+            previously_selected_chunk_ids=previously_selected_chunk_ids,
             supplemental_query_limit=supplemental_query_limit,
         )
+        contract_retry_used = False
         parsed = await _structured_completion(
             self.config,
             self._client,
             messages,
         )
         if set(parsed) != expected_fields:
+            contract_retry_used = True
             parsed = await _structured_completion(
                 self.config,
                 self._client,
@@ -1043,7 +1061,7 @@ class OpenAICompatibleEvidenceAssessor:
                     },
                 ],
             )
-        budget_retry_used = False
+        executed_queries = {_normalize_retrieval_query(item) for item in queries}
         while True:
             try:
                 if set(parsed) != expected_fields:
@@ -1059,19 +1077,21 @@ class OpenAICompatibleEvidenceAssessor:
                     raise ValueError
                 normalized_selected = tuple(dict.fromkeys(selected))
                 if not isinstance(supplemental_queries, list) or any(
-                    not isinstance(item, str) or not item.strip()
-                    for item in supplemental_queries
+                    not isinstance(item, str) or not item.strip() for item in supplemental_queries
                 ):
                     raise ValueError
                 normalized_supplemental = tuple(item.strip() for item in supplemental_queries)
-                if len(set(normalized_supplemental)) != len(normalized_supplemental):
+                normalized_query_keys = tuple(
+                    _normalize_retrieval_query(item) for item in normalized_supplemental
+                )
+                if len(set(normalized_query_keys)) != len(normalized_query_keys):
                     raise ValueError
                 if not 0 <= supplemental_query_limit <= 2:
                     raise ValueError
                 if len(normalized_supplemental) > supplemental_query_limit:
-                    if budget_retry_used:
+                    if contract_retry_used:
                         raise ValueError
-                    budget_retry_used = True
+                    contract_retry_used = True
                     parsed = await _structured_completion(
                         self.config,
                         self._client,
@@ -1089,6 +1109,28 @@ class OpenAICompatibleEvidenceAssessor:
                         ],
                     )
                     continue
+                if any(item in executed_queries for item in normalized_query_keys):
+                    if contract_retry_used:
+                        raise ValueError
+                    contract_retry_used = True
+                    parsed = await _structured_completion(
+                        self.config,
+                        self._client,
+                        [
+                            *messages,
+                            {
+                                "role": "system",
+                                "content": (
+                                    "The previous response repeated a retrieval query that has "
+                                    "already been executed. Retry once with only new standalone "
+                                    "queries that target missing evidence components. Preserve the "
+                                    "remaining supplemental query capacity and return exactly the "
+                                    "required three fields."
+                                ),
+                            },
+                        ],
+                    )
+                    continue
                 return EvidenceDecision(
                     sufficient=sufficient,
                     selected_chunk_ids=normalized_selected,
@@ -1099,6 +1141,10 @@ class OpenAICompatibleEvidenceAssessor:
                     "LLM_INVALID_RESPONSE",
                     "Language model returned an invalid response",
                 ) from error
+
+
+def _normalize_retrieval_query(query: str) -> str:
+    return " ".join(query.split()).casefold()
 
 
 class OpenAICompatibleCitationRepairer:
@@ -1188,21 +1234,15 @@ class OpenAICompatibleCitationRepairer:
                     raise _CitationRepairValidationError("citation_repair_empty_citations")
                 if any(item not in allowed for item in normalized_ids):
                     raise _CitationRepairValidationError("citation_repair_unknown_citation")
-                inline_ids = tuple(
-                    label[1:-1] for label in _UUID_CITATION_LABEL.findall(text)
-                )
+                inline_ids = tuple(label[1:-1] for label in _UUID_CITATION_LABEL.findall(text))
                 if any(item not in allowed for item in inline_ids):
-                    raise _CitationRepairValidationError(
-                        "citation_repair_unknown_inline_citation"
-                    )
+                    raise _CitationRepairValidationError("citation_repair_unknown_inline_citation")
                 normalized_text = _UUID_CITATION_LABEL.sub("", text).strip()
                 if not answer_matches_question_language(
                     question=question,
                     answer=normalized_text,
                 ):
-                    raise _CitationRepairValidationError(
-                        "citation_repair_language_mismatch"
-                    )
+                    raise _CitationRepairValidationError("citation_repair_language_mismatch")
                 units = split_answer_units(normalized_text)
                 if not units:
                     raise _CitationRepairValidationError("citation_repair_empty_text")
