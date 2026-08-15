@@ -4,14 +4,17 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from sourcetrace.evaluation.cli import main
 from sourcetrace.evaluation.models import (
     CitationDiagnosticsReport,
+    EvaluationFailureReport,
     HybridQueryPlanFixture,
     HybridRetrievalEvaluationReport,
     RerankerEvaluationReport,
 )
+from sourcetrace.evaluation.real import RealEvaluationFailure
 
 
 def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path) -> None:
@@ -220,6 +223,156 @@ def test_real_cli_requires_explicit_provider_confirmation() -> None:
     assert error.value.code == 2
 
 
+def test_real_cli_writes_an_unscored_failure_artifact(tmp_path, monkeypatch) -> None:
+    knowledge_base_id = uuid4()
+    document_version_id = uuid4()
+    dataset_path = tmp_path / "dataset.json"
+    output_path = tmp_path / "reports" / "report.json"
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "dataset_id": "reviewed-fixture",
+                "dataset_version": "1.0.0",
+                "knowledge_base_id": str(knowledge_base_id),
+                "document_version_ids": [str(document_version_id)],
+                "review": {
+                    "status": "reviewed",
+                    "reviewed_by": "project-owner",
+                    "reviewed_at": "2026-08-15T00:00:00Z",
+                },
+                "cases": [
+                    {
+                        "id": "direct-001",
+                        "category": "direct",
+                        "question": "How are vectors stored?",
+                        "expected": {
+                            "outcome": "answered",
+                            "reference_answer": "They are normalized.",
+                            "evidence": [
+                                {
+                                    "document_version_id": str(document_version_id),
+                                    "page_number": 4,
+                                    "text": "Vectors are normalized.",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def fail_real_evaluation(*args, **kwargs):
+        raise RealEvaluationFailure(
+            EvaluationFailureReport(
+                dataset_id="reviewed-fixture",
+                dataset_version="1.0.0",
+                knowledge_base_id=knowledge_base_id,
+                document_version_ids=[document_version_id],
+                metadata=None,
+                failed_case_id="direct-001",
+                phase="assessing",
+                error_code="LLM_INVALID_RESPONSE",
+                error_reason="provider_structured_invalid_json",
+            )
+        )
+
+    monkeypatch.setattr(
+        "sourcetrace.evaluation.real.run_real_evaluation",
+        fail_real_evaluation,
+    )
+
+    exit_code = main(
+        [
+            "real",
+            "--dataset",
+            str(dataset_path),
+            "--code-commit",
+            "test-commit",
+            "--output",
+            str(output_path),
+            "--confirm-real-provider",
+        ]
+    )
+
+    failure_path = output_path.with_name("report-failure.json")
+    failure = json.loads(failure_path.read_text(encoding="utf-8"))
+    assert exit_code == 1
+    assert output_path.exists() is False
+    assert failure["failed_case_id"] == "direct-001"
+    assert failure["phase"] == "assessing"
+    assert failure["error_code"] == "LLM_INVALID_RESPONSE"
+    assert failure["error_reason"] == "provider_structured_invalid_json"
+    assert "cases" not in failure
+    assert "question" not in failure
+    assert "answer" not in failure
+    with pytest.raises(ValidationError):
+        main(
+            [
+                "review",
+                "--report",
+                str(failure_path),
+                "--judgments",
+                str(tmp_path / "judgments.json"),
+                "--output",
+                str(tmp_path / "reviewed.json"),
+            ]
+        )
+    for mode in ("diagnose-retrieval", "diagnose-citations"):
+        with pytest.raises(ValidationError):
+            main(
+                [
+                    mode,
+                    "--dataset",
+                    str(dataset_path),
+                    "--report",
+                    str(failure_path),
+                    "--output",
+                    str(tmp_path / f"{mode}.json"),
+                ]
+            )
+
+
+@pytest.mark.parametrize("existing_filename", ["report.json", "report-failure.json"])
+def test_real_cli_refuses_to_overwrite_a_previous_evaluation_artifact(
+    tmp_path,
+    monkeypatch,
+    existing_filename: str,
+) -> None:
+    output_path = tmp_path / "reports" / "report.json"
+    output_path.parent.mkdir(parents=True)
+    (output_path.parent / existing_filename).write_text("previous artifact", encoding="utf-8")
+    invoked = False
+
+    async def unexpected_real_evaluation(*args, **kwargs):
+        nonlocal invoked
+        invoked = True
+        raise AssertionError("existing output must fail before a real provider invocation")
+
+    monkeypatch.setattr(
+        "sourcetrace.evaluation.real.run_real_evaluation",
+        unexpected_real_evaluation,
+    )
+
+    with pytest.raises(FileExistsError, match="output or failure artifact already exists"):
+        main(
+            [
+                "real",
+                "--dataset",
+                str(tmp_path / "unused-dataset.json"),
+                "--code-commit",
+                "test-commit",
+                "--output",
+                str(output_path),
+                "--confirm-real-provider",
+            ]
+        )
+
+    assert invoked is False
+
+
 def test_rerank_cli_requires_explicit_local_model_confirmation() -> None:
     with pytest.raises(SystemExit) as error:
         main(
@@ -282,6 +435,15 @@ def test_repository_citation_diagnostics_schema_matches_model() -> None:
     )
 
     assert schema == CitationDiagnosticsReport.model_json_schema()
+
+
+def test_repository_failure_report_schema_matches_model() -> None:
+    root = Path(__file__).resolve().parents[4]
+    schema = json.loads(
+        (root / "evals/schema/failure-report-v1.schema.json").read_text(encoding="utf-8")
+    )
+
+    assert schema == EvaluationFailureReport.model_json_schema()
 
 
 @pytest.mark.parametrize(

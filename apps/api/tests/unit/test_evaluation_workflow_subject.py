@@ -1,8 +1,13 @@
 from collections.abc import AsyncIterator, Sequence
 from uuid import UUID, uuid4
 
+import pytest
+
 from sourcetrace.evaluation.models import EvaluationCase
-from sourcetrace.evaluation.workflow_subject import WorkflowEvaluationSubject
+from sourcetrace.evaluation.workflow_subject import (
+    EvaluationExecutionFailure,
+    WorkflowEvaluationSubject,
+)
 from sourcetrace.modules.retrieval.service import (
     FusedRetrievalCandidate,
     QueryRetrievalResult,
@@ -11,6 +16,7 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
     RetrievedEvidence,
 )
+from sourcetrace.rag.llm import LlmProviderError
 from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
 from sourcetrace.rag.workflow import AnswerWorkflow
 from tests.helpers import CitationPreservingClaimSupportVerifier, PreserveOrderReranker
@@ -87,6 +93,15 @@ class RefusingAssessor:
             sufficient=False,
             selected_chunk_ids=(),
             supplemental_queries=(),
+        )
+
+
+class InvalidResponseAssessor:
+    async def assess(self, **kwargs: object) -> EvidenceDecision:
+        raise LlmProviderError(
+            "LLM_INVALID_RESPONSE",
+            "Language model returned an invalid response",
+            reason="provider_structured_invalid_json",
         )
 
 
@@ -241,3 +256,55 @@ async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence
     assert assessment.sufficient is False
     assert assessment.selected_chunk_ids == ()
     assert observation.decision_trace.citation_validations == ()
+
+
+async def test_workflow_subject_classifies_provider_failure_without_an_observation() -> None:
+    evidence = RetrievedEvidence(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_version_id=uuid4(),
+        document_name="agents.pdf",
+        storage_key="knowledge/agents.pdf",
+        page_number=3,
+        text="Bounded workflows stop after one retry.",
+        score=0.9,
+    )
+    subject = WorkflowEvaluationSubject(
+        retrieval=StaticRetrieval(evidence),
+        workflow_factory=lambda retrieval, run_control: AnswerWorkflow(
+            retrieval=retrieval,
+            assessor=InvalidResponseAssessor(),
+            generator=CitingGenerator(),
+            citation_repairer=UnusedRepairer(),
+            run_control=run_control,
+            minimum_score=0.5,
+            minimum_evidence=1,
+        ),
+        knowledge_base_id=uuid4(),
+    )
+    case = EvaluationCase.model_validate(
+        {
+            "id": "provider-failure-001",
+            "category": "direct",
+            "question": "How many retries are allowed?",
+            "expected": {
+                "outcome": "answered",
+                "reference_answer": "One retry.",
+                "evidence": [
+                    {
+                        "document_version_id": str(evidence.document_version_id),
+                        "page_number": 3,
+                        "text": "one retry",
+                    }
+                ],
+            },
+        }
+    )
+
+    with pytest.raises(EvaluationExecutionFailure) as error:
+        await subject.evaluate(case)
+
+    assert error.value.case_id == case.id
+    assert error.value.phase == "assessing"
+    assert error.value.error_code == "LLM_INVALID_RESPONSE"
+    assert error.value.error_reason == "provider_structured_invalid_json"

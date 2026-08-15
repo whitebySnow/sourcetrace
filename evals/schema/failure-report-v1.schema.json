@@ -1,0 +1,317 @@
+{
+  "$defs": {
+    "EvaluationFailurePhase": {
+      "enum": [
+        "setup",
+        "analyzing",
+        "retrieving",
+        "assessing",
+        "generating",
+        "validating",
+        "repairing"
+      ],
+      "type": "string"
+    },
+    "EvaluationRunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "code_commit": {
+          "minLength": 1,
+          "title": "Code Commit",
+          "type": "string"
+        },
+        "model_provider": {
+          "minLength": 1,
+          "title": "Model Provider",
+          "type": "string"
+        },
+        "model_name": {
+          "minLength": 1,
+          "title": "Model Name",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minLength": 1,
+          "title": "Workflow Version",
+          "type": "string"
+        },
+        "parser_version": {
+          "minLength": 1,
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "tokenizer": {
+          "minLength": 1,
+          "title": "Tokenizer",
+          "type": "string"
+        },
+        "chunk_size": {
+          "exclusiveMinimum": 0,
+          "title": "Chunk Size",
+          "type": "integer"
+        },
+        "chunk_overlap": {
+          "minimum": 0,
+          "title": "Chunk Overlap",
+          "type": "integer"
+        },
+        "chunking_version": {
+          "minLength": 1,
+          "title": "Chunking Version",
+          "type": "string"
+        },
+        "embedding_provider": {
+          "minLength": 1,
+          "title": "Embedding Provider",
+          "type": "string"
+        },
+        "embedding_model": {
+          "minLength": 1,
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "embedding_revision": {
+          "minLength": 1,
+          "title": "Embedding Revision",
+          "type": "string"
+        },
+        "embedding_dimension": {
+          "exclusiveMinimum": 0,
+          "title": "Embedding Dimension",
+          "type": "integer"
+        },
+        "embedding_version": {
+          "minLength": 1,
+          "title": "Embedding Version",
+          "type": "string"
+        },
+        "retrieval_version": {
+          "minLength": 1,
+          "title": "Retrieval Version",
+          "type": "string"
+        },
+        "retrieval_top_k": {
+          "exclusiveMinimum": 0,
+          "title": "Retrieval Top K",
+          "type": "integer"
+        },
+        "retrieval_page_neighbor_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Retrieval Page Neighbor Count",
+          "type": "integer"
+        },
+        "retrieval_rrf_rank_constant": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieval Rrf Rank Constant"
+        },
+        "retrieval_minimum_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Retrieval Minimum Score",
+          "type": "number"
+        },
+        "retrieval_minimum_evidence": {
+          "exclusiveMinimum": 0,
+          "title": "Retrieval Minimum Evidence",
+          "type": "integer"
+        },
+        "generation_prompt_version": {
+          "minLength": 1,
+          "title": "Generation Prompt Version",
+          "type": "string"
+        },
+        "question_rewrite_prompt_version": {
+          "minLength": 1,
+          "title": "Question Rewrite Prompt Version",
+          "type": "string"
+        },
+        "evidence_assessment_prompt_version": {
+          "minLength": 1,
+          "title": "Evidence Assessment Prompt Version",
+          "type": "string"
+        },
+        "citation_repair_prompt_version": {
+          "minLength": 1,
+          "title": "Citation Repair Prompt Version",
+          "type": "string"
+        },
+        "provider_connect_timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Connect Timeout Seconds"
+        },
+        "provider_read_timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Read Timeout Seconds"
+        },
+        "provider_request_timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Request Timeout Seconds"
+        },
+        "provider_operation_deadline_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Operation Deadline Seconds"
+        }
+      },
+      "required": [
+        "code_commit",
+        "model_provider",
+        "model_name",
+        "workflow_version",
+        "parser_version",
+        "tokenizer",
+        "chunk_size",
+        "chunk_overlap",
+        "chunking_version",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_revision",
+        "embedding_dimension",
+        "embedding_version",
+        "retrieval_version",
+        "retrieval_top_k",
+        "retrieval_minimum_score",
+        "retrieval_minimum_evidence",
+        "generation_prompt_version",
+        "question_rewrite_prompt_version",
+        "evidence_assessment_prompt_version",
+        "citation_repair_prompt_version"
+      ],
+      "title": "EvaluationRunMetadata",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A non-scoreable record for a real evaluation that terminated early.",
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "knowledge_base_id": {
+      "format": "uuid",
+      "title": "Knowledge Base Id",
+      "type": "string"
+    },
+    "document_version_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Document Version Ids",
+      "type": "array"
+    },
+    "metadata": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvaluationRunMetadata"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "failed_case_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failed Case Id"
+    },
+    "phase": {
+      "$ref": "#/$defs/EvaluationFailurePhase"
+    },
+    "error_code": {
+      "pattern": "^[A-Z][A-Z0-9_]*$",
+      "title": "Error Code",
+      "type": "string"
+    },
+    "error_reason": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Reason"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "knowledge_base_id",
+    "document_version_ids",
+    "phase",
+    "error_code"
+  ],
+  "title": "EvaluationFailureReport",
+  "type": "object"
+}

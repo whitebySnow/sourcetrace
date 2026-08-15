@@ -5,6 +5,7 @@ from sourcetrace.evaluation.fixtures import FixtureObservationSet
 from sourcetrace.evaluation.models import (
     CitationDiagnosticsReport,
     EvaluationDataset,
+    EvaluationFailureReport,
     EvaluationJudgmentSet,
     EvaluationReport,
     HybridQueryPlanFixture,
@@ -20,6 +21,7 @@ def main() -> None:
     schemas = {
         "citation-diagnostics-v1.schema.json": CitationDiagnosticsReport.model_json_schema(),
         "dataset-v1.schema.json": EvaluationDataset.model_json_schema(),
+        "failure-report-v1.schema.json": EvaluationFailureReport.model_json_schema(),
         "fixture-observations-v1.schema.json": FixtureObservationSet.model_json_schema(),
         "hybrid-query-plan-v1.schema.json": HybridQueryPlanFixture.model_json_schema(),
         "hybrid-retrieval-report-v1.schema.json": (
