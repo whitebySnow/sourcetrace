@@ -240,6 +240,20 @@ BGE-M3、pgvector 和 `AnswerWorkflow`，但检索只允许数据集声明的不
 或诊断命令。真实运行不覆盖已有正常报告，必须使用新的输出路径，避免旧结果被误读为本轮结果。
 真实运行同样不覆盖该输出路径配对的既有失败工件。完整参数和数据审核规则见 `evals/README.md`。
 
+Windows 宿主机上的 CPU PyTorch 原生算子发生异常时，真实评测应使用 Compose 的 Linux CPU
+镜像，避免把宿主机崩溃误判为供应商或 RAG 失败。下面的脚本会重建当前 API 镜像、把宿主机
+`output/` 显式挂载到容器，并保留 CLI 的正常报告/去敏失败工件互斥规则：
+
+```powershell
+pwsh apps/api/scripts/run_real_evaluation_in_docker.ps1 `
+  -Output output/evals/<fresh-report>.json `
+  -CodeCommit (git rev-parse HEAD)
+```
+
+该脚本仍会调用已配置的真实供应商，运行前必须得到单独授权。它不挂载源代码目录，镜像由当前
+工作区构建；因此报告中的 commit 参数必须与构建时的代码版本一致。使用 `-SkipBuild` 只适用于
+已明确验证同一提交已构建为 `sourcetrace-api:local` 的情况。
+
 离线 reranker 实验只消费既有真实报告最后一轮的融合候选 Chunk ID，并从报告绑定的数据库
 快照读取候选文本和同页邻居。它不重新执行向量检索、不调用 LLM，也不改变线上
 `RetrievalService`。命令必须显式传入 Dataset、基线 Report、模型 revision、权重 SHA-256、
