@@ -5,11 +5,15 @@ from sourcetrace.db.session import session_factory
 from sourcetrace.evaluation.harness import EvaluationHarness
 from sourcetrace.evaluation.models import (
     EvaluationDataset,
+    EvaluationFailureReport,
     EvaluationReport,
     EvaluationRunMetadata,
 )
 from sourcetrace.evaluation.repository import CorpusProvenance, EvaluationCorpusRepository
-from sourcetrace.evaluation.workflow_subject import WorkflowEvaluationSubject
+from sourcetrace.evaluation.workflow_subject import (
+    EvaluationExecutionFailure,
+    WorkflowEvaluationSubject,
+)
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
 from sourcetrace.modules.retrieval.service import RetrievalService
 from sourcetrace.rag.embeddings import BgeM3EmbeddingProvider, EmbeddingConfig
@@ -71,6 +75,50 @@ def _llm_config(settings: Settings, *, prompt_version: str) -> OpenAICompatibleC
     )
 
 
+class RealEvaluationFailure(Exception):
+    def __init__(self, report: EvaluationFailureReport) -> None:
+        super().__init__(report.error_code)
+        self.report = report
+
+
+def _run_metadata(
+    provenance: CorpusProvenance,
+    *,
+    code_commit: str,
+    settings: Settings,
+) -> EvaluationRunMetadata:
+    return EvaluationRunMetadata(
+        code_commit=code_commit,
+        model_provider=settings.llm_provider,
+        model_name=settings.llm_model,
+        workflow_version=settings.answer_workflow_version,
+        parser_version=provenance.parser_version,
+        tokenizer=provenance.tokenizer,
+        chunk_size=provenance.chunk_size,
+        chunk_overlap=provenance.chunk_overlap,
+        chunking_version=provenance.chunking_version,
+        embedding_provider=provenance.embedding_provider,
+        embedding_model=provenance.embedding_model,
+        embedding_revision=provenance.embedding_revision,
+        embedding_dimension=provenance.embedding_dimension,
+        embedding_version=provenance.embedding_version,
+        retrieval_version=settings.retrieval_config_version,
+        retrieval_top_k=settings.retrieval_top_k,
+        retrieval_page_neighbor_count=settings.retrieval_page_neighbor_count,
+        retrieval_rrf_rank_constant=settings.retrieval_rrf_rank_constant,
+        retrieval_minimum_score=settings.retrieval_minimum_score,
+        retrieval_minimum_evidence=settings.retrieval_minimum_evidence,
+        generation_prompt_version=settings.llm_prompt_version,
+        question_rewrite_prompt_version=settings.llm_retrieval_plan_prompt_version,
+        evidence_assessment_prompt_version=settings.llm_evidence_assessment_prompt_version,
+        citation_repair_prompt_version=settings.llm_citation_repair_prompt_version,
+        provider_connect_timeout_seconds=settings.llm_connect_timeout_seconds,
+        provider_read_timeout_seconds=settings.llm_read_timeout_seconds,
+        provider_request_timeout_seconds=settings.llm_request_timeout_seconds,
+        provider_operation_deadline_seconds=settings.llm_operation_deadline_seconds,
+    )
+
+
 async def run_real_evaluation(
     dataset: EvaluationDataset,
     *,
@@ -86,6 +134,7 @@ async def run_real_evaluation(
         )
         if provenance.embedding_provider != "sentence-transformers":
             raise RuntimeError(f"unsupported embedding provider: {provenance.embedding_provider}")
+        metadata = _run_metadata(provenance, code_commit=code_commit, settings=settings)
         embedding = BgeM3EmbeddingProvider(
             EmbeddingConfig(
                 provider=provenance.embedding_provider,
@@ -165,41 +214,19 @@ async def run_real_evaluation(
             ),
             knowledge_base_id=dataset.knowledge_base_id,
         )
-        return await EvaluationHarness().run(
-            dataset,
-            subject,
-            metadata=EvaluationRunMetadata(
-                code_commit=code_commit,
-                model_provider=settings.llm_provider,
-                model_name=settings.llm_model,
-                workflow_version=settings.answer_workflow_version,
-                parser_version=provenance.parser_version,
-                tokenizer=provenance.tokenizer,
-                chunk_size=provenance.chunk_size,
-                chunk_overlap=provenance.chunk_overlap,
-                chunking_version=provenance.chunking_version,
-                embedding_provider=provenance.embedding_provider,
-                embedding_model=provenance.embedding_model,
-                embedding_revision=provenance.embedding_revision,
-                embedding_dimension=provenance.embedding_dimension,
-                embedding_version=provenance.embedding_version,
-                retrieval_version=settings.retrieval_config_version,
-                retrieval_top_k=settings.retrieval_top_k,
-                retrieval_page_neighbor_count=settings.retrieval_page_neighbor_count,
-                retrieval_rrf_rank_constant=settings.retrieval_rrf_rank_constant,
-                retrieval_minimum_score=settings.retrieval_minimum_score,
-                retrieval_minimum_evidence=settings.retrieval_minimum_evidence,
-                generation_prompt_version=settings.llm_prompt_version,
-                question_rewrite_prompt_version=(settings.llm_retrieval_plan_prompt_version),
-                evidence_assessment_prompt_version=(
-                    settings.llm_evidence_assessment_prompt_version
-                ),
-                citation_repair_prompt_version=(settings.llm_citation_repair_prompt_version),
-                provider_connect_timeout_seconds=(settings.llm_connect_timeout_seconds),
-                provider_read_timeout_seconds=settings.llm_read_timeout_seconds,
-                provider_request_timeout_seconds=settings.llm_request_timeout_seconds,
-                provider_operation_deadline_seconds=(
-                    settings.llm_operation_deadline_seconds
-                ),
-            ),
-        )
+        try:
+            return await EvaluationHarness().run(dataset, subject, metadata=metadata)
+        except EvaluationExecutionFailure as error:
+            raise RealEvaluationFailure(
+                EvaluationFailureReport(
+                    dataset_id=dataset.dataset_id,
+                    dataset_version=dataset.dataset_version,
+                    knowledge_base_id=dataset.knowledge_base_id,
+                    document_version_ids=dataset.document_version_ids,
+                    metadata=metadata,
+                    failed_case_id=error.case_id,
+                    phase=error.phase,
+                    error_code=error.error_code,
+                    error_reason=error.error_reason,
+                )
+            ) from error

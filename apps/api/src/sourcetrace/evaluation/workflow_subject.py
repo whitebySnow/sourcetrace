@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 from sourcetrace.evaluation.models import (
     EvaluationCase,
     EvaluationDecisionTrace,
+    EvaluationFailurePhase,
     EvaluationObservation,
     ObservedCitationValidation,
     ObservedEvidence,
@@ -23,6 +24,9 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
     RetrievedEvidence,
 )
+from sourcetrace.rag.embeddings import EmbeddingProviderError
+from sourcetrace.rag.llm import LlmProviderError
+from sourcetrace.rag.rerankers import RerankerProviderError
 from sourcetrace.rag.workflow import (
     WorkflowAnswered,
     WorkflowCancelled,
@@ -30,8 +34,25 @@ from sourcetrace.rag.workflow import (
     WorkflowRefused,
     WorkflowRequest,
     WorkflowRunControl,
+    WorkflowStatus,
     WorkflowTrace,
 )
+
+
+class EvaluationExecutionFailure(Exception):
+    def __init__(
+        self,
+        *,
+        case_id: str,
+        phase: EvaluationFailurePhase,
+        error_code: str,
+        error_reason: str | None,
+    ) -> None:
+        super().__init__(error_code)
+        self.case_id = case_id
+        self.phase = phase
+        self.error_code = error_code
+        self.error_reason = error_reason
 
 
 class WorkflowRetrieval(Protocol):
@@ -161,15 +182,26 @@ class WorkflowEvaluationSubject:
         self._retrieval.reset()
         self._run_control.reset()
         final: WorkflowAnswered | WorkflowRefused | WorkflowCancelled | None = None
+        phase: EvaluationFailurePhase = "analyzing"
         request = WorkflowRequest(
             run_id=uuid4(),
             knowledge_base_id=self._knowledge_base_id,
             question=case.question,
             recent_questions=(),
         )
-        async for event in self._workflow.run(request):
-            if isinstance(event, (WorkflowAnswered, WorkflowRefused, WorkflowCancelled)):
-                final = event
+        try:
+            async for event in self._workflow.run(request):
+                if isinstance(event, WorkflowStatus):
+                    phase = event.stage
+                if isinstance(event, (WorkflowAnswered, WorkflowRefused, WorkflowCancelled)):
+                    final = event
+        except (EmbeddingProviderError, LlmProviderError, RerankerProviderError) as error:
+            raise EvaluationExecutionFailure(
+                case_id=case.id,
+                phase=phase,
+                error_code=error.code,
+                error_reason=error.reason if isinstance(error, LlmProviderError) else None,
+            ) from error
         if final is None:
             raise RuntimeError("answer workflow completed without a final event")
 

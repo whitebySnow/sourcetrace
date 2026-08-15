@@ -99,18 +99,32 @@ async def _run_fake(args: argparse.Namespace) -> None:
     args.output.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
-async def _run_real(args: argparse.Namespace) -> None:
-    from sourcetrace.core.config import get_settings
-    from sourcetrace.evaluation.real import run_real_evaluation
+def _failure_output_path(output: Path) -> Path:
+    return output.with_name(f"{output.stem}-failure{output.suffix or '.json'}")
 
+
+async def _run_real(args: argparse.Namespace) -> int:
+    from sourcetrace.core.config import get_settings
+    from sourcetrace.evaluation.real import RealEvaluationFailure, run_real_evaluation
+
+    failure_output = _failure_output_path(args.output)
+    if args.output.exists() or failure_output.exists():
+        raise FileExistsError(
+            "real evaluation output or failure artifact already exists; choose a new output path"
+        )
     dataset = load_dataset(args.dataset)
-    report = await run_real_evaluation(
-        dataset,
-        code_commit=args.code_commit,
-        settings=get_settings(),
-    )
+    try:
+        report = await run_real_evaluation(
+            dataset,
+            code_commit=args.code_commit,
+            settings=get_settings(),
+        )
+    except RealEvaluationFailure as error:
+        _write_json_artifact(failure_output, error.report)
+        return 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    return 0
 
 
 async def _run_rerank(args: argparse.Namespace) -> None:
@@ -200,8 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         asyncio.run(_run_fake(args))
         return 0
     if args.mode == "real":
-        asyncio.run(_run_real(args))
-        return 0
+        return asyncio.run(_run_real(args))
     if args.mode == "review":
         _run_review(args)
         return 0

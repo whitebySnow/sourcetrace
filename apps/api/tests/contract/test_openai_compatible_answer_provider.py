@@ -2624,6 +2624,7 @@ async def test_evidence_assessor_rejects_unstructured_output() -> None:
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.reason == "evidence_assessment_contract_violation"
     assert attempts == 2
 
 
@@ -2787,6 +2788,7 @@ async def test_evidence_assessor_rejects_persistently_repeated_executed_query() 
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.reason == "evidence_assessment_contract_violation"
     assert attempts == 2
 
 

@@ -340,6 +340,35 @@ class EvaluationReport(StrictModel):
     end_to_end_summary: EvaluationSummary
 
 
+type EvaluationFailurePhase = Literal[
+    "setup",
+    "analyzing",
+    "retrieving",
+    "assessing",
+    "generating",
+    "validating",
+    "repairing",
+]
+
+
+class EvaluationFailureReport(StrictModel):
+    """A non-scoreable record for a real evaluation that terminated early."""
+
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    knowledge_base_id: UUID
+    document_version_ids: list[UUID]
+    metadata: EvaluationRunMetadata | None = None
+    failed_case_id: str | None = Field(default=None, min_length=1)
+    phase: EvaluationFailurePhase
+    error_code: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    error_reason: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$",
+    )
+
+
 type RetrievalFailureMechanism = Literal[
     "query_rewrite_drift",
     "chunk_boundary_mismatch",

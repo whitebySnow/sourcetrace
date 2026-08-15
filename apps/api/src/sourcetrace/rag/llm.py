@@ -935,6 +935,7 @@ async def _structured_completion(
         raise LlmProviderError(
             "LLM_INVALID_RESPONSE",
             "Language model returned an invalid response",
+            reason="provider_structured_invalid_response",
         ) from error
     except (httpx.TimeoutException, TimeoutError) as error:
         raise LlmProviderError(
@@ -1140,6 +1141,7 @@ class OpenAICompatibleEvidenceAssessor:
                 raise LlmProviderError(
                     "LLM_INVALID_RESPONSE",
                     "Language model returned an invalid response",
+                    reason="evidence_assessment_contract_violation",
                 ) from error
 
 
