@@ -627,3 +627,33 @@ Self-RAG 的三项规范证据，但缺少 ReAct 的规范证据，因此 Retrie
 证据即使未进入第二轮检索结果也不会丢失。修复不扩大查询预算、候选上限或 Citation/Refusal
 门禁，不修改 Dataset 与既有 Evaluation Report。两次定向重放均不构成完整 Evaluation Report，
 不能据此填写产品准确率或改写绑定评测结果。
+
+## 31. 多槽位查询的第 2 名证据在覆盖阶段被丢弃
+
+**症状**：`ARF-026` 的固定 ReAct 槽位查询能够召回通过既有 cosine 门槛的规范证据，但最终
+主证据和页面扩展证据均不包含该 Chunk。最小本地回放证明，这与 DeepSeek 查询规划、PDF 英文
+文本或 Embedding 未召回无关。
+
+**根因**：额外查询的覆盖配额固定为一个。该 ReAct 证据在自身查询中 dense 第 1、融合第 2、
+reranker 第 2，因而没有成为覆盖候选；全局融合会优先覆盖候选，证据在页面多样性选择之前就已
+被排除。它的 cosine 高于最低门槛，阈值不是根因。
+
+**修复**：在默认 Top-8 内保留原始问题的四个覆盖候选，并把余下容量按实际额外槽位分配，
+每槽至少一个、至多两个。两个额外槽位时覆盖配额为 4、2、2，不扩大最终证据数、候选池、
+查询预算或任何 Evidence/Citation/Refusal 门禁。检索配置升级为
+`pgvector-hybrid-query-aware-bge-reranker-v8`；ADR 0006 明确替代 ADR 0001 的固定单候选规则。
+
+**验证边界**：确定性 `RetrievalService.search` 回归先在旧策略失败，再验证额外查询第 2 名证据
+进入最终主证据。下一步必须在同一版本化 30 题数据集、本地 PostgreSQL、BGE-M3 和 reranker 上
+完成无供应商差异回放，确认旧通过项没有回归；该回放完成前不填写新的真实供应商或端到端指标。
+
+**本地回放**：2026-08-15 在提交 `20abfad`、Dataset `1.2.0`、查询计划
+`two-stage-evidence-slots-v6`、BGE-M3 与 `BAAI/bge-reranker-v2-m3` 的 CPU 配置下完成完整 30 题
+混合检索运行。去敏报告位于被忽略的
+`output/evals/issue73-20abfad-hybrid-v8-v6.json`，SHA-256 为
+`9834978bd35d58c39e7e1c285a14c7fec5ef658cc06173049a78993204277c67`；Dataset 与查询计划 SHA-256
+分别为 `99abe02e752bb4bb53d93e9a9ba73c831c63c5348f4d95a47fcb34cb2e04e683` 和
+`0ac1ca6ff89120710de7a077b25487ad35e66ebcaccd2884c8076e2133a2779c`。报告的 hybrid 检索为
+27 passed、0 regressions、3 not applicable；`ARF-026` 通过，原问题与两个额外槽位的覆盖数为
+4、2、2，两个额外槽位的第 2 名候选均保留。该实验只验证检索轴，不调用供应商、不生成回答，
+不能用作端到端质量或产品准确率声明。

@@ -14,7 +14,7 @@ _MAX_CANDIDATE_POOL_SIZE = 100
 _MAX_PRIMARY_CANDIDATES = 8
 _MAX_ADDITIONAL_QUERIES = 2
 _ORIGINAL_QUERY_COVERAGE_CANDIDATES = 4
-_ADDITIONAL_QUERY_COVERAGE_CANDIDATES = 1
+_MAX_ADDITIONAL_QUERY_COVERAGE_CANDIDATES = 2
 _PLANNER_DOCUMENT_TITLE_LIMIT = 50
 _RETRIEVAL_PLAN_VERSION = "two-stage-evidence-slots-v6"
 
@@ -231,9 +231,8 @@ class RetrievalService:
             rank_constant=self._rrf_rank_constant,
         )
         scores_by_chunk: dict[UUID, float] = {}
-        coverage_ids: set[UUID] = set()
         reranked_query_results: list[QueryRetrievalResult] = []
-        for query_index, query_result in enumerate(query_results):
+        for query_result in query_results:
             ranked_candidates = query_result.candidates
             if not ranked_candidates:
                 reranked_query_results.append(query_result)
@@ -267,16 +266,6 @@ class RetrievalService:
             scores_for_query = {
                 candidate.evidence.chunk_id: score for candidate, score in scored_candidates
             }
-            coverage_limit = (
-                _ORIGINAL_QUERY_COVERAGE_CANDIDATES
-                if query_index == 0
-                else _ADDITIONAL_QUERY_COVERAGE_CANDIDATES
-            )
-            query_coverage_ids = {
-                candidate.evidence.chunk_id
-                for candidate, _score in scored_candidates[:coverage_limit]
-            }
-            coverage_ids.update(query_coverage_ids)
             reranked_query_results.append(
                 replace(
                     query_result,
@@ -285,9 +274,6 @@ class RetrievalService:
                             candidate,
                             reranker_score=scores_for_query[candidate.evidence.chunk_id],
                             reranked_rank=ranks_by_chunk[candidate.evidence.chunk_id],
-                            selected_for_query_coverage=(
-                                candidate.evidence.chunk_id in query_coverage_ids
-                            ),
                         )
                         for candidate in ranked_candidates
                     ),
@@ -299,6 +285,37 @@ class RetrievalService:
                     scores_by_chunk.get(chunk_id, float("-inf")),
                     score,
                 )
+        coverage_ids: set[UUID] = set()
+        coverage_limits = _coverage_candidate_limits(
+            reranked_query_results,
+            top_k=self._top_k,
+        )
+        reranked_query_results = [
+            replace(
+                query_result,
+                candidates=tuple(
+                    replace(
+                        candidate,
+                        selected_for_query_coverage=(
+                            candidate.reranked_rank is not None
+                            and candidate.reranked_rank <= coverage_limit
+                        ),
+                    )
+                    for candidate in query_result.candidates
+                ),
+            )
+            for query_result, coverage_limit in zip(
+                reranked_query_results,
+                coverage_limits,
+                strict=True,
+            )
+        ]
+        for query_result in reranked_query_results:
+            coverage_ids.update(
+                candidate.evidence.chunk_id
+                for candidate in query_result.candidates
+                if candidate.selected_for_query_coverage
+            )
         fused = [
             replace(item, reranker_score=scores_by_chunk[item.evidence.chunk_id]) for item in fused
         ]
@@ -347,6 +364,42 @@ class RetrievalService:
 
 def _normalize_query(query: str) -> str:
     return " ".join(query.split()).casefold()
+
+
+def _coverage_candidate_limits(
+    query_results: Sequence[QueryRetrievalResult],
+    *,
+    top_k: int,
+) -> tuple[int, ...]:
+    limits = [0] * len(query_results)
+    if not query_results:
+        return tuple(limits)
+    remaining_capacity = top_k
+    for index, query_result in enumerate(query_results):
+        if remaining_capacity == 0:
+            return tuple(limits)
+        if not query_result.candidates:
+            continue
+        limits[index] = 1
+        remaining_capacity -= 1
+    original_additional_capacity = min(
+        _ORIGINAL_QUERY_COVERAGE_CANDIDATES - limits[0],
+        len(query_results[0].candidates) - limits[0],
+        remaining_capacity,
+    )
+    limits[0] += original_additional_capacity
+    remaining_capacity -= original_additional_capacity
+    for index, query_result in enumerate(query_results[1:], start=1):
+        if remaining_capacity == 0:
+            return tuple(limits)
+        additional_capacity = min(
+            _MAX_ADDITIONAL_QUERY_COVERAGE_CANDIDATES - limits[index],
+            len(query_result.candidates) - limits[index],
+            remaining_capacity,
+        )
+        limits[index] += additional_capacity
+        remaining_capacity -= additional_capacity
+    return tuple(limits)
 
 
 def _unique_queries(queries: Sequence[str]) -> tuple[str, ...]:

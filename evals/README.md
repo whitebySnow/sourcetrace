@@ -91,11 +91,15 @@ $env:EMBEDDING_DEVICE = "cuda"
 $env:RERANKER_DEVICE = "cuda"
 uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli hybrid-retrieval `
   --dataset evals/datasets/agentic-rag-foundations-v1.json `
-  --query-plan evals/query-plans/agentic-rag-foundations-v1-two-stage-evidence-slots-v5.json `
+  --query-plan evals/query-plans/agentic-rag-foundations-v1-two-stage-evidence-slots-v6.json `
   --code-commit (git rev-parse HEAD) `
   --output output/evals/hybrid-retrieval-report.json `
   --confirm-local-model
 ```
+
+`two-stage-evidence-slots-v6` 的 `ARF-026` 槽位查询只组合了问题中的“环境动作”与
+“critique token”和知识库稳定标题中的 `ReAct`、`Self-RAG`；它不包含参考答案、规范摘录或
+评测不可见的目标词，因此可以作为本地检索覆盖分配的可重放输入。
 
 报告逐题记录 dense、lexical、通道融合和 reranker 排名，但不复制文档正文。任何线上接入、索引
 迁移或阈值调整都必须另开 Issue，并以本实验报告作为决策输入。没有可用 NVIDIA GPU 时可移除

@@ -445,7 +445,7 @@ async def test_reranker_scores_fused_union_before_page_diversity() -> None:
     assert [item.reranker_score for item in first_query_candidates] == [0.1, 0.8, 0.9]
     assert [item.reranked_rank for item in first_query_candidates] == [3, 2, 1]
     assert [item.selected_for_query_coverage for item in first_query_candidates] == [
-        True,
+        False,
         True,
         True,
     ]
@@ -596,4 +596,208 @@ async def test_speculative_query_coverage_cannot_displace_original_evidence() ->
         original_second.chunk_id,
         expansion_one_first.chunk_id,
         expansion_two_first.chunk_id,
+    }
+
+
+async def test_multi_slot_coverage_preserves_rank_two_evidence_within_top_eight() -> None:
+    original = [
+        _evidence(
+            f"00000000-0000-0000-0000-00000000000{index}",
+            score=0.90 - index / 100,
+            page_number=index,
+        )
+        for index in range(1, 5)
+    ]
+    react_distractor = _evidence(
+        "00000000-0000-0000-0000-000000000005",
+        score=0.80,
+        page_number=5,
+    )
+    react_target = _evidence(
+        "00000000-0000-0000-0000-000000000006",
+        score=0.79,
+        page_number=6,
+    )
+    react_tail = _evidence(
+        "00000000-0000-0000-0000-000000000007",
+        score=0.78,
+        page_number=7,
+    )
+    self_rag_first = _evidence(
+        "00000000-0000-0000-0000-000000000008",
+        score=0.77,
+        page_number=8,
+    )
+    self_rag_second = _evidence(
+        "00000000-0000-0000-0000-000000000009",
+        score=0.76,
+        page_number=9,
+    )
+    self_rag_tail = _evidence(
+        "00000000-0000-0000-0000-000000000010",
+        score=0.75,
+        page_number=10,
+    )
+    reranker = QuerySpecificReranker(
+        {
+            "original": {item.text: 0.90 - index / 100 for index, item in enumerate(original)},
+            "ReAct slot": {
+                react_distractor.text: 0.99,
+                react_target.text: 0.50,
+                react_tail.text: 0.49,
+            },
+            "Self-RAG slot": {
+                self_rag_first.text: 0.98,
+                self_rag_second.text: 0.80,
+                self_rag_tail.text: 0.70,
+            },
+        }
+    )
+    service = RetrievalService(
+        repository=RankedListRepository(
+            {
+                (1.0,): original,
+                (2.0,): [react_distractor, react_target, react_tail],
+                (3.0,): [self_rag_first, self_rag_second, self_rag_tail],
+            }
+        ),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,), (3.0,))),
+        question_planner=StaticPlanner(),
+        reranker=reranker,
+        top_k=8,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("original", "ReAct slot", "Self-RAG slot"),
+    )
+
+    react_candidate = next(
+        item
+        for item in result.query_results[1].candidates
+        if item.evidence.chunk_id == react_target.chunk_id
+    )
+    assert react_candidate.reranked_rank == 2
+    assert react_candidate.selected_for_query_coverage is True
+    assert react_target in result.primary_evidence
+    assert sum(item.selected_for_query_coverage for item in result.query_results[0].candidates) == 4
+    assert sum(item.selected_for_query_coverage for item in result.query_results[1].candidates) == 2
+    assert sum(item.selected_for_query_coverage for item in result.query_results[2].candidates) == 2
+    assert (
+        next(
+            item
+            for item in result.query_results[2].candidates
+            if item.evidence.chunk_id == self_rag_second.chunk_id
+        ).selected_for_query_coverage
+        is True
+    )
+
+
+async def test_low_top_k_balances_query_coverage_within_the_final_budget() -> None:
+    original = [
+        _evidence(
+            f"00000000-0000-0000-0000-00000000001{index}",
+            score=0.90 - index / 100,
+            page_number=index,
+        )
+        for index in range(1, 5)
+    ]
+    first_slot = _evidence(
+        "00000000-0000-0000-0000-000000000015",
+        score=0.80,
+        page_number=5,
+    )
+    second_slot = _evidence(
+        "00000000-0000-0000-0000-000000000016",
+        score=0.79,
+        page_number=6,
+    )
+    service = RetrievalService(
+        repository=RankedListRepository(
+            {
+                (1.0,): original,
+                (2.0,): [first_slot],
+                (3.0,): [second_slot],
+            }
+        ),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,), (3.0,))),
+        question_planner=StaticPlanner(),
+        reranker=QuerySpecificReranker(
+            {
+                "original": {item.text: 0.60 for item in original},
+                "first slot": {first_slot.text: 0.99},
+                "second slot": {second_slot.text: 0.98},
+            }
+        ),
+        top_k=4,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("original", "first slot", "second slot"),
+    )
+
+    assert all(item.selected_for_query_coverage for item in result.query_results[0].candidates[:2])
+    assert not any(
+        item.selected_for_query_coverage for item in result.query_results[0].candidates[2:]
+    )
+    assert result.query_results[1].candidates[0].selected_for_query_coverage
+    assert result.query_results[2].candidates[0].selected_for_query_coverage
+    assert (
+        sum(
+            item.selected_for_query_coverage
+            for query_result in result.query_results
+            for item in query_result.candidates
+        )
+        == 4
+    )
+    assert {item.chunk_id for item in result.primary_evidence} == {
+        original[0].chunk_id,
+        original[1].chunk_id,
+        first_slot.chunk_id,
+        second_slot.chunk_id,
+    }
+
+
+async def test_coverage_stops_in_query_order_when_top_k_is_exhausted() -> None:
+    original = _evidence(
+        "00000000-0000-0000-0000-000000000021",
+        score=0.90,
+        page_number=1,
+    )
+    first_slot = _evidence(
+        "00000000-0000-0000-0000-000000000022",
+        score=0.80,
+        page_number=2,
+    )
+    second_slot = _evidence(
+        "00000000-0000-0000-0000-000000000023",
+        score=0.70,
+        page_number=3,
+    )
+    service = RetrievalService(
+        repository=RankedListRepository(
+            {
+                (1.0,): [original],
+                (2.0,): [first_slot],
+                (3.0,): [second_slot],
+            }
+        ),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,), (3.0,))),
+        question_planner=StaticPlanner(),
+        reranker=PreserveOrderReranker(),
+        top_k=2,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("original", "first slot", "second slot"),
+    )
+
+    assert result.query_results[0].candidates[0].selected_for_query_coverage
+    assert result.query_results[1].candidates[0].selected_for_query_coverage
+    assert not result.query_results[2].candidates[0].selected_for_query_coverage
+    assert {item.chunk_id for item in result.primary_evidence} == {
+        original.chunk_id,
+        first_slot.chunk_id,
     }
