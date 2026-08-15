@@ -757,3 +757,47 @@ async def test_low_top_k_balances_query_coverage_within_the_final_budget() -> No
         first_slot.chunk_id,
         second_slot.chunk_id,
     }
+
+
+async def test_coverage_stops_in_query_order_when_top_k_is_exhausted() -> None:
+    original = _evidence(
+        "00000000-0000-0000-0000-000000000021",
+        score=0.90,
+        page_number=1,
+    )
+    first_slot = _evidence(
+        "00000000-0000-0000-0000-000000000022",
+        score=0.80,
+        page_number=2,
+    )
+    second_slot = _evidence(
+        "00000000-0000-0000-0000-000000000023",
+        score=0.70,
+        page_number=3,
+    )
+    service = RetrievalService(
+        repository=RankedListRepository(
+            {
+                (1.0,): [original],
+                (2.0,): [first_slot],
+                (3.0,): [second_slot],
+            }
+        ),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,), (3.0,))),
+        question_planner=StaticPlanner(),
+        reranker=PreserveOrderReranker(),
+        top_k=2,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("original", "first slot", "second slot"),
+    )
+
+    assert result.query_results[0].candidates[0].selected_for_query_coverage
+    assert result.query_results[1].candidates[0].selected_for_query_coverage
+    assert not result.query_results[2].candidates[0].selected_for_query_coverage
+    assert {item.chunk_id for item in result.primary_evidence} == {
+        original.chunk_id,
+        first_slot.chunk_id,
+    }
