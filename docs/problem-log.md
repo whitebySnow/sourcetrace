@@ -646,3 +646,14 @@ reranker 第 2，因而没有成为覆盖候选；全局融合会优先覆盖候
 **验证边界**：确定性 `RetrievalService.search` 回归先在旧策略失败，再验证额外查询第 2 名证据
 进入最终主证据。下一步必须在同一版本化 30 题数据集、本地 PostgreSQL、BGE-M3 和 reranker 上
 完成无供应商差异回放，确认旧通过项没有回归；该回放完成前不填写新的真实供应商或端到端指标。
+
+**本地回放**：2026-08-15 在提交 `20abfad`、Dataset `1.2.0`、查询计划
+`two-stage-evidence-slots-v6`、BGE-M3 与 `BAAI/bge-reranker-v2-m3` 的 CPU 配置下完成完整 30 题
+混合检索运行。去敏报告位于被忽略的
+`output/evals/issue73-20abfad-hybrid-v8-v6.json`，SHA-256 为
+`9834978bd35d58c39e7e1c285a14c7fec5ef658cc06173049a78993204277c67`；Dataset 与查询计划 SHA-256
+分别为 `99abe02e752bb4bb53d93e9a9ba73c831c63c5348f4d95a47fcb34cb2e04e683` 和
+`0ac1ca6ff89120710de7a077b25487ad35e66ebcaccd2884c8076e2133a2779c`。报告的 hybrid 检索为
+27 passed、0 regressions、3 not applicable；`ARF-026` 通过，原问题与两个额外槽位的覆盖数为
+4、2、2，两个额外槽位的第 2 名候选均保留。该实验只验证检索轴，不调用供应商、不生成回答，
+不能用作端到端质量或产品准确率声明。
