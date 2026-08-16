@@ -456,6 +456,55 @@ class CitationDiagnosticsReport(StrictModel):
     cases: tuple[CitationCaseDiagnostic, ...]
 
 
+type EvidenceAssessmentFailureMechanism = Literal[
+    "no_evidence_selected",
+    "expected_source_pages_not_selected",
+    "expected_source_pages_selected_but_insufficient",
+]
+
+
+class EvidenceAssessmentClaimDiagnostic(StrictModel):
+    claim_id: str = Field(min_length=1)
+    expected: SanitizedEvidenceLocation
+    retrieval_match_status: EvidenceMatchStatus
+    selected_source_page: bool
+
+
+class EvidenceAssessmentRoundDiagnostic(StrictModel):
+    round_number: int = Field(gt=0, le=2)
+    sufficient: bool
+    selected_chunk_count: int = Field(ge=0)
+    selected_source_pages: tuple[SanitizedEvidenceLocation, ...]
+    supplemental_query_count: int = Field(ge=0, le=2)
+
+
+class EvidenceAssessmentCaseDiagnostic(StrictModel):
+    case_id: str = Field(min_length=1)
+    primary_mechanism: EvidenceAssessmentFailureMechanism
+    claims: tuple[EvidenceAssessmentClaimDiagnostic, ...]
+    assessment_rounds: tuple[EvidenceAssessmentRoundDiagnostic, ...] = Field(
+        min_length=1,
+        max_length=2,
+    )
+
+
+class EvidenceAssessmentDiagnosticsSummary(StrictModel):
+    failed_answerable_refusals: int = Field(ge=0)
+    no_evidence_selected: int = Field(ge=0)
+    expected_source_pages_not_selected: int = Field(ge=0)
+    expected_source_pages_selected_but_insufficient: int = Field(ge=0)
+
+
+class EvidenceAssessmentDiagnosticsReport(StrictModel):
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_metadata: EvaluationRunMetadata
+    summary: EvidenceAssessmentDiagnosticsSummary
+    cases: tuple[EvidenceAssessmentCaseDiagnostic, ...]
+
+
 class HybridQueryPlanCase(StrictModel):
     case_id: str = Field(min_length=1)
     additional_queries: tuple[str, ...] = Field(max_length=2)
@@ -488,9 +537,7 @@ class HybridRetrievalRunMetadata(StrictModel):
     reranker_weight_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     reranker_version: str = Field(min_length=1)
     reranker_device: str = Field(min_length=1)
-    lexical_version: Literal["postgres-english-or-phrase-v1"] = (
-        "postgres-english-or-phrase-v1"
-    )
+    lexical_version: Literal["postgres-english-or-phrase-v1"] = "postgres-english-or-phrase-v1"
     text_search_configuration: Literal["english"] = "english"
     phrase_weight: float = Field(ge=0)
     channel_rrf_rank_constant: int = Field(gt=0)

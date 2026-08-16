@@ -10,6 +10,7 @@ from sourcetrace.evaluation.cli import main
 from sourcetrace.evaluation.models import (
     CitationDiagnosticsReport,
     EvaluationFailureReport,
+    EvidenceAssessmentDiagnosticsReport,
     HybridQueryPlanFixture,
     HybridRetrievalEvaluationReport,
     RerankerEvaluationReport,
@@ -28,6 +29,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     reviewed_output_path = tmp_path / "reports" / "reviewed-report.json"
     diagnostics_output_path = tmp_path / "reports" / "retrieval-diagnostics.json"
     citation_diagnostics_output_path = tmp_path / "reports" / "citation-diagnostics.json"
+    assessment_diagnostics_output_path = tmp_path / "reports" / "assessment-diagnostics.json"
     dataset_path.write_text(
         json.dumps(
             {
@@ -184,16 +186,29 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
             str(citation_diagnostics_output_path),
         ]
     )
+    assessment_diagnostics_exit_code = main(
+        [
+            "diagnose-assessments",
+            "--dataset",
+            str(dataset_path),
+            "--report",
+            str(output_path),
+            "--output",
+            str(assessment_diagnostics_output_path),
+        ]
+    )
 
     report = json.loads(reviewed_output_path.read_text(encoding="utf-8"))
     diagnostics = json.loads(diagnostics_output_path.read_text(encoding="utf-8"))
-    citation_diagnostics = json.loads(
-        citation_diagnostics_output_path.read_text(encoding="utf-8")
+    citation_diagnostics = json.loads(citation_diagnostics_output_path.read_text(encoding="utf-8"))
+    assessment_diagnostics = json.loads(
+        assessment_diagnostics_output_path.read_text(encoding="utf-8")
     )
     assert exit_code == 0
     assert review_exit_code == 0
     assert diagnostics_exit_code == 0
     assert citation_diagnostics_exit_code == 0
+    assert assessment_diagnostics_exit_code == 0
     assert report["dataset_id"] == "cli-fixture"
     assert report["metadata"]["code_commit"] == "test-commit"
     assert report["retrieval_summary"]["passed"] == 1
@@ -204,6 +219,9 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     assert citation_diagnostics["report_sha256"] == report_sha256
     assert citation_diagnostics["summary"]["failed_answered_cases"] == 0
     assert citation_diagnostics["cases"] == []
+    assert assessment_diagnostics["report_sha256"] == report_sha256
+    assert assessment_diagnostics["summary"]["failed_answerable_refusals"] == 0
+    assert assessment_diagnostics["cases"] == []
 
 
 def test_real_cli_requires_explicit_provider_confirmation() -> None:
@@ -320,7 +338,11 @@ def test_real_cli_writes_an_unscored_failure_artifact(tmp_path, monkeypatch) -> 
                 str(tmp_path / "reviewed.json"),
             ]
         )
-    for mode in ("diagnose-retrieval", "diagnose-citations"):
+    for mode in (
+        "diagnose-retrieval",
+        "diagnose-citations",
+        "diagnose-assessments",
+    ):
         with pytest.raises(ValidationError):
             main(
                 [
@@ -429,12 +451,21 @@ def test_repository_reranker_report_schema_matches_model() -> None:
 def test_repository_citation_diagnostics_schema_matches_model() -> None:
     root = Path(__file__).resolve().parents[4]
     schema = json.loads(
-        (root / "evals/schema/citation-diagnostics-v1.schema.json").read_text(
+        (root / "evals/schema/citation-diagnostics-v1.schema.json").read_text(encoding="utf-8")
+    )
+
+    assert schema == CitationDiagnosticsReport.model_json_schema()
+
+
+def test_repository_evidence_assessment_diagnostics_schema_matches_model() -> None:
+    root = Path(__file__).resolve().parents[4]
+    schema = json.loads(
+        (root / "evals/schema/evidence-assessment-diagnostics-v1.schema.json").read_text(
             encoding="utf-8"
         )
     )
 
-    assert schema == CitationDiagnosticsReport.model_json_schema()
+    assert schema == EvidenceAssessmentDiagnosticsReport.model_json_schema()
 
 
 def test_repository_failure_report_schema_matches_model() -> None:

@@ -15,6 +15,7 @@
     "eval:real": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli real",
     "eval:rerank": "uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli rerank",
     "eval:review": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli review",
+    "eval:diagnose-assessments": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli diagnose-assessments",
     "eval:diagnose-citations": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli diagnose-citations",
     "format": "uv run --project apps/api --extra cpu ruff format apps/api && pnpm --dir apps/web format",
     "check:cpu-deps": "python apps/api/scripts/verify_cpu_dependencies.py",

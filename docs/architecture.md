@@ -254,6 +254,12 @@ case/claim ID、不可变文档版本 ID、页码、规范或批准替代匹配�
 不复制问题、答案、提示词或文档正文。诊断区分目标证据未召回、已召回但未引用、同页不同
 chunk 和多声明部分覆盖；该分类不构成替代证据批准，也不能改变原 Report 的任何评分。
 
+Evidence Assessment 失败诊断位于相同的进程外 `evaluation` 边界。它从报告中的结构化
+Retrieval 与 Evidence Decision 轨迹建立 Chunk ID 到不可变文档版本和页码的去敏映射，将检索通过但在
+生成前拒答的 answerable case 分为零选中、期望来源页未选中或期望来源页已选中但仍判定不足。
+输出绑定 Dataset ID/version、原 Report SHA-256 和原运行配置，但不保留问题、回答、查询、提示词或证据正文。
+来源页选中只是轨迹定位，不等于声明语义已获支持；诊断不能改变 Evidence Decision、Dataset 真值或原 Report 评分。
+
 ## 7. API 契约
 
 - 业务 API 位于 `/api/v1`，健康检查保持在 `/health` 与 `/ready`。
