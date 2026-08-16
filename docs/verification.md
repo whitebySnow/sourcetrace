@@ -494,3 +494,36 @@ SHA-256 为 `9691ade49662bed8f468bbed5438ea727ae0e2a8c073d884418f6812f5924d18`�
 引用或严格拒答路径，人工审核没有覆盖或改写它们；20/30 不能泛化为产品准确率。剩余检索失败为
 `ARF-023`、`ARF-024`；引用失败为 `ARF-006`、`ARF-009`、`ARF-012`、`ARF-013`、
 `ARF-017`、`ARF-020`、`ARF-023`、`ARF-024`、`ARF-026`、`ARF-030`。
+
+### 稳定性改动后的 Dataset 1.2.0 基线
+
+2026-08-16 在合并提交 `beed1e6726843b70e257d77827e81c71f338d692` 上，使用
+`agentic-rag-foundations@1.2.0`、`deepseek-v4-flash`、工作流 v8、生产混合检索 v8、
+`grounded-answer-v6`、`two-stage-evidence-slots-v6`、`evidence-assessment-v6`、
+`citation-repair-v7`、本地 BGE-M3 与固定 `BAAI/bge-reranker-v2-m3` 完成 30 题真实
+供应商回归。报告记录 10 秒 connect、120 秒 read、180 秒单次 request lifecycle
+和 361 秒 operation deadline。原始报告 SHA-256 为
+`7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b76919efea67f7afa6`。
+
+| 维度 | 人工审核前结果 |
+|---|---|
+| 检索 | 25 passed，2 failed，3 not applicable |
+| 引用 | 19 passed，8 failed，3 not applicable |
+| 拒答 | 3 passed，0 failed，27 not applicable |
+| 端到端 | 3 passed，8 failed，19 pending review |
+
+用户逐条审核全部 19 个待审回答并判定通过。judgment 位于
+`evals/judgments/agentic-rag-foundations-v1.2.0-beed1e67-deepseek-v4-flash.json`，仅覆盖本轮
+`pending_review` case，并绑定上述原始报告 SHA-256。应用后的 reviewed report SHA-256 为
+`41df14cf78446152a3040648bda37d3e3c40abdbd741bd0f39dcb51f3f1fdf6e`，最终端到端结果为
+22 passed、8 failed、0 pending review；三个客观维度未被人工 judgment 改写。
+
+八个最终失败按首个已知阻断阶段分类：`ARF-023`、`ARF-024` 为规范证据检索未完整命中；
+`ARF-025`、`ARF-026` 为检索通过后的证据阶段拒答；`ARF-006`、`ARF-009`、`ARF-020`、
+`ARF-030` 为检索通过且已回答后的引用匹配失败。客观 Citation 轴上的全部失败 ID 仍为
+`ARF-006`、`ARF-009`、`ARF-020`、`ARF-023`、`ARF-024`、`ARF-025`、`ARF-026`、`ARF-030`。
+该分类只用于拆分后续诊断，不更改 Dataset 真值或现有门禁。
+
+该结果只适用于固定三篇论文、固定 30 题、上述代码和供应商配置；22/30 不是产品通用
+准确率。原始与 reviewed report 包含本地论文摘录，继续保留在被 Git 忽略的 `output/evals/`，
+不提交。
