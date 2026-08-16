@@ -272,6 +272,51 @@ async def test_repository_search_fuses_bounded_dense_and_lexical_candidates(
     assert target.evidence.score == pytest.approx(0.0)
 
 
+async def test_repository_channel_trace_preserves_raw_candidates_before_fusion(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = await KnowledgeBaseService(KnowledgeBaseRepository(session)).create(
+        "Hybrid trace"
+    )
+    await _create_searchable_version(
+        session,
+        knowledge_base_id=knowledge_base.id,
+        file_name="trace.pdf",
+        checksum="b" * 64,
+        text="Dense first candidate",
+        page_number=1,
+        embedding=_vector(1.0, 0.0),
+        additional_chunks=(
+            (
+                2,
+                "Self RAG citation support can be partial.",
+                _vector(0.0, 1.0),
+            ),
+            (3, "Dense second candidate", _vector(0.9, 0.1)),
+        ),
+    )
+    repository = PgVectorRetrievalRepository(session)
+
+    traced = await repository.search_channels(
+        knowledge_base.id,
+        _vector(1.0, 0.0),
+        query="Self RAG citation support can be partial",
+        limit=2,
+    )
+    public = await repository.search(
+        knowledge_base.id,
+        _vector(1.0, 0.0),
+        query="Self RAG citation support can be partial",
+        limit=2,
+    )
+
+    assert [item.page_number for item in traced.dense] == [1, 3]
+    assert [item.evidence.page_number for item in traced.lexical] == [2]
+    assert [item.evidence.chunk_id for item in traced.fused] == [
+        item.evidence.chunk_id for item in public
+    ]
+
+
 async def test_chunk_english_text_search_expression_uses_gin_index(
     session: AsyncSession,
 ) -> None:

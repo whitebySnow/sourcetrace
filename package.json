@@ -17,6 +17,7 @@
     "eval:review": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli review",
     "eval:diagnose-assessments": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli diagnose-assessments",
     "eval:diagnose-citations": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli diagnose-citations",
+    "eval:diagnose-retrieval-stages": "uv run --project apps/api --extra cpu python -m sourcetrace.evaluation.cli diagnose-retrieval-stages",
     "format": "uv run --project apps/api --extra cpu ruff format apps/api && pnpm --dir apps/web format",
     "check:cpu-deps": "python apps/api/scripts/verify_cpu_dependencies.py",
     "check": "pnpm check:cpu-deps && uv run --project apps/api --extra cpu ruff check apps/api && uv run --project apps/api --extra cpu mypy apps/api/src && pnpm --dir apps/web typecheck",

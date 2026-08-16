@@ -5,6 +5,7 @@ from sourcetrace.evaluation.models import (
     EvaluationJudgmentSet,
     EvaluationReport,
     HybridQueryPlanFixture,
+    HybridRetrievalEvaluationReport,
 )
 
 
@@ -22,3 +23,9 @@ def load_report(path: Path) -> EvaluationReport:
 
 def load_hybrid_query_plan(path: Path) -> HybridQueryPlanFixture:
     return HybridQueryPlanFixture.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def load_hybrid_retrieval_report(path: Path) -> HybridRetrievalEvaluationReport:
+    return HybridRetrievalEvaluationReport.model_validate_json(
+        path.read_text(encoding="utf-8")
+    )
