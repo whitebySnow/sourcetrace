@@ -20,13 +20,34 @@ from sourcetrace.evaluation.fixtures import (
     load_fixture_observations,
 )
 from sourcetrace.evaluation.harness import EvaluationHarness
-from sourcetrace.evaluation.models import EvaluationRunMetadata
+from sourcetrace.evaluation.models import (
+    EvaluationDataset,
+    EvaluationReport,
+    EvaluationRunMetadata,
+)
 from sourcetrace.evaluation.retrieval_diagnostics import build_retrieval_diagnostics
 from sourcetrace.evaluation.review import apply_judgments
 
 
 class _JsonArtifact(Protocol):
     def model_dump_json(self, *, indent: int) -> str: ...
+
+
+class _DiagnosticsBuilder(Protocol):
+    def __call__(
+        self,
+        dataset: EvaluationDataset,
+        report: EvaluationReport,
+        *,
+        report_sha256: str,
+    ) -> _JsonArtifact: ...
+
+
+_DIAGNOSTIC_BUILDERS: dict[str, _DiagnosticsBuilder] = {
+    "diagnose-retrieval": build_retrieval_diagnostics,
+    "diagnose-citations": build_citation_diagnostics,
+    "diagnose-assessments": build_evidence_assessment_diagnostics,
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -51,18 +72,11 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--report", type=Path, required=True)
     review.add_argument("--judgments", type=Path, required=True)
     review.add_argument("--output", type=Path, required=True)
-    diagnose = subparsers.add_parser("diagnose-retrieval")
-    diagnose.add_argument("--dataset", type=Path, required=True)
-    diagnose.add_argument("--report", type=Path, required=True)
-    diagnose.add_argument("--output", type=Path, required=True)
-    diagnose_citations = subparsers.add_parser("diagnose-citations")
-    diagnose_citations.add_argument("--dataset", type=Path, required=True)
-    diagnose_citations.add_argument("--report", type=Path, required=True)
-    diagnose_citations.add_argument("--output", type=Path, required=True)
-    diagnose_assessments = subparsers.add_parser("diagnose-assessments")
-    diagnose_assessments.add_argument("--dataset", type=Path, required=True)
-    diagnose_assessments.add_argument("--report", type=Path, required=True)
-    diagnose_assessments.add_argument("--output", type=Path, required=True)
+    for mode in _DIAGNOSTIC_BUILDERS:
+        diagnose = subparsers.add_parser(mode)
+        diagnose.add_argument("--dataset", type=Path, required=True)
+        diagnose.add_argument("--report", type=Path, required=True)
+        diagnose.add_argument("--output", type=Path, required=True)
     rerank = subparsers.add_parser("rerank")
     rerank.add_argument("--dataset", type=Path, required=True)
     rerank.add_argument("--report", type=Path, required=True)
@@ -189,29 +203,12 @@ def _run_review(args: argparse.Namespace) -> None:
     args.output.write_text(reviewed.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
-def _run_diagnose_retrieval(args: argparse.Namespace) -> None:
+def _run_diagnostics(
+    args: argparse.Namespace,
+    builder: _DiagnosticsBuilder,
+) -> None:
     report_bytes = args.report.read_bytes()
-    diagnostics = build_retrieval_diagnostics(
-        load_dataset(args.dataset),
-        load_report(args.report),
-        report_sha256=hashlib.sha256(report_bytes).hexdigest(),
-    )
-    _write_json_artifact(args.output, diagnostics)
-
-
-def _run_diagnose_citations(args: argparse.Namespace) -> None:
-    report_bytes = args.report.read_bytes()
-    diagnostics = build_citation_diagnostics(
-        load_dataset(args.dataset),
-        load_report(args.report),
-        report_sha256=hashlib.sha256(report_bytes).hexdigest(),
-    )
-    _write_json_artifact(args.output, diagnostics)
-
-
-def _run_diagnose_assessments(args: argparse.Namespace) -> None:
-    report_bytes = args.report.read_bytes()
-    diagnostics = build_evidence_assessment_diagnostics(
+    diagnostics = builder(
         load_dataset(args.dataset),
         load_report(args.report),
         report_sha256=hashlib.sha256(report_bytes).hexdigest(),
@@ -234,14 +231,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.mode == "review":
         _run_review(args)
         return 0
-    if args.mode == "diagnose-retrieval":
-        _run_diagnose_retrieval(args)
-        return 0
-    if args.mode == "diagnose-citations":
-        _run_diagnose_citations(args)
-        return 0
-    if args.mode == "diagnose-assessments":
-        _run_diagnose_assessments(args)
+    if args.mode in _DIAGNOSTIC_BUILDERS:
+        _run_diagnostics(args, _DIAGNOSTIC_BUILDERS[args.mode])
         return 0
     if args.mode == "rerank":
         asyncio.run(_run_rerank(args))

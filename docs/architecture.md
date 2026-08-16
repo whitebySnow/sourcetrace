@@ -257,7 +257,10 @@ chunk 和多声明部分覆盖；该分类不构成替代证据批准，也不�
 Evidence Assessment 失败诊断位于相同的进程外 `evaluation` 边界。它从报告中的结构化
 Retrieval 与 Evidence Decision 轨迹建立 Chunk ID 到不可变文档版本和页码的去敏映射，将检索通过但在
 生成前拒答的 answerable case 分为零选中、期望来源页未选中或期望来源页已选中但仍判定不足。
-输出绑定 Dataset ID/version、原 Report SHA-256 和原运行配置，但不保留问题、回答、查询、提示词或证据正文。
+输出保留逐轮候选/最终 evidence Chunk ID、查询 SHA-256 指纹、模型选择和跨轮保留关系，并绑定
+Dataset ID/version、原 Report SHA-256 和原运行配置，但不保留问题、回答、查询原文、提示词或证据正文。
+诊断重新按 Dataset 逐声明匹配观察证据；若与 Report 的 Retrieval passed 状态不一致则 fail closed，
+不会把检索不足归因于模型评估。
 来源页选中只是轨迹定位，不等于声明语义已获支持；诊断不能改变 Evidence Decision、Dataset 真值或原 Report 评分。
 
 ## 7. API 契约

@@ -231,6 +231,32 @@
           "title": "Claims",
           "type": "array"
         },
+        "retrieval_plan_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Retrieval Plan Version"
+        },
+        "candidate_sources": {
+          "items": {
+            "$ref": "#/$defs/SanitizedEvidenceChunk"
+          },
+          "title": "Candidate Sources",
+          "type": "array"
+        },
+        "retrieval_rounds": {
+          "items": {
+            "$ref": "#/$defs/EvidenceAssessmentRetrievalRoundDiagnostic"
+          },
+          "maxItems": 2,
+          "title": "Retrieval Rounds",
+          "type": "array"
+        },
         "assessment_rounds": {
           "items": {
             "$ref": "#/$defs/EvidenceAssessmentRoundDiagnostic"
@@ -239,13 +265,23 @@
           "minItems": 1,
           "title": "Assessment Rounds",
           "type": "array"
+        },
+        "supplemental_retrieval_attempts": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Supplemental Retrieval Attempts",
+          "type": "integer"
         }
       },
       "required": [
         "case_id",
         "primary_mechanism",
         "claims",
-        "assessment_rounds"
+        "retrieval_plan_version",
+        "candidate_sources",
+        "retrieval_rounds",
+        "assessment_rounds",
+        "supplemental_retrieval_attempts"
       ],
       "title": "EvidenceAssessmentCaseDiagnostic",
       "type": "object"
@@ -319,6 +355,39 @@
       ],
       "type": "string"
     },
+    "EvidenceAssessmentRetrievalRoundDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "round_number": {
+          "exclusiveMinimum": 0,
+          "maximum": 2,
+          "title": "Round Number",
+          "type": "integer"
+        },
+        "queries": {
+          "items": {
+            "$ref": "#/$defs/SanitizedRetrievalQueryDiagnostic"
+          },
+          "title": "Queries",
+          "type": "array"
+        },
+        "final_evidence_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Final Evidence Chunk Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "round_number",
+        "queries",
+        "final_evidence_chunk_ids"
+      ],
+      "title": "EvidenceAssessmentRetrievalRoundDiagnostic",
+      "type": "object"
+    },
     "EvidenceAssessmentRoundDiagnostic": {
       "additionalProperties": false,
       "properties": {
@@ -337,6 +406,21 @@
           "title": "Selected Chunk Count",
           "type": "integer"
         },
+        "selected_chunks": {
+          "items": {
+            "$ref": "#/$defs/SanitizedEvidenceChunk"
+          },
+          "title": "Selected Chunks",
+          "type": "array"
+        },
+        "preserved_selection_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Preserved Selection Chunk Ids",
+          "type": "array"
+        },
         "selected_source_pages": {
           "items": {
             "$ref": "#/$defs/SanitizedEvidenceLocation"
@@ -349,14 +433,25 @@
           "minimum": 0,
           "title": "Supplemental Query Count",
           "type": "integer"
+        },
+        "supplemental_query_sha256": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Supplemental Query Sha256",
+          "type": "array"
         }
       },
       "required": [
         "round_number",
         "sufficient",
         "selected_chunk_count",
+        "selected_chunks",
+        "preserved_selection_chunk_ids",
         "selected_source_pages",
-        "supplemental_query_count"
+        "supplemental_query_count",
+        "supplemental_query_sha256"
       ],
       "title": "EvidenceAssessmentRoundDiagnostic",
       "type": "object"
@@ -368,6 +463,33 @@
         "not_matched"
       ],
       "type": "string"
+    },
+    "SanitizedEvidenceChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number",
+        "chunk_id"
+      ],
+      "title": "SanitizedEvidenceChunk",
+      "type": "object"
     },
     "SanitizedEvidenceLocation": {
       "additionalProperties": false,
@@ -388,6 +510,39 @@
         "page_number"
       ],
       "title": "SanitizedEvidenceLocation",
+      "type": "object"
+    },
+    "SanitizedRetrievalQueryDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "query_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Query Sha256",
+          "type": "string"
+        },
+        "candidate_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Candidate Chunk Ids",
+          "type": "array"
+        },
+        "query_coverage_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Query Coverage Chunk Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query_sha256",
+        "candidate_chunk_ids",
+        "query_coverage_chunk_ids"
+      ],
+      "title": "SanitizedRetrievalQueryDiagnostic",
       "type": "object"
     }
   },

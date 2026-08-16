@@ -1,6 +1,7 @@
 """Sanitized diagnostics for evidence-stage refusals in an evaluation report."""
 
 from collections.abc import Mapping, Sequence
+from hashlib import sha256
 from typing import Literal
 from uuid import UUID
 
@@ -16,10 +17,14 @@ from sourcetrace.evaluation.models import (
     EvidenceAssessmentDiagnosticsReport,
     EvidenceAssessmentDiagnosticsSummary,
     EvidenceAssessmentFailureMechanism,
+    EvidenceAssessmentRetrievalRoundDiagnostic,
     EvidenceAssessmentRoundDiagnostic,
     ObservedEvidenceAssessment,
     ObservedRetrieval,
+    ObservedRetrievalRoundTrace,
+    SanitizedEvidenceChunk,
     SanitizedEvidenceLocation,
+    SanitizedRetrievalQueryDiagnostic,
 )
 
 
@@ -52,10 +57,17 @@ def build_evidence_assessment_diagnostics(
             continue
         assert trace is not None
         locations = _candidate_locations(trace.retrievals)
-        rounds = tuple(
-            _round_diagnostic(index, assessment, locations)
-            for index, assessment in enumerate(trace.assessments, start=1)
-        )
+        previous_selection: set[UUID] = set()
+        rounds: list[EvidenceAssessmentRoundDiagnostic] = []
+        for index, assessment in enumerate(trace.assessments, start=1):
+            diagnostic = _round_diagnostic(
+                index,
+                assessment,
+                locations,
+                previous_selection=previous_selection,
+            )
+            rounds.append(diagnostic)
+            previous_selection = {chunk.chunk_id for chunk in diagnostic.selected_chunks}
         final_locations = {
             (item.document_version_id, item.page_number)
             for item in rounds[-1].selected_source_pages
@@ -64,6 +76,10 @@ def build_evidence_assessment_diagnostics(
             case.expected.evidence,
             result.observation.retrieved_evidence,
         )
+        if any(match.match_status == "not_matched" for match in matches):
+            raise ValueError(
+                "retrieval passed but recomputed evidence claim matching failed"
+            )
         claims = tuple(
             EvidenceAssessmentClaimDiagnostic(
                 claim_id=match.claim_id,
@@ -84,7 +100,14 @@ def build_evidence_assessment_diagnostics(
                 case_id=case.id,
                 primary_mechanism=_primary_mechanism(claims, rounds[-1]),
                 claims=claims,
-                assessment_rounds=rounds,
+                retrieval_plan_version=trace.retrieval_plan_version,
+                candidate_sources=tuple(locations.values()),
+                retrieval_rounds=tuple(
+                    _retrieval_round_diagnostic(round_trace)
+                    for round_trace in trace.retrieval_rounds
+                ),
+                assessment_rounds=tuple(rounds),
+                supplemental_retrieval_attempts=trace.supplemental_retrieval_attempts,
             )
         )
 
@@ -118,29 +141,65 @@ def _is_evidence_stage_refusal(
 
 def _candidate_locations(
     retrievals: Sequence[ObservedRetrieval],
-) -> dict[str, SanitizedEvidenceLocation]:
-    locations: dict[str, SanitizedEvidenceLocation] = {}
+) -> dict[UUID, SanitizedEvidenceChunk]:
+    locations: dict[UUID, SanitizedEvidenceChunk] = {}
     for retrieval in retrievals:
         for candidate in retrieval.candidates:
-            locations[str(candidate.chunk_id)] = SanitizedEvidenceLocation(
+            location = SanitizedEvidenceChunk(
+                chunk_id=candidate.chunk_id,
                 document_version_id=candidate.document_version_id,
                 page_number=candidate.page_number,
             )
+            previous = locations.setdefault(candidate.chunk_id, location)
+            if previous != location:
+                raise ValueError("retrieval trace maps one chunk to multiple source locations")
     return locations
+
+
+def _retrieval_round_diagnostic(
+    retrieval_round: ObservedRetrievalRoundTrace,
+) -> EvidenceAssessmentRetrievalRoundDiagnostic:
+    queries: list[SanitizedRetrievalQueryDiagnostic] = []
+    results_by_query = {result.query: result for result in retrieval_round.query_results}
+    if len(results_by_query) != len(retrieval_round.query_results):
+        raise ValueError("retrieval round contains duplicate query results")
+    if not set(results_by_query) <= set(retrieval_round.queries):
+        raise ValueError("retrieval round result does not belong to its declared queries")
+    for query in retrieval_round.queries:
+        query_result = results_by_query.get(query)
+        candidates = query_result.candidates if query_result is not None else ()
+        candidate_ids = tuple(candidate.chunk_id for candidate in candidates)
+        queries.append(
+            SanitizedRetrievalQueryDiagnostic(
+                query_sha256=_query_sha256(query),
+                candidate_chunk_ids=candidate_ids,
+                query_coverage_chunk_ids=tuple(
+                    candidate.chunk_id
+                    for candidate in candidates
+                    if candidate.selected_for_query_coverage
+                ),
+            )
+        )
+    return EvidenceAssessmentRetrievalRoundDiagnostic(
+        round_number=retrieval_round.round_number,
+        queries=tuple(queries),
+        final_evidence_chunk_ids=retrieval_round.final_evidence_chunk_ids,
+    )
 
 
 def _round_diagnostic(
     round_number: int,
     assessment: ObservedEvidenceAssessment,
-    locations: Mapping[str, SanitizedEvidenceLocation],
+    locations: Mapping[UUID, SanitizedEvidenceChunk],
+    *,
+    previous_selection: set[UUID],
 ) -> EvidenceAssessmentRoundDiagnostic:
-    unknown = [item for item in assessment.selected_chunk_ids if item not in locations]
-    if unknown:
-        raise ValueError("assessment selected a chunk absent from the retrieval trace")
+    selected_ids = tuple(UUID(item) for item in assessment.selected_chunk_ids)
+    _require_known_chunks(selected_ids, locations)
+    selected_chunks = tuple(locations[chunk_id] for chunk_id in selected_ids)
     selected_locations: list[SanitizedEvidenceLocation] = []
     seen: set[tuple[UUID, int]] = set()
-    for chunk_id in assessment.selected_chunk_ids:
-        location = locations[chunk_id]
+    for location in selected_chunks:
         key = (location.document_version_id, location.page_number)
         if key in seen:
             continue
@@ -149,10 +208,29 @@ def _round_diagnostic(
     return EvidenceAssessmentRoundDiagnostic(
         round_number=round_number,
         sufficient=assessment.sufficient,
-        selected_chunk_count=len(assessment.selected_chunk_ids),
+        selected_chunk_count=len(selected_chunks),
+        selected_chunks=selected_chunks,
+        preserved_selection_chunk_ids=tuple(
+            chunk_id for chunk_id in selected_ids if chunk_id in previous_selection
+        ),
         selected_source_pages=tuple(selected_locations),
         supplemental_query_count=len(assessment.supplemental_queries),
+        supplemental_query_sha256=tuple(
+            _query_sha256(query) for query in assessment.supplemental_queries
+        ),
     )
+
+
+def _require_known_chunks(
+    chunk_ids: Sequence[UUID],
+    locations: Mapping[UUID, SanitizedEvidenceChunk],
+) -> None:
+    if any(chunk_id not in locations for chunk_id in chunk_ids):
+        raise ValueError("diagnostic trace references a chunk absent from retrieval candidates")
+
+
+def _query_sha256(query: str) -> str:
+    return sha256(query.encode("utf-8")).hexdigest()
 
 
 def _primary_mechanism(

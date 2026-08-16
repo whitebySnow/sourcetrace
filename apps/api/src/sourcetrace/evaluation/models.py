@@ -424,6 +424,10 @@ class SanitizedEvidenceLocation(StrictModel):
     page_number: int = Field(ge=1)
 
 
+class SanitizedEvidenceChunk(SanitizedEvidenceLocation):
+    chunk_id: UUID
+
+
 class CitationClaimDiagnostic(StrictModel):
     claim_id: str = Field(min_length=1)
     expected: SanitizedEvidenceLocation
@@ -470,22 +474,43 @@ class EvidenceAssessmentClaimDiagnostic(StrictModel):
     selected_source_page: bool
 
 
+class SanitizedRetrievalQueryDiagnostic(StrictModel):
+    query_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_chunk_ids: tuple[UUID, ...]
+    query_coverage_chunk_ids: tuple[UUID, ...]
+
+
+class EvidenceAssessmentRetrievalRoundDiagnostic(StrictModel):
+    round_number: int = Field(gt=0, le=2)
+    queries: tuple[SanitizedRetrievalQueryDiagnostic, ...]
+    final_evidence_chunk_ids: tuple[UUID, ...]
+
+
 class EvidenceAssessmentRoundDiagnostic(StrictModel):
     round_number: int = Field(gt=0, le=2)
     sufficient: bool
     selected_chunk_count: int = Field(ge=0)
+    selected_chunks: tuple[SanitizedEvidenceChunk, ...]
+    preserved_selection_chunk_ids: tuple[UUID, ...]
     selected_source_pages: tuple[SanitizedEvidenceLocation, ...]
     supplemental_query_count: int = Field(ge=0, le=2)
+    supplemental_query_sha256: tuple[str, ...] = Field(max_length=2)
 
 
 class EvidenceAssessmentCaseDiagnostic(StrictModel):
     case_id: str = Field(min_length=1)
     primary_mechanism: EvidenceAssessmentFailureMechanism
     claims: tuple[EvidenceAssessmentClaimDiagnostic, ...]
+    retrieval_plan_version: str | None
+    candidate_sources: tuple[SanitizedEvidenceChunk, ...]
+    retrieval_rounds: tuple[EvidenceAssessmentRetrievalRoundDiagnostic, ...] = Field(
+        max_length=2,
+    )
     assessment_rounds: tuple[EvidenceAssessmentRoundDiagnostic, ...] = Field(
         min_length=1,
         max_length=2,
     )
+    supplemental_retrieval_attempts: int = Field(ge=0, le=1)
 
 
 class EvidenceAssessmentDiagnosticsSummary(StrictModel):

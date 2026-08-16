@@ -115,7 +115,3 @@ _Avoid_: Alternative-evidence approval, corrected evaluation result
 **Evidence Assessment Diagnostics Report**:
 A sanitized, replayable classification of answerable refusals at the Evidence Decision stage, bound to one Evaluation Dataset and one Evaluation Report without retaining questions, answers, queries, prompts, or evidence text.
 _Avoid_: Evidence sufficiency override, corrected evaluation result
-
-**Evidence Assessment Diagnostics Report**:
-A sanitized, replayable classification of answerable refusals at the Evidence Decision stage, bound to one Evaluation Dataset and one Evaluation Report without retaining questions, answers, queries, prompts, or evidence text.
-_Avoid_: Evidence sufficiency override, corrected evaluation result

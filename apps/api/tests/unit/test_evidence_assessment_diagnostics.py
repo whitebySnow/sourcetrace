@@ -1,6 +1,8 @@
 from hashlib import sha256
 from uuid import uuid4
 
+import pytest
+
 from sourcetrace.evaluation.assessment_diagnostics import (
     build_evidence_assessment_diagnostics,
 )
@@ -233,7 +235,71 @@ def test_diagnostics_classify_refusal_when_expected_source_page_is_not_selected(
                                 }
                             ],
                             "retrieval_plan_version": "test-plan-v1",
-                            "retrieval_rounds": [],
+                            "retrieval_rounds": [
+                                {
+                                    "round_number": 1,
+                                    "queries": ["Which sources own both components?"],
+                                    "query_results": [
+                                        {
+                                            "query": "Which sources own both components?",
+                                            "candidates": [
+                                                {
+                                                    "chunk_id": str(selected_chunk_id),
+                                                    "raw_rank": 1,
+                                                    "raw_cosine_score": 0.9,
+                                                    "reranker_score": 0.8,
+                                                    "reranked_rank": 1,
+                                                    "selected_for_query_coverage": True,
+                                                },
+                                                {
+                                                    "chunk_id": str(omitted_chunk_id),
+                                                    "raw_rank": 2,
+                                                    "raw_cosine_score": 0.8,
+                                                    "reranker_score": 0.7,
+                                                    "reranked_rank": 2,
+                                                    "selected_for_query_coverage": False,
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                    "fused_candidates": [],
+                                    "final_evidence_chunk_ids": [
+                                        str(selected_chunk_id),
+                                        str(omitted_chunk_id),
+                                    ],
+                                    "rrf_rank_constant": 60,
+                                    "reranker": None,
+                                },
+                                {
+                                    "round_number": 2,
+                                    "queries": [
+                                        "Which sources own both components?",
+                                        "second component source",
+                                    ],
+                                    "query_results": [
+                                        {
+                                            "query": "second component source",
+                                            "candidates": [
+                                                {
+                                                    "chunk_id": str(omitted_chunk_id),
+                                                    "raw_rank": 1,
+                                                    "raw_cosine_score": 0.85,
+                                                    "reranker_score": 0.75,
+                                                    "reranked_rank": 1,
+                                                    "selected_for_query_coverage": True,
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                    "fused_candidates": [],
+                                    "final_evidence_chunk_ids": [
+                                        str(selected_chunk_id),
+                                        str(omitted_chunk_id),
+                                    ],
+                                    "rrf_rank_constant": 60,
+                                    "reranker": None,
+                                },
+                            ],
                             "assessments": [
                                 {
                                     "sufficient": False,
@@ -274,6 +340,119 @@ def test_diagnostics_classify_refusal_when_expected_source_page_is_not_selected(
     assert [claim.selected_source_page for claim in case.claims] == [True, False]
     assert [round_.selected_chunk_count for round_ in case.assessment_rounds] == [1, 1]
     assert [round_.supplemental_query_count for round_ in case.assessment_rounds] == [1, 0]
+    assert case.retrieval_plan_version == "test-plan-v1"
+    assert case.supplemental_retrieval_attempts == 1
+    assert [
+        [chunk.chunk_id for chunk in round_.selected_chunks]
+        for round_ in case.assessment_rounds
+    ] == [[selected_chunk_id], [selected_chunk_id]]
+    assert case.assessment_rounds[0].preserved_selection_chunk_ids == ()
+    assert case.assessment_rounds[1].preserved_selection_chunk_ids == (selected_chunk_id,)
+    assert case.assessment_rounds[0].supplemental_query_sha256 == (
+        sha256(b"second component source").hexdigest(),
+    )
+    assert [round_.round_number for round_ in case.retrieval_rounds] == [1, 2]
+    assert case.retrieval_rounds[0].queries[0].query_sha256 == sha256(
+        b"Which sources own both components?"
+    ).hexdigest()
+    assert case.retrieval_rounds[0].queries[0].candidate_chunk_ids == (
+        selected_chunk_id,
+        omitted_chunk_id,
+    )
+    assert case.retrieval_rounds[1].queries[1].query_sha256 == sha256(
+        b"second component source"
+    ).hexdigest()
+    serialized = diagnostics.model_dump_json()
+    assert "Which sources own both components?" not in serialized
+    assert "second component source" not in serialized
+
+
+def test_diagnostics_reject_inconsistent_retrieval_pass_without_claim_matches() -> None:
+    document_version_id = uuid4()
+    knowledge_base_id = uuid4()
+    dataset = EvaluationDataset.model_validate(
+        {
+            "schema_version": "1",
+            "dataset_id": "assessment-diagnostic-fixture",
+            "dataset_version": "1.0.0",
+            "knowledge_base_id": str(knowledge_base_id),
+            "document_version_ids": [str(document_version_id)],
+            "review": {"status": "fixture"},
+            "cases": [
+                {
+                    "id": "inconsistent-001",
+                    "category": "direct",
+                    "question": "Which component is used?",
+                    "expected": {
+                        "outcome": "answered",
+                        "reference_answer": "The documented component is used.",
+                        "evidence": [
+                            {
+                                "claim_id": "component-claim",
+                                "document_version_id": str(document_version_id),
+                                "page_number": 3,
+                                "text": "The documented component is used.",
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+    report = EvaluationReport.model_validate(
+        {
+            "schema_version": "1",
+            "dataset_id": dataset.dataset_id,
+            "dataset_version": dataset.dataset_version,
+            "knowledge_base_id": str(knowledge_base_id),
+            "document_version_ids": [str(document_version_id)],
+            "metadata": _metadata(),
+            "cases": [
+                {
+                    "case_id": "inconsistent-001",
+                    "retrieval": "passed",
+                    "citation": "failed",
+                    "refusal": "not_applicable",
+                    "end_to_end": "failed",
+                    "observation": {
+                        "outcome": "refused",
+                        "answer": None,
+                        "retrieved_evidence": [],
+                        "citations": [],
+                        "decision_trace": {
+                            "retrievals": [],
+                            "retrieval_plan_version": "test-plan-v1",
+                            "retrieval_rounds": [],
+                            "assessments": [
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": [],
+                                }
+                            ],
+                            "citation_validations": [],
+                            "supplemental_retrieval_attempts": 0,
+                            "citation_repair_attempts": 0,
+                        },
+                    },
+                }
+            ],
+            "retrieval_summary": _summary(passed=1),
+            "citation_summary": _summary(failed=1),
+            "refusal_summary": _summary(not_applicable=1),
+            "end_to_end_summary": _summary(failed=1),
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="retrieval passed but recomputed evidence claim matching failed",
+    ):
+        build_evidence_assessment_diagnostics(
+            dataset,
+            report,
+            report_sha256=sha256(b"source report").hexdigest(),
+        )
 
 
 def _metadata() -> dict[str, object]:
