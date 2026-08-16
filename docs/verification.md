@@ -527,3 +527,27 @@ SHA-256 为 `9691ade49662bed8f468bbed5438ea727ae0e2a8c073d884418f6812f5924d18`�
 该结果只适用于固定三篇论文、固定 30 题、上述代码和供应商配置；22/30 不是产品通用
 准确率。原始与 reviewed report 包含本地论文摘录，继续保留在被 Git 忽略的 `output/evals/`，
 不提交。
+
+### Issue #82 检索阶段诊断
+
+2026-08-17 在诊断提交 `ce8091e` 上，使用 Dataset `1.2.0`、Issue #77 原始报告最后一轮实际
+查询、本地 PostgreSQL 文档快照、CPU BGE-M3、固定 `BAAI/bge-reranker-v2-m3` 和生产检索 v8
+完成 hybrid v2 stage replay。Dataset、源报告与 stage report SHA-256 分别为：
+
+- `99abe02e752bb4bb53d93e9a9ba73c831c63c5348f4d95a47fcb34cb2e04e683`
+- `7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b76919efea67f7afa6`
+- `865b3bcc0d4ac3ce02dd3427ee56fb312ae5a267f3f0e498fc0c2cb71e5cf019`
+
+版本化查询计划 SHA-256 为
+`9a11c850e499cb54a82b37550183e0a16728e21cc9e810b517ce2ee2fa7a7735`。
+
+离线 `diagnose-retrieval-stages` 用相同三份输入运行两次，两个输出的 SHA-256 均为
+`3ce87b587b283cbe882f068a312446f612c59fddaed618e6d1a7c9b242443597`。诊断覆盖源报告全部两个
+answerable Retrieval 失败 case 和三个 claim：`ARF-023/evidence-1` 与
+`ARF-024/evidence-2` 均在 raw channel 和 channel fusion 命中规范 Chunk，但未进入 primary
+selection；`ARF-024/evidence-1` 在本地重放中进入最终证据，因此该 case 的 claim 级结果为一个
+未重现、一个 `primary_selection`，case 级为 `mixed`。
+
+stage report 与诊断保存在被 Git 忽略的 `output/evals/`，不提交问题、查询原文或文档正文。
+本次只验证检索阶段分类，不调用供应商、不生成答案、不改写 Issue #77 四轴结果，也不证明任何
+候选修复不会使其他 28 题回归。

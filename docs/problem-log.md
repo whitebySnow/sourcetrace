@@ -704,3 +704,35 @@ case/claim ID、文档版本和页码、匹配状态、Chunk UUID、查询 SHA-2
 诊断定位；旧报告和不执行检索的 fake fixture 该字段可为空，已有 query candidate 映射继续可重放，
 诊断不会为 fixture 伪造身份或从当前数据库反推历史来源。
 对模型漏选的运行时缓解必须作为独立任务，用新的回归与受控供应商验证，不能从该诊断自动推导放宽门禁。
+
+## 34. ARF-023/024 的规范证据在 primary selection 前被丢弃
+
+**反馈环**：Issue #82 绑定 Dataset `1.2.0`（SHA-256
+`99abe02e752bb4bb53d93e9a9ba73c831c63c5348f4d95a47fcb34cb2e04e683`）与 Issue #77 原始
+Evaluation Report（SHA-256 `7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b76919efea67f7afa6`）。
+提交 `ce8091e` 使用源报告最后一轮的原始问题与额外查询、本地 PostgreSQL 快照、CPU BGE-M3、
+固定 `BAAI/bge-reranker-v2-m3` 和生产检索 v8 生成 hybrid v2 stage report，SHA-256 为
+`865b3bcc0d4ac3ce02dd3427ee56fb312ae5a267f3f0e498fc0c2cb71e5cf019`。该运行不调用
+DeepSeek，不生成回答；版本化查询计划 SHA-256 为
+`9a11c850e499cb54a82b37550183e0a16728e21cc9e810b517ce2ee2fa7a7735`。随后离线诊断运行两次，输出 SHA-256 均为
+`3ce87b587b283cbe882f068a312446f612c59fddaed618e6d1a7c9b242443597`。
+
+**分类**：`ARF-023/evidence-1` 的规范 Chunk `8208efec-870e-5ace-b7b4-845f2dc7522c`
+在两条附加查询中分别由 lexical 第 13 和第 11 命中，其中后一条查询还由 dense 第 25 命中；
+通道融合排名分别为 27 和 10，reranker 排名为 6 和 24。它没有获得 query coverage，也没有
+进入 primary selection，因此最早不可恢复阶段是 `primary_selection`，不是 channel recall。
+
+`ARF-024/evidence-1` 在重放中进入 primary、页面扩展和最终证据，源报告的该声明失败未被重现；
+`evidence-2` 的两个规范 Chunk 已在 dense 与 lexical 中多次出现。其中最强的专用查询结果把
+`a3f3b2cc-9f65-5823-9392-39fc7b0384dd` 放在 channel fusion 第 1，但 reranker 将其降到第 13；
+另一规范 Chunk 最好为 channel fusion 第 10、reranker 第 10。两者均未获得 coverage 或 primary，
+因此缺失声明同样分类为 `primary_selection`。case 级结果为 `mixed`，因为一个声明已通过重放、
+另一个声明仍在 primary selection 丢失。
+
+**可证伪假设**：当前直接机制是 query-aware cross-encoder 排名与固定 4/2/2 coverage 共同使规范
+Chunk 排在每个附加槽位前两名之外，随后全局 Top-8 也没有补入，而不是 PDF 英文、dense/lexical
+未召回、通道融合截断、页面扩展或最低 cosine 门槛。若相同查询与固定模型的重放中目标 Chunk
+未进入 raw channel，则该假设被否证并应回到召回阶段；若目标已获得 coverage 或 primary 仍从
+最终证据消失，则应改查页面扩展或最低分门禁。本诊断不授权增加 Top-K、扩大每槽 coverage、
+修改 Dataset、替换模型或放宽 Evidence/Citation/Refusal 门禁，具体缓解必须另开 Issue 做完整
+本地差异回放。
