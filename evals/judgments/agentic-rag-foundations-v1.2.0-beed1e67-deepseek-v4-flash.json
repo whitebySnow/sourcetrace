@@ -1,0 +1,32 @@
+{
+  "schema_version": "1",
+  "dataset_id": "agentic-rag-foundations",
+  "dataset_version": "1.2.0",
+  "report_sha256": "7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b76919efea67f7afa6",
+  "review": {
+    "status": "reviewed",
+    "reviewed_by": "whitebySnow",
+    "reviewed_at": "2026-08-16T12:29:52Z"
+  },
+  "judgments": [
+    { "case_id": "ARF-001", "status": "passed" },
+    { "case_id": "ARF-002", "status": "passed" },
+    { "case_id": "ARF-003", "status": "passed" },
+    { "case_id": "ARF-004", "status": "passed" },
+    { "case_id": "ARF-005", "status": "passed" },
+    { "case_id": "ARF-007", "status": "passed" },
+    { "case_id": "ARF-008", "status": "passed" },
+    { "case_id": "ARF-010", "status": "passed" },
+    { "case_id": "ARF-011", "status": "passed" },
+    { "case_id": "ARF-012", "status": "passed" },
+    { "case_id": "ARF-013", "status": "passed" },
+    { "case_id": "ARF-014", "status": "passed" },
+    { "case_id": "ARF-015", "status": "passed" },
+    { "case_id": "ARF-016", "status": "passed" },
+    { "case_id": "ARF-017", "status": "passed" },
+    { "case_id": "ARF-018", "status": "passed" },
+    { "case_id": "ARF-019", "status": "passed" },
+    { "case_id": "ARF-021", "status": "passed" },
+    { "case_id": "ARF-022", "status": "passed" }
+  ]
+}
