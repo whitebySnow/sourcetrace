@@ -226,6 +226,7 @@ class WorkflowEvaluationSubject:
     @staticmethod
     def _to_observed(evidence: RetrievedEvidence) -> ObservedEvidence:
         return ObservedEvidence(
+            chunk_id=evidence.chunk_id,
             document_version_id=evidence.document_version_id,
             page_number=evidence.page_number,
             text=evidence.text,

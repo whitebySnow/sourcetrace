@@ -700,4 +700,6 @@ case/claim ID、文档版本和页码、匹配状态、Chunk UUID、查询 SHA-2
 **边界**：来源页选中只说明 Chunk 来自对应文档和页码，不是确定性语义蕴含证明。本诊断不调用真实
 供应商，不改动提示词、候选数、查询或重试预算，也不改写 Evidence Decision、Dataset 真值或原 Report 评分。
 诊断会重新执行逐声明匹配；若 Report 的 Retrieval passed 与实际匹配矛盾则直接失败，不产生机制分类。
+新报告还会在 observed evidence 中保存 Chunk UUID，使页面邻居进入最终 evidence 后仍能被诊断定位；
+旧报告该字段为空，已有 query candidate 映射继续可重放，诊断不会从当前数据库反推历史来源。
 对模型漏选的运行时缓解必须作为独立任务，用新的回归与受控供应商验证，不能从该诊断自动推导放宽门禁。

@@ -129,6 +129,7 @@ class EvaluationDataset(StrictModel):
 
 
 class ObservedEvidence(StrictModel):
+    chunk_id: UUID | None = None
     document_version_id: UUID
     page_number: int = Field(ge=1)
     text: str = Field(min_length=1)

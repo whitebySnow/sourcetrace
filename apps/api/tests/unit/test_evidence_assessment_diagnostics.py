@@ -199,39 +199,34 @@ def test_diagnostics_classify_refusal_when_expected_source_page_is_not_selected(
                     "observation": {
                         "outcome": "refused",
                         "answer": None,
-                        "retrieved_evidence": [
-                            {
-                                "document_version_id": str(first_document_id),
-                                "page_number": 3,
-                                "text": "The first source owns component A.",
-                            },
-                            {
-                                "document_version_id": str(second_document_id),
-                                "page_number": 1,
-                                "text": "The second source owns component B.",
+                            "retrieved_evidence": [
+                                {
+                                    "chunk_id": str(selected_chunk_id),
+                                    "document_version_id": str(first_document_id),
+                                    "page_number": 3,
+                                    "text": "The first source owns component A.",
+                                },
+                                {
+                                    "chunk_id": str(omitted_chunk_id),
+                                    "document_version_id": str(second_document_id),
+                                    "page_number": 1,
+                                    "text": "The second source owns component B.",
                             },
                         ],
                         "citations": [],
                         "decision_trace": {
                             "retrievals": [
                                 {
-                                    "query": "Which sources own both components?",
-                                    "candidates": [
-                                        {
-                                            "chunk_id": str(selected_chunk_id),
-                                            "document_version_id": str(first_document_id),
-                                            "page_number": 3,
-                                            "score": 0.9,
-                                            "raw_rank": 1,
-                                        },
-                                        {
-                                            "chunk_id": str(omitted_chunk_id),
-                                            "document_version_id": str(second_document_id),
-                                            "page_number": 1,
-                                            "score": 0.8,
-                                            "raw_rank": 2,
-                                        },
-                                    ],
+                                        "query": "Which sources own both components?",
+                                        "candidates": [
+                                            {
+                                                "chunk_id": str(omitted_chunk_id),
+                                                "document_version_id": str(second_document_id),
+                                                "page_number": 1,
+                                                "score": 0.8,
+                                                "raw_rank": 1,
+                                            },
+                                        ],
                                 }
                             ],
                             "retrieval_plan_version": "test-plan-v1",
@@ -244,20 +239,12 @@ def test_diagnostics_classify_refusal_when_expected_source_page_is_not_selected(
                                             "query": "Which sources own both components?",
                                             "candidates": [
                                                 {
-                                                    "chunk_id": str(selected_chunk_id),
-                                                    "raw_rank": 1,
-                                                    "raw_cosine_score": 0.9,
-                                                    "reranker_score": 0.8,
-                                                    "reranked_rank": 1,
-                                                    "selected_for_query_coverage": True,
-                                                },
-                                                {
                                                     "chunk_id": str(omitted_chunk_id),
-                                                    "raw_rank": 2,
+                                                    "raw_rank": 1,
                                                     "raw_cosine_score": 0.8,
                                                     "reranker_score": 0.7,
-                                                    "reranked_rank": 2,
-                                                    "selected_for_query_coverage": False,
+                                                    "reranked_rank": 1,
+                                                    "selected_for_query_coverage": True,
                                                 },
                                             ],
                                         }
@@ -356,9 +343,12 @@ def test_diagnostics_classify_refusal_when_expected_source_page_is_not_selected(
         b"Which sources own both components?"
     ).hexdigest()
     assert case.retrieval_rounds[0].queries[0].candidate_chunk_ids == (
-        selected_chunk_id,
         omitted_chunk_id,
     )
+    assert {chunk.chunk_id for chunk in case.candidate_sources} == {
+        selected_chunk_id,
+        omitted_chunk_id,
+    }
     assert case.retrieval_rounds[1].queries[1].query_sha256 == sha256(
         b"second component source"
     ).hexdigest()

@@ -19,6 +19,7 @@ from sourcetrace.evaluation.models import (
     EvidenceAssessmentFailureMechanism,
     EvidenceAssessmentRetrievalRoundDiagnostic,
     EvidenceAssessmentRoundDiagnostic,
+    ObservedEvidence,
     ObservedEvidenceAssessment,
     ObservedRetrieval,
     ObservedRetrievalRoundTrace,
@@ -56,14 +57,17 @@ def build_evidence_assessment_diagnostics(
         ):
             continue
         assert trace is not None
-        locations = _candidate_locations(trace.retrievals)
+        candidate_chunks_by_id = _candidate_chunks_by_id(
+            trace.retrievals,
+            result.observation.retrieved_evidence,
+        )
         previous_selection: set[UUID] = set()
         rounds: list[EvidenceAssessmentRoundDiagnostic] = []
         for index, assessment in enumerate(trace.assessments, start=1):
             diagnostic = _round_diagnostic(
                 index,
                 assessment,
-                locations,
+                candidate_chunks_by_id,
                 previous_selection=previous_selection,
             )
             rounds.append(diagnostic)
@@ -101,7 +105,7 @@ def build_evidence_assessment_diagnostics(
                 primary_mechanism=_primary_mechanism(claims, rounds[-1]),
                 claims=claims,
                 retrieval_plan_version=trace.retrieval_plan_version,
-                candidate_sources=tuple(locations.values()),
+                candidate_sources=tuple(candidate_chunks_by_id.values()),
                 retrieval_rounds=tuple(
                     _retrieval_round_diagnostic(round_trace)
                     for round_trace in trace.retrieval_rounds
@@ -139,21 +143,36 @@ def _is_evidence_stage_refusal(
     return bool(assessments and not assessments[-1].sufficient and not citation_validations)
 
 
-def _candidate_locations(
+def _candidate_chunks_by_id(
     retrievals: Sequence[ObservedRetrieval],
+    final_evidence: Sequence[ObservedEvidence],
 ) -> dict[UUID, SanitizedEvidenceChunk]:
-    locations: dict[UUID, SanitizedEvidenceChunk] = {}
+    chunks_by_id: dict[UUID, SanitizedEvidenceChunk] = {}
+
+    def remember(chunk: SanitizedEvidenceChunk) -> None:
+        previous = chunks_by_id.setdefault(chunk.chunk_id, chunk)
+        if previous != chunk:
+            raise ValueError("retrieval trace maps one chunk to multiple source locations")
+
     for retrieval in retrievals:
         for candidate in retrieval.candidates:
-            location = SanitizedEvidenceChunk(
-                chunk_id=candidate.chunk_id,
-                document_version_id=candidate.document_version_id,
-                page_number=candidate.page_number,
+            remember(
+                SanitizedEvidenceChunk(
+                    chunk_id=candidate.chunk_id,
+                    document_version_id=candidate.document_version_id,
+                    page_number=candidate.page_number,
+                )
             )
-            previous = locations.setdefault(candidate.chunk_id, location)
-            if previous != location:
-                raise ValueError("retrieval trace maps one chunk to multiple source locations")
-    return locations
+    for evidence in final_evidence:
+        if evidence.chunk_id is not None:
+            remember(
+                SanitizedEvidenceChunk(
+                    chunk_id=evidence.chunk_id,
+                    document_version_id=evidence.document_version_id,
+                    page_number=evidence.page_number,
+                )
+            )
+    return chunks_by_id
 
 
 def _retrieval_round_diagnostic(

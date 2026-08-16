@@ -349,6 +349,9 @@ LangGraph 是首版 Agent 编排核心。固定工作流为：
   结构化选择及跨轮保留关系，不保存问题、回答、查询原文、提示词或证据正文。诊断必须重新执行
   逐声明证据匹配；报告声称 Retrieval 通过但仍有声明未命中时不得归因为 Evidence Decision，也不得
   改写 Evidence Decision 或评分。
+- 新生成的 Evaluation Report 必须为 observed evidence 记录 Chunk UUID；迁移前报告可为 null。
+  诊断只能使用 Report 内的 query candidate 或 observed evidence 身份定位选中 Chunk，不得查询可变数据库
+  或从正文猜测历史 Chunk 身份。
 - 所有结果绑定评测集、配置和代码版本；未实际运行不得填写指标。
 - 真实评测在供应商或模型基础设施错误后终止时，只能输出独立的去敏失败工件。该工件记录
   数据集快照、已知运行元数据、失败 case ID、工作流阶段和安全错误分类，不含题目、回答、
