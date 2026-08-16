@@ -209,13 +209,13 @@ def _retrieval_round_diagnostic(
 def _round_diagnostic(
     round_number: int,
     assessment: ObservedEvidenceAssessment,
-    locations: Mapping[UUID, SanitizedEvidenceChunk],
+    candidate_chunks_by_id: Mapping[UUID, SanitizedEvidenceChunk],
     *,
     previous_selection: set[UUID],
 ) -> EvidenceAssessmentRoundDiagnostic:
     selected_ids = tuple(UUID(item) for item in assessment.selected_chunk_ids)
-    _require_known_chunks(selected_ids, locations)
-    selected_chunks = tuple(locations[chunk_id] for chunk_id in selected_ids)
+    _require_known_chunks(selected_ids, candidate_chunks_by_id)
+    selected_chunks = tuple(candidate_chunks_by_id[chunk_id] for chunk_id in selected_ids)
     selected_locations: list[SanitizedEvidenceLocation] = []
     seen: set[tuple[UUID, int]] = set()
     for location in selected_chunks:
@@ -242,9 +242,9 @@ def _round_diagnostic(
 
 def _require_known_chunks(
     chunk_ids: Sequence[UUID],
-    locations: Mapping[UUID, SanitizedEvidenceChunk],
+    candidate_chunks_by_id: Mapping[UUID, SanitizedEvidenceChunk],
 ) -> None:
-    if any(chunk_id not in locations for chunk_id in chunk_ids):
+    if any(chunk_id not in candidate_chunks_by_id for chunk_id in chunk_ids):
         raise ValueError("diagnostic trace references a chunk absent from retrieval candidates")
 
 

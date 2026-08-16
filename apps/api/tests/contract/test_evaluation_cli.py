@@ -214,6 +214,7 @@ def test_fake_cli_writes_a_versioned_report_without_external_providers(tmp_path)
     assert report["retrieval_summary"]["passed"] == 1
     assert report["end_to_end_summary"]["passed"] == 1
     assert report["judgment_review"]["reviewed_by"] == "project-owner"
+    assert report["cases"][0]["observation"]["retrieved_evidence"][0]["chunk_id"] is None
     assert diagnostics["dataset_id"] == "cli-fixture"
     assert diagnostics["cases"] == []
     assert citation_diagnostics["report_sha256"] == report_sha256
