@@ -8,6 +8,7 @@ from sourcetrace.evaluation.models import (
     EvaluationFailureReport,
     EvaluationJudgmentSet,
     EvaluationReport,
+    EvidenceAssessmentDiagnosticsReport,
     HybridQueryPlanFixture,
     HybridRetrievalEvaluationReport,
     RerankerEvaluationReport,
@@ -20,6 +21,9 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     schemas = {
         "citation-diagnostics-v1.schema.json": CitationDiagnosticsReport.model_json_schema(),
+        "evidence-assessment-diagnostics-v1.schema.json": (
+            EvidenceAssessmentDiagnosticsReport.model_json_schema()
+        ),
         "dataset-v1.schema.json": EvaluationDataset.model_json_schema(),
         "failure-report-v1.schema.json": EvaluationFailureReport.model_json_schema(),
         "fixture-observations-v1.schema.json": FixtureObservationSet.model_json_schema(),

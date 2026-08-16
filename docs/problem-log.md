@@ -673,3 +673,34 @@ Retrieval 并生成回答，但 Citation 轴未命中全部规范或已批准证
 
 **边界**：本轮没有改动 Dataset 真值、已批准替代证据、提示词、检索排序或三类门禁。
 22/30 只是固定数据集和绑定配置下的评测结果，不是产品通用准确率。
+
+## 33. Evidence Assessment 的可回答拒答缺少去敏阶段诊断
+
+**反馈环**：Issue #81 使用 Dataset 1.2.0 和原始报告
+`7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b76919efea67f7afa6` 做纯离线重放。新命令
+`pnpm eval:diagnose-assessments` 绑定 Dataset ID/version、原 Report SHA-256 与运行配置，只输出
+case/claim ID、文档版本和页码、匹配状态、Chunk UUID、查询 SHA-256 指纹、各轮候选/最终 evidence、
+结构化选择及跨轮保留关系。两次扩展轨迹输出字节完全一致，SHA-256 均为
+`5d27bafc7206caf64ce9257044e49fe90c8e1aa74415564bff3aa67298043af2`。
+
+**可证伪分类**：
+
+1. 如果是供应商或结构化 Schema 失败，真实评测应生成不可评分的 failure artifact，而不是完整
+   Evaluation Report。本轮报告完整，两题均有合法的两轮 `sufficient=false` Evidence Decision，因此该假设被否证。
+2. 如果是评测所需证据未召回，Retrieval 轴或声明匹配应失败。`ARF-025` 的两个声明均为
+   canonical 命中；`ARF-026` 的四个声明为两个 canonical 和两个 approved-alternative 命中，因此“证据未到达”被否证。
+3. 如果是 Evidence Decision 漏选已到达的期望来源，选中轨迹应缺少对应来源页。`ARF-025`
+   两轮均选中 0 个 Chunk，分类为 `no_evidence_selected`；`ARF-026` 两轮均只保留 RAG 第 3 页的 3 个
+   相同 Chunk，第二轮的三个 `preserved_selection_chunk_ids` 与第一轮选择完全一致，没有选中 ReAct
+   与 Self-RAG 的期望或已批准来源页。三个 Chunk UUID 为
+   `d58c9798-b062-5bdb-bb9f-3f909ba3a83e`、`c3dfb5c1-75d0-5489-9abb-42a7cfff09ce` 和
+   `30b539a6-114d-5ecf-b6d4-ca34853ab417`，分类为
+   `expected_source_pages_not_selected`。该预测与报告一致，因此直接机制是模型驱动 Evidence Decision 漏选，而不是检索或协议失败。
+
+**边界**：来源页选中只说明 Chunk 来自对应文档和页码，不是确定性语义蕴含证明。本诊断不调用真实
+供应商，不改动提示词、候选数、查询或重试预算，也不改写 Evidence Decision、Dataset 真值或原 Report 评分。
+诊断会重新执行逐声明匹配；若 Report 的 Retrieval passed 与实际匹配矛盾则直接失败，不产生机制分类。
+真实工作流新报告还会在 observed evidence 中保存 Chunk UUID，使页面邻居进入最终 evidence 后仍能被
+诊断定位；旧报告和不执行检索的 fake fixture 该字段可为空，已有 query candidate 映射继续可重放，
+诊断不会为 fixture 伪造身份或从当前数据库反推历史来源。
+对模型漏选的运行时缓解必须作为独立任务，用新的回归与受控供应商验证，不能从该诊断自动推导放宽门禁。

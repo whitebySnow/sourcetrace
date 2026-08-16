@@ -252,6 +252,7 @@ async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence
     assert retrieval_round.reranker.revision == "v1"
     assert retrieval_round.final_evidence_chunk_ids == (evidence.chunk_id,)
     assert retrieval_round.rrf_rank_constant == 60
+    assert observation.retrieved_evidence[0].chunk_id == evidence.chunk_id
     assessment = observation.decision_trace.assessments[0]
     assert assessment.sufficient is False
     assert assessment.selected_chunk_ids == ()

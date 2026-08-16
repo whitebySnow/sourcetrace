@@ -49,6 +49,22 @@ pnpm eval:diagnose-citations -- `
 正文，也不自动批准替代证据或改变原评测结果。Schema 位于
 `schema/citation-diagnostics-v1.schema.json`。
 
+Evidence Assessment 阶段的 answerable refusal 使用独立的纯离线诊断：
+
+```powershell
+pnpm eval:diagnose-assessments -- `
+  --dataset evals/datasets/<dataset>.json `
+  --report output/evals/<report>.json `
+  --output output/evals/<assessment-diagnostics>.json
+```
+
+该工件保存失败 case/claim ID、期望来源页、Retrieval 匹配状态、候选与选中 Chunk UUID、
+每轮查询的 SHA-256 指纹、Coverage 与最终 evidence 身份、模型结构化选择及跨轮保留关系，以及
+Dataset、原 Report SHA-256 和运行配置。查询指纹只用于验证同一输入轨迹，不替代原报告；工件不
+保存问题、回答、查询原文、提示词或证据正文，也不会修改原 Report 或 Evidence Decision。若原报告
+声称 Retrieval 通过但重新逐声明匹配仍有未命中，诊断必须拒绝分类。Schema 位于
+`schema/evidence-assessment-diagnostics-v1.schema.json`。
+
 ## 真实受控评测
 
 真实评测要求 PostgreSQL 中存在数据集指定的知识库和文档版本，本机可加载配置的 embedding
