@@ -715,19 +715,19 @@ Evaluation Report（SHA-256 `7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b7691
 `865b3bcc0d4ac3ce02dd3427ee56fb312ae5a267f3f0e498fc0c2cb71e5cf019`。该运行不调用
 DeepSeek，不生成回答；版本化查询计划 SHA-256 为
 `9a11c850e499cb54a82b37550183e0a16728e21cc9e810b517ce2ee2fa7a7735`。随后离线诊断运行两次，输出 SHA-256 均为
-`3ce87b587b283cbe882f068a312446f612c59fddaed618e6d1a7c9b242443597`。
+`7b68479f131db0640263165f59250b421c74d3aa4ffaeb23a987a84867fb7de7`。
 
 **分类**：`ARF-023/evidence-1` 的规范 Chunk `8208efec-870e-5ace-b7b4-845f2dc7522c`
 在两条附加查询中分别由 lexical 第 13 和第 11 命中，其中后一条查询还由 dense 第 25 命中；
 通道融合排名分别为 27 和 10，reranker 排名为 6 和 24。它没有获得 query coverage，也没有
 进入 primary selection，因此最早不可恢复阶段是 `primary_selection`，不是 channel recall。
 
-`ARF-024/evidence-1` 在重放中进入 primary、页面扩展和最终证据，源报告的该声明失败未被重现；
-`evidence-2` 的两个规范 Chunk 已在 dense 与 lexical 中多次出现。其中最强的专用查询结果把
+`ARF-024/evidence-1` 在源报告中已经 canonical 命中，因此不属于缺失声明，也不参与失败机制
+统计；`evidence-2` 的两个规范 Chunk 已在 dense 与 lexical 中多次出现。其中最强的专用查询结果把
 `a3f3b2cc-9f65-5823-9392-39fc7b0384dd` 放在 channel fusion 第 1，但 reranker 将其降到第 13；
 另一规范 Chunk 最好为 channel fusion 第 10、reranker 第 10。两者均未获得 coverage 或 primary，
-因此缺失声明同样分类为 `primary_selection`。case 级结果为 `mixed`，因为一个声明已通过重放、
-另一个声明仍在 primary selection 丢失。
+因此缺失声明同样分类为 `primary_selection`，case 级机制也是 `primary_selection`。重放仍记录
+已命中声明的各阶段轨迹，但其最早丢失阶段为不适用，避免把源报告的部分命中误记为失败未复现。
 
 **可证伪假设**：当前直接机制是 query-aware cross-encoder 排名与固定 4/2/2 coverage 共同使规范
 Chunk 排在每个附加槽位前两名之外，随后全局 Top-8 也没有补入，而不是 PDF 英文、dense/lexical

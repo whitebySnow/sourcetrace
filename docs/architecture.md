@@ -272,8 +272,9 @@ embedding 与 reranker 上重放源 Evaluation Report 最后一轮实际查询�
 raw dense、raw lexical、channel fusion、reranker、query coverage、primary selection 与页面扩展轨迹，
 并在运行时用 Dataset 摘录做精确 claim 匹配；序列化结果只保存匹配 claim ID、Chunk UUID、文档版本、
 页码、排名和分数，不保存正文。离线 `diagnose-retrieval-stages` 再校验 Dataset SHA、两个报告 SHA 与
-查询顺序，把每个失败 claim 分类到最早不可恢复阶段。stage replay 使用当前固定代码和本地模型重现
-历史输入，不会改写源 Report；若重放通过，只能记录“未重现”，不能反向修改历史评分。
+查询顺序。源 Report 已命中的 claim 保留其原始 match status，最早丢失阶段记为不适用；只有源 Report
+中 `not_matched` 的 claim 才分类到最早不可恢复阶段。stage replay 使用当前固定代码和本地模型重现
+历史输入，不会改写源 Report；缺失 claim 若重放通过，只能记录“未重现”，不能反向修改历史评分。
 
 ## 7. API 契约
 

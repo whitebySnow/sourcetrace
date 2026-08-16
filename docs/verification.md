@@ -542,11 +542,11 @@ SHA-256 为 `9691ade49662bed8f468bbed5438ea727ae0e2a8c073d884418f6812f5924d18`�
 `9a11c850e499cb54a82b37550183e0a16728e21cc9e810b517ce2ee2fa7a7735`。
 
 离线 `diagnose-retrieval-stages` 用相同三份输入运行两次，两个输出的 SHA-256 均为
-`3ce87b587b283cbe882f068a312446f612c59fddaed618e6d1a7c9b242443597`。诊断覆盖源报告全部两个
+`7b68479f131db0640263165f59250b421c74d3aa4ffaeb23a987a84867fb7de7`。诊断覆盖源报告全部两个
 answerable Retrieval 失败 case 和三个 claim：`ARF-023/evidence-1` 与
 `ARF-024/evidence-2` 均在 raw channel 和 channel fusion 命中规范 Chunk，但未进入 primary
-selection；`ARF-024/evidence-1` 在本地重放中进入最终证据，因此该 case 的 claim 级结果为一个
-未重现、一个 `primary_selection`，case 级为 `mixed`。
+selection；`ARF-024/evidence-1` 在源报告中已经 canonical 命中，因此其丢失阶段为不适用，
+不参与失败机制统计。两个 case 的缺失 claim 和 case 级机制均为 `primary_selection`。
 
 stage report 与诊断保存在被 Git 忽略的 `output/evals/`，不提交问题、查询原文或文档正文。
 本次只验证检索阶段分类，不调用供应商、不生成答案、不改写 Issue #77 四轴结果，也不证明任何

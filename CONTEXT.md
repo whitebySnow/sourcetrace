@@ -119,7 +119,3 @@ _Avoid_: Evidence sufficiency override, corrected evaluation result
 **Retrieval Stage Diagnostics Report**:
 A sanitized classification of failed expected claims across dense, lexical, channel fusion, reranking, query coverage, primary selection, page expansion, and the final score gate, bound to the source Evaluation Report and a local stage-replay report.
 _Avoid_: Retrieval tuning result, corrected evaluation result
-
-**Retrieval Stage Diagnostics Report**:
-A sanitized classification of failed expected claims across dense, lexical, channel fusion, reranking, query coverage, primary selection, page expansion, and the final score gate, bound to the source Evaluation Report and a local stage-replay report.
-_Avoid_: Retrieval tuning result, corrected evaluation result

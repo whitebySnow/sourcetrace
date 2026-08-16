@@ -562,12 +562,13 @@ class RetrievalStageFusedHit(StrictModel):
 class RetrievalStageClaimDiagnostic(StrictModel):
     claim_id: str = Field(min_length=1)
     expected: SanitizedEvidenceLocation
+    source_match_status: EvidenceMatchStatus
     dense_hits: tuple[RetrievalStageRankedHit, ...]
     lexical_hits: tuple[RetrievalStageRankedHit, ...]
     channel_fusion_hits: tuple[RetrievalStageFusedHit, ...]
     expanded_chunk_ids: tuple[UUID, ...]
     final_chunk_ids: tuple[UUID, ...]
-    earliest_loss_stage: RetrievalStageFailureMechanism
+    earliest_loss_stage: RetrievalStageFailureMechanism | None
 
 
 class RetrievalStageCaseDiagnostic(StrictModel):

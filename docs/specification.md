@@ -357,6 +357,8 @@ LangGraph 是首版 Agent 编排核心。固定工作流为：
   Retrieval Stage Diagnostics Report。诊断逐 claim 记录 dense、lexical、通道融合、reranker 排名、
   query coverage、primary selection、页面扩展和最低分门禁，只保存 case/claim ID、Chunk UUID、不可变
   文档版本、页码、排名、布尔选择状态和查询 SHA-256，不保存问题、查询原文、答案、提示词或证据正文。
+  诊断必须保留源 Report 的逐 claim match status；已命中的 claim 不参与失败机制统计，只有
+  `not_matched` claim 才能被分类到丢失阶段或“重放未复现”。
   stage replay 的查询与源报告最后一轮不完全一致时必须失败，不能用不同查询的结果解释历史失败。
 - 所有结果绑定评测集、配置和代码版本；未实际运行不得填写指标。
 - 真实评测在供应商或模型基础设施错误后终止时，只能输出独立的去敏失败工件。该工件记录

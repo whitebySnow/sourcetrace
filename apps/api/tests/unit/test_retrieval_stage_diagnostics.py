@@ -13,6 +13,7 @@ from sourcetrace.evaluation.models import (
     EvaluationReport,
     EvaluationRunMetadata,
     EvaluationSummary,
+    EvidenceClaimMatch,
     HybridCandidateTrace,
     HybridChannelCandidateTrace,
     HybridQueryTrace,
@@ -88,6 +89,57 @@ def test_diagnostics_reject_stage_replay_with_different_queries() -> None:
         )
 
 
+def test_diagnostics_do_not_classify_source_matched_claim_as_replay_failure() -> None:
+    dataset = _dataset()
+    expected = dataset.cases[0].expected
+    matched_reference = expected.evidence[0].model_copy(
+        update={"claim_id": "already-retrieved"}
+    )
+    case = dataset.cases[0].model_copy(
+        update={
+            "expected": expected.model_copy(
+                update={"evidence": [matched_reference, expected.evidence[0]]}
+            )
+        }
+    )
+    dataset = dataset.model_copy(update={"cases": [case]})
+    source_report = _source_report(dataset)
+    source_result = source_report.cases[0].model_copy(
+        update={
+            "retrieval_evidence_matches": (
+                EvidenceClaimMatch(
+                    claim_id="already-retrieved",
+                    match_status="canonical",
+                    matched_reference=matched_reference,
+                ),
+                EvidenceClaimMatch(
+                    claim_id="support-claim",
+                    match_status="not_matched",
+                ),
+            )
+        }
+    )
+    source_report = source_report.model_copy(update={"cases": [source_result]})
+
+    diagnostics = build_retrieval_stage_diagnostics(
+        dataset,
+        source_report,
+        _stage_report(dataset),
+        dataset_sha256=sha256(b"dataset").hexdigest(),
+        source_report_sha256=sha256(b"source").hexdigest(),
+        stage_report_sha256=sha256(b"stage").hexdigest(),
+    )
+
+    assert diagnostics.summary.primary_selection == 1
+    assert diagnostics.summary.mixed == 0
+    case_diagnostic = diagnostics.cases[0]
+    assert case_diagnostic.primary_mechanism == "primary_selection"
+    assert case_diagnostic.claims[0].source_match_status == "canonical"
+    assert case_diagnostic.claims[0].earliest_loss_stage is None
+    assert case_diagnostic.claims[1].source_match_status == "not_matched"
+    assert case_diagnostic.claims[1].earliest_loss_stage == "primary_selection"
+
+
 def _dataset() -> EvaluationDataset:
     case = EvaluationCase.model_validate(
         {
@@ -134,6 +186,12 @@ def _source_report(dataset: EvaluationDataset) -> EvaluationReport:
                 citation="failed",
                 refusal="not_applicable",
                 end_to_end="failed",
+                retrieval_evidence_matches=(
+                    EvidenceClaimMatch(
+                        claim_id="support-claim",
+                        match_status="not_matched",
+                    ),
+                ),
                 observation=EvaluationObservation(
                     outcome="answered",
                     answer="Answer [citation]",

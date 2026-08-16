@@ -213,6 +213,14 @@
       "title": "EvaluationRunMetadata",
       "type": "object"
     },
+    "EvidenceMatchStatus": {
+      "enum": [
+        "canonical",
+        "approved_alternative",
+        "not_matched"
+      ],
+      "type": "string"
+    },
     "HybridRetrievalRunMetadata": {
       "additionalProperties": false,
       "properties": {
@@ -419,6 +427,9 @@
         "expected": {
           "$ref": "#/$defs/SanitizedEvidenceLocation"
         },
+        "source_match_status": {
+          "$ref": "#/$defs/EvidenceMatchStatus"
+        },
         "dense_hits": {
           "items": {
             "$ref": "#/$defs/RetrievalStageRankedHit"
@@ -457,12 +468,20 @@
           "type": "array"
         },
         "earliest_loss_stage": {
-          "$ref": "#/$defs/RetrievalStageFailureMechanism"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetrievalStageFailureMechanism"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "claim_id",
         "expected",
+        "source_match_status",
         "dense_hits",
         "lexical_hits",
         "channel_fusion_hits",
