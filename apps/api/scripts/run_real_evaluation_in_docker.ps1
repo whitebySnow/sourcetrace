@@ -53,7 +53,7 @@ if (-not $SkipBuild) {
     }
 }
 
-$relativeOutput = [IO.Path]::GetRelativePath($repositoryRoot, $resolvedOutput).Replace("\", "/")
+$relativeOutput = $resolvedOutput.Substring($repositoryRoot.Length).TrimStart([char[]]@("\", "/")).Replace("\", "/")
 $containerOutputVolume = "{0}:/app/output" -f $resolvedOutputRoot
 $containerEvalsVolume = "{0}:/app/evals:ro" -f (Join-Path $repositoryRoot "evals")
 & docker compose --project-directory $repositoryRoot run --rm --no-deps `
