@@ -736,3 +736,24 @@ Chunk 排在每个附加槽位前两名之外，随后全局 Top-8 也没有补�
 最终证据消失，则应改查页面扩展或最低分门禁。本诊断不授权增加 Top-K、扩大每槽 coverage、
 修改 Dataset、替换模型或放宽 Evidence/Citation/Refusal 门禁，具体缓解必须另开 Issue 做完整
 本地差异回放。
+
+## 35. 引用诊断不应混入已失败的检索 case
+
+**反馈环**：Issue #83 使用 Dataset `1.2.0`（SHA-256
+`99abe02e752bb4bb53d93e9a9ba73c831c63c5348f4d95a47fcb34cb2e04e683`）和 Issue #77 的原始
+Evaluation Report（SHA-256 `7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b76919efea67f7afa6`）运行
+纯离线 `diagnose-citations`。首次输出错误地包含 `ARF-023`、`ARF-024`，它们的 Retrieval 已失败，
+使检索缺失与引用缺失混在同一机制汇总中。
+
+**修复**：诊断只接受 `retrieval=passed`、`citation=failed` 且已回答的 case。此前会失败的单元回归
+证明 Retrieval 失败的 Citation case 不再进入诊断；这不改变原始四轴结果或任何门禁。
+
+**分类**：同一输入连续运行两次，去敏输出 SHA-256 均为
+`92cffff81b243699306a7825115671b10db9cdd4a1abf8aeb6562371f6bcf911`。四个目标 case 中，
+`ARF-006`、`ARF-009`、`ARF-030` 是 `retrieved_but_not_cited`；`ARF-020` 是
+`partial_claim_coverage`，其中 `evidence-3` 与 `evidence-4` 的最终引用为
+`same_page_different_chunk`。该状态只说明需要比较同页原文，不能自动认定其为等价证据。
+
+**边界与后续**：本轮不调用供应商，不修改 Dataset、引用/拒答门禁、提示词或 Issue #77 评分。
+如要添加任何 `approved_alternatives`，必须先由用户逐条核对问题、实际回答、规范证据和实际引用，
+另行记录绑定该报告 SHA-256 的人工决定；若候选不等价，应在独立 Issue 中改进证据选择或引用生成。

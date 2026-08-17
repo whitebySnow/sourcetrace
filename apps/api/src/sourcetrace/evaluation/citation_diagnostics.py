@@ -33,7 +33,11 @@ def build_citation_diagnostics(
     cases_by_id = {case.id: case for case in dataset.cases}
     diagnostics: list[CitationCaseDiagnostic] = []
     for result in report.cases:
-        if result.citation != "failed" or result.observation.outcome != "answered":
+        if (
+            result.retrieval != "passed"
+            or result.citation != "failed"
+            or result.observation.outcome != "answered"
+        ):
             continue
         case = cases_by_id.get(result.case_id)
         if case is None:

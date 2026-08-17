@@ -551,3 +551,16 @@ selection；`ARF-024/evidence-1` 在源报告中已经 canonical 命中，因此
 stage report 与诊断保存在被 Git 忽略的 `output/evals/`，不提交问题、查询原文或文档正文。
 本次只验证检索阶段分类，不调用供应商、不生成答案、不改写 Issue #77 四轴结果，也不证明任何
 候选修复不会使其他 28 题回归。
+
+### Issue #83 引用失败诊断
+
+2026-08-17 使用 Dataset `1.2.0` 和 Issue #77 原始 Evaluation Report，运行纯离线
+`diagnose-citations`。输入报告绑定提交 `beed1e6726843b70e257d77827e81c71f338d692` 与 SHA-256
+`7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b76919efea67f7afa6`。诊断只处理 Retrieval
+已通过、已回答但 Citation 失败的 case，因此排除了 `ARF-023` 和 `ARF-024` 的检索失败。
+
+两次离线输出的 SHA-256 均为
+`92cffff81b243699306a7825115671b10db9cdd4a1abf8aeb6562371f6bcf911`。四个目标 case 中，
+`ARF-006`、`ARF-009`、`ARF-030` 分类为 `retrieved_but_not_cited`；`ARF-020` 分类为
+`partial_claim_coverage`，其两个缺失声明为 `same_page_different_chunk`。该分类只提供人工审核
+候选，不能证明同页片段语义等价、自动批准替代证据或改变原始报告评分。

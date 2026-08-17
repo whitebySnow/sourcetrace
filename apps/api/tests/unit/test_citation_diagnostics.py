@@ -188,7 +188,7 @@ def test_diagnostics_classify_retrieved_evidence_that_was_not_cited() -> None:
     assert diagnostics.cases[0].claims[0].citation_status == "not_observed"
 
 
-def test_diagnostics_classify_expected_evidence_that_was_not_retrieved() -> None:
+def test_diagnostics_exclude_citation_failures_when_retrieval_failed() -> None:
     diagnostics = _build_single_claim_diagnostics(
         retrieved_page=3,
         retrieved_text="Different evidence.",
@@ -196,8 +196,9 @@ def test_diagnostics_classify_expected_evidence_that_was_not_retrieved() -> None
         cited_text="Different evidence.",
     )
 
-    assert diagnostics.cases[0].primary_mechanism == "expected_evidence_not_retrieved"
-    assert diagnostics.cases[0].claims[0].retrieval_status == "not_observed"
+    assert diagnostics.cases == ()
+    assert diagnostics.summary.failed_answered_cases == 0
+    assert diagnostics.summary.expected_evidence_not_retrieved == 0
 
 
 def test_diagnostics_classify_same_page_different_chunk() -> None:

@@ -249,10 +249,12 @@ prompt、工作流、切分、embedding 和检索参数/版本。端到端 Judgm
 替代命中，并把逐声明结果写入评测 Report；Harness、真实混合检索、reranker 与失败诊断共享
 同一规则，不能各自放宽。
 
-引用失败诊断同样作为进程外离线工具读取版本化 Dataset 与既有 Evaluation Report。它只输出
+引用失败诊断同样作为进程外离线工具读取版本化 Dataset 与既有 Evaluation Report。它只处理
+Retrieval 已通过、已生成回答但 Citation 失败的 case，检索失败不进入引用机制统计。它只输出
 case/claim ID、不可变文档版本 ID、页码、规范或批准替代匹配状态、失败机制和源报告 SHA-256，
 不复制问题、答案、提示词或文档正文。诊断区分目标证据未召回、已召回但未引用、同页不同
-chunk 和多声明部分覆盖；该分类不构成替代证据批准，也不能改变原 Report 的任何评分。
+chunk 和多声明部分覆盖；同页不同 chunk 仅产生人工审核候选，不构成替代证据批准，也不能改变原
+Report 的任何评分。
 
 Evidence Assessment 失败诊断位于相同的进程外 `evaluation` 边界。它从报告中的结构化
 Retrieval 与 Evidence Decision 轨迹建立 Chunk ID 到不可变文档版本和页码的去敏映射，将检索通过但在
