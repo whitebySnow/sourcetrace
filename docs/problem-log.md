@@ -758,3 +758,20 @@ Evaluation Report（SHA-256 `7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b7691
 **边界与后续**：本轮不调用供应商，不修改 Dataset、引用/拒答门禁、提示词或 Issue #77 评分。
 如要添加任何 `approved_alternatives`，必须先由用户逐条核对问题、实际回答、规范证据和实际引用，
 另行记录绑定该报告 SHA-256 的人工决定；若候选不等价，应在独立 Issue 中改进证据选择或引用生成。
+
+## 36. 通道融合首位不能无条件替代 reranker 第二名
+
+**假设与实验**：Issue #87 针对 `ARF-023`、`ARF-024` 在 primary selection 前丢失规范证据的
+诊断，尝试在不增加 `Top-8` 或 `4/2/2` 覆盖配额的前提下，让额外槽位的两个名额分别保留
+reranker 首位和通道融合首位。策略只读取运行时排名，不读取 Dataset 期望证据或 case ID。
+
+**结果**：提交 `26860dfeea89dc129f037005a5747bb9ddf21399` 在 Dataset `1.2.0`、查询计划
+`two-stage-evidence-slots-v6`、本地 PostgreSQL、CPU BGE-M3 与固定 reranker 上完成完整 30 题
+回放。去敏报告位于被忽略的 `output/evals/issue87-26860df-hybrid-v9.json`，SHA-256 为
+`cb6cfc52a26376d602e2028be7423e7b5781366d3456966f00e70a9fbe69f29a`。报告中 `ARF-023`
+改善，但 `ARF-026` 从通过回退为失败；hybrid 仍为 26 passed、3 not applicable。因此该候选
+不满足“零回归”验收，已用反向提交撤回，未调用供应商、未生成答案、未改写 Dataset 或历史评分。
+
+**结论**：`ARF-026` 证明 reranker 第二名可能是多槽位问题不可替代的证据，不能把通道融合首位
+无条件塞入同一个固定名额。后续若继续处理 primary selection，必须先提出能同时保留这些两类
+候选的通用规则，并再次用完整本地差异回放证伪或验证；不得扩大配额、硬编码评测证据或放宽门禁。
