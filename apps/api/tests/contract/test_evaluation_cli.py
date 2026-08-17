@@ -453,7 +453,7 @@ def test_repository_reranker_report_schema_matches_model() -> None:
 def test_repository_citation_diagnostics_schema_matches_model() -> None:
     root = Path(__file__).resolve().parents[4]
     schema = json.loads(
-        (root / "evals/schema/citation-diagnostics-v1.schema.json").read_text(encoding="utf-8")
+        (root / "evals/schema/citation-diagnostics-v2.schema.json").read_text(encoding="utf-8")
     )
 
     assert schema == CitationDiagnosticsReport.model_json_schema()

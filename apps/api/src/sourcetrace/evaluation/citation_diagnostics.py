@@ -33,7 +33,11 @@ def build_citation_diagnostics(
     cases_by_id = {case.id: case for case in dataset.cases}
     diagnostics: list[CitationCaseDiagnostic] = []
     for result in report.cases:
-        if result.citation != "failed" or result.observation.outcome != "answered":
+        if (
+            result.retrieval != "passed"
+            or result.citation != "failed"
+            or result.observation.outcome != "answered"
+        ):
             continue
         case = cases_by_id.get(result.case_id)
         if case is None:
@@ -107,8 +111,6 @@ def _primary_mechanism(
     )
     if 0 < citation_successes < len(claims):
         return "partial_claim_coverage"
-    if any(item.retrieval_status == "not_observed" for item in claims):
-        return "expected_evidence_not_retrieved"
     if any(
         "same_page_different_chunk"
         in {item.retrieval_status, item.citation_status}
@@ -124,9 +126,6 @@ def _summarize(
     mechanisms = [item.primary_mechanism for item in cases]
     return CitationDiagnosticsSummary(
         failed_answered_cases=len(cases),
-        expected_evidence_not_retrieved=mechanisms.count(
-            "expected_evidence_not_retrieved"
-        ),
         retrieved_but_not_cited=mechanisms.count("retrieved_but_not_cited"),
         same_page_different_chunk=mechanisms.count("same_page_different_chunk"),
         partial_claim_coverage=mechanisms.count("partial_claim_coverage"),

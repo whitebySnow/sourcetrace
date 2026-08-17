@@ -35,7 +35,9 @@ pnpm eval:fake
 报告文件的 SHA-256、审核人与 UTC 时间，并完整覆盖所有 `pending_review` case。审核只通过
 独立的 `review` 命令应用到既有报告，不能在新一轮模型调用前复用旧 judgment。
 
-引用失败可通过纯离线命令生成去敏诊断，不访问数据库、本地模型或远程供应商：
+引用失败可通过纯离线命令生成去敏诊断，不访问数据库、本地模型或远程供应商。诊断只处理
+`retrieval=passed`、`citation=failed` 且已回答的 case；检索失败由独立的 Retrieval 诊断处理，
+不能混入引用机制结论：
 
 ```powershell
 pnpm eval:diagnose-citations -- `
@@ -46,8 +48,10 @@ pnpm eval:diagnose-citations -- `
 
 诊断报告绑定 Dataset ID/version、源报告 SHA-256 和运行配置，只保存 case/claim ID、不可变文档
 版本 ID、页码、匹配状态和汇总计数。它不复制问题、参考答案、模型回答、提示词、文档或 chunk
-正文，也不自动批准替代证据或改变原评测结果。Schema 位于
-`schema/citation-diagnostics-v1.schema.json`。
+正文，也不自动批准替代证据或改变原评测结果。`same_page_different_chunk` 只表示值得人工核对
+的同页候选，不表示语义等价；只有人工审核后才能把候选写入声明级 `approved_alternatives`。Schema 位于
+`schema/citation-diagnostics-v2.schema.json`。`citation-diagnostics-v1` 保留为历史工件契约，
+其中的检索失败分类不适用于当前命令。
 
 Evidence Assessment 阶段的 answerable refusal 使用独立的纯离线诊断：
 

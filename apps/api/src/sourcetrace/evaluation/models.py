@@ -413,7 +413,6 @@ type CitationObservationStatus = Literal[
     "not_observed",
 ]
 type CitationFailureMechanism = Literal[
-    "expected_evidence_not_retrieved",
     "retrieved_but_not_cited",
     "same_page_different_chunk",
     "partial_claim_coverage",
@@ -445,14 +444,13 @@ class CitationCaseDiagnostic(StrictModel):
 
 class CitationDiagnosticsSummary(StrictModel):
     failed_answered_cases: int = Field(ge=0)
-    expected_evidence_not_retrieved: int = Field(ge=0)
     retrieved_but_not_cited: int = Field(ge=0)
     same_page_different_chunk: int = Field(ge=0)
     partial_claim_coverage: int = Field(ge=0)
 
 
 class CitationDiagnosticsReport(StrictModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     dataset_id: str = Field(min_length=1)
     dataset_version: str = Field(min_length=1)
     report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

@@ -21,7 +21,7 @@ def main() -> None:
     output_dir = Path(__file__).resolve().parents[3] / "evals" / "schema"
     output_dir.mkdir(parents=True, exist_ok=True)
     schemas = {
-        "citation-diagnostics-v1.schema.json": CitationDiagnosticsReport.model_json_schema(),
+        "citation-diagnostics-v2.schema.json": CitationDiagnosticsReport.model_json_schema(),
         "evidence-assessment-diagnostics-v1.schema.json": (
             EvidenceAssessmentDiagnosticsReport.model_json_schema()
         ),
