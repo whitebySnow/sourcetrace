@@ -151,9 +151,10 @@ def test_diagnostics_classify_partial_claim_coverage_without_copying_text() -> N
 
     assert diagnostics.cases[0].primary_mechanism == "partial_claim_coverage"
     assert diagnostics.source_metadata.code_commit == "test-commit"
+    assert diagnostics.schema_version == "2"
     assert diagnostics.summary.failed_answered_cases == 1
     assert diagnostics.summary.partial_claim_coverage == 1
-    assert diagnostics.summary.expected_evidence_not_retrieved == 0
+    assert "expected_evidence_not_retrieved" not in diagnostics.summary.model_dump()
     assert [item.retrieval_status for item in diagnostics.cases[0].claims] == [
         "canonical",
         "canonical",
@@ -198,38 +199,34 @@ def test_diagnostics_exclude_citation_failures_when_retrieval_failed() -> None:
 
     assert diagnostics.cases == ()
     assert diagnostics.summary.failed_answered_cases == 0
-    assert diagnostics.summary.expected_evidence_not_retrieved == 0
+    assert "expected_evidence_not_retrieved" not in diagnostics.summary.model_dump()
 
 
 def test_diagnostics_classify_same_page_different_chunk() -> None:
     diagnostics = _build_single_claim_diagnostics(
         retrieved_page=2,
-        retrieved_text="Adjacent chunk.",
+        retrieved_text="Expected evidence.",
         cited_page=2,
         cited_text="Adjacent chunk.",
     )
 
     assert diagnostics.cases[0].primary_mechanism == "same_page_different_chunk"
-    assert diagnostics.cases[0].claims[0].retrieval_status == (
-        "same_page_different_chunk"
-    )
+    assert diagnostics.cases[0].claims[0].retrieval_status == "canonical"
     assert diagnostics.cases[0].claims[0].citation_status == (
         "same_page_different_chunk"
     )
 
 
-def test_diagnostics_classify_same_page_retrieval_when_citation_uses_other_page() -> None:
+def test_diagnostics_classify_canonical_retrieval_when_citation_uses_other_page() -> None:
     diagnostics = _build_single_claim_diagnostics(
         retrieved_page=2,
-        retrieved_text="Adjacent chunk.",
+        retrieved_text="Expected evidence.",
         cited_page=3,
         cited_text="Different evidence.",
     )
 
-    assert diagnostics.cases[0].primary_mechanism == "same_page_different_chunk"
-    assert diagnostics.cases[0].claims[0].retrieval_status == (
-        "same_page_different_chunk"
-    )
+    assert diagnostics.cases[0].primary_mechanism == "retrieved_but_not_cited"
+    assert diagnostics.cases[0].claims[0].retrieval_status == "canonical"
     assert diagnostics.cases[0].claims[0].citation_status == "not_observed"
 
 

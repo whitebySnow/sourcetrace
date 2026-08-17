@@ -50,7 +50,8 @@ pnpm eval:diagnose-citations -- `
 版本 ID、页码、匹配状态和汇总计数。它不复制问题、参考答案、模型回答、提示词、文档或 chunk
 正文，也不自动批准替代证据或改变原评测结果。`same_page_different_chunk` 只表示值得人工核对
 的同页候选，不表示语义等价；只有人工审核后才能把候选写入声明级 `approved_alternatives`。Schema 位于
-`schema/citation-diagnostics-v1.schema.json`。
+`schema/citation-diagnostics-v2.schema.json`。`citation-diagnostics-v1` 保留为历史工件契约，
+其中的检索失败分类不适用于当前命令。
 
 Evidence Assessment 阶段的 answerable refusal 使用独立的纯离线诊断：
 

@@ -746,10 +746,11 @@ Evaluation Report（SHA-256 `7087a6f1134074dca087840e6fb64ae8dce91d5a0960f8b7691
 使检索缺失与引用缺失混在同一机制汇总中。
 
 **修复**：诊断只接受 `retrieval=passed`、`citation=failed` 且已回答的 case。此前会失败的单元回归
-证明 Retrieval 失败的 Citation case 不再进入诊断；这不改变原始四轴结果或任何门禁。
+证明 Retrieval 失败的 Citation case 不再进入诊断；该语义变化发布为 `citation-diagnostics-v2`，
+保留 v1 作为历史工件契约。这不改变原始四轴结果或任何门禁。
 
 **分类**：同一输入连续运行两次，去敏输出 SHA-256 均为
-`92cffff81b243699306a7825115671b10db9cdd4a1abf8aeb6562371f6bcf911`。四个目标 case 中，
+`fed41544ea8f2c990fe9eb94d714103b459a1c591395d8bdfac6cfbf4dd8c4aa`。四个目标 case 中，
 `ARF-006`、`ARF-009`、`ARF-030` 是 `retrieved_but_not_cited`；`ARF-020` 是
 `partial_claim_coverage`，其中 `evidence-3` 与 `evidence-4` 的最终引用为
 `same_page_different_chunk`。该状态只说明需要比较同页原文，不能自动认定其为等价证据。
