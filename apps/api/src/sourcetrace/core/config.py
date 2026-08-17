@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     retrieval_rrf_rank_constant: int = Field(default=60, ge=1, le=1000)
     retrieval_minimum_score: float = Field(default=0.5, ge=-1, le=1)
     retrieval_minimum_evidence: int = Field(default=1, ge=1)
-    retrieval_config_version: str = "pgvector-hybrid-query-aware-bge-reranker-v8"
+    retrieval_config_version: str = "pgvector-hybrid-query-aware-bge-reranker-v9"
     answer_workflow_version: str = "langgraph-bounded-multi-query-v8"
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "BAAI/bge-m3"

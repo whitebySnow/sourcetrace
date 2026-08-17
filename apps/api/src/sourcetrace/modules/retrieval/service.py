@@ -290,24 +290,30 @@ class RetrievalService:
             reranked_query_results,
             top_k=self._top_k,
         )
+        channel_leader_reranked_rank_limit = _channel_leader_reranked_rank_limit(
+            top_k=self._top_k,
+        )
         reranked_query_results = [
             replace(
                 query_result,
                 candidates=tuple(
                     replace(
                         candidate,
-                        selected_for_query_coverage=(
-                            candidate.reranked_rank is not None
-                            and candidate.reranked_rank <= coverage_limit
-                        ),
+                        selected_for_query_coverage=(candidate.evidence.chunk_id in coverage_ids),
                     )
                     for candidate in query_result.candidates
                 ),
             )
-            for query_result, coverage_limit in zip(
-                reranked_query_results,
-                coverage_limits,
-                strict=True,
+            for query_index, (query_result, coverage_limit) in enumerate(
+                zip(reranked_query_results, coverage_limits, strict=True)
+            )
+            for coverage_ids in (
+                _query_coverage_candidate_ids(
+                    query_result,
+                    limit=coverage_limit,
+                    preserve_channel_leader=query_index > 0,
+                    channel_leader_reranked_rank_limit=channel_leader_reranked_rank_limit,
+                ),
             )
         ]
         for query_result in reranked_query_results:
@@ -400,6 +406,56 @@ def _coverage_candidate_limits(
         limits[index] += additional_capacity
         remaining_capacity -= additional_capacity
     return tuple(limits)
+
+
+def _channel_leader_reranked_rank_limit(*, top_k: int) -> int:
+    return top_k + _MAX_ADDITIONAL_QUERIES * _MAX_ADDITIONAL_QUERY_COVERAGE_CANDIDATES
+
+
+def _query_coverage_candidate_ids(
+    query_result: QueryRetrievalResult,
+    *,
+    limit: int,
+    preserve_channel_leader: bool,
+    channel_leader_reranked_rank_limit: int,
+) -> frozenset[UUID]:
+    if limit == 0:
+        return frozenset()
+
+    reranked = sorted(
+        query_result.candidates,
+        key=lambda candidate: (
+            candidate.reranked_rank if candidate.reranked_rank is not None else float("inf"),
+            candidate.rank,
+            str(candidate.evidence.chunk_id),
+        ),
+    )
+    selected = [reranked[0]]
+    selected_ids = {selected[0].evidence.chunk_id}
+    if preserve_channel_leader and limit > 1:
+        channel_leader = min(
+            query_result.candidates,
+            key=lambda candidate: (
+                candidate.rank,
+                candidate.reranked_rank if candidate.reranked_rank is not None else float("inf"),
+                str(candidate.evidence.chunk_id),
+            ),
+        )
+        if (
+            channel_leader.reranked_rank is not None
+            and channel_leader.reranked_rank <= channel_leader_reranked_rank_limit
+            and channel_leader.evidence.chunk_id not in selected_ids
+        ):
+            selected.append(channel_leader)
+            selected_ids.add(channel_leader.evidence.chunk_id)
+
+    for candidate in reranked:
+        if len(selected) == limit:
+            break
+        if candidate.evidence.chunk_id not in selected_ids:
+            selected.append(candidate)
+            selected_ids.add(candidate.evidence.chunk_id)
+    return frozenset(candidate.evidence.chunk_id for candidate in selected)
 
 
 def _unique_queries(queries: Sequence[str]) -> tuple[str, ...]:

@@ -693,6 +693,113 @@ async def test_multi_slot_coverage_preserves_rank_two_evidence_within_top_eight(
     )
 
 
+async def test_slot_coverage_preserves_only_bounded_channel_leader_disagreement() -> None:
+    original = [
+        _evidence(
+            f"00000000-0000-0000-0000-00000000004{index}",
+            score=0.90 - index / 100,
+            page_number=index,
+        )
+        for index in range(1, 5)
+    ]
+    nearby_channel_leader = _evidence(
+        "00000000-0000-0000-0000-000000000045",
+        score=0.80,
+        page_number=5,
+    )
+    nearby_reranker_leader = _evidence(
+        "00000000-0000-0000-0000-000000000046",
+        score=0.79,
+        page_number=6,
+    )
+    nearby_reranker_runner_up = _evidence(
+        "00000000-0000-0000-0000-000000000047",
+        score=0.78,
+        page_number=7,
+    )
+    remote_channel_leader = _evidence(
+        "00000000-0000-0000-0000-000000000048",
+        score=0.77,
+        page_number=8,
+    )
+    remote_reranker_leader = _evidence(
+        "00000000-0000-0000-0000-000000000049",
+        score=0.76,
+        page_number=9,
+    )
+    remote_reranker_runner_up = _evidence(
+        "00000000-0000-0000-0000-000000000050",
+        score=0.75,
+        page_number=10,
+    )
+    remote_reranker_tail = [
+        _evidence(
+            f"00000000-0000-0000-0000-{50 + index:012d}",
+            score=0.74 - index / 100,
+            page_number=10 + index,
+        )
+        for index in range(1, 11)
+    ]
+    service = RetrievalService(
+        repository=RankedListRepository(
+            {
+                (1.0,): original,
+                (2.0,): [
+                    nearby_channel_leader,
+                    nearby_reranker_leader,
+                    nearby_reranker_runner_up,
+                ],
+                (3.0,): [
+                    remote_channel_leader,
+                    remote_reranker_leader,
+                    remote_reranker_runner_up,
+                    *remote_reranker_tail,
+                ],
+            }
+        ),
+        embedding_provider=RecordingEmbeddingProvider(((1.0,), (2.0,), (3.0,))),
+        question_planner=StaticPlanner(),
+        reranker=QuerySpecificReranker(
+            {
+                "original": {item.text: 0.90 - index / 100 for index, item in enumerate(original)},
+                "nearby slot": {
+                    nearby_channel_leader.text: 0.97,
+                    nearby_reranker_leader.text: 0.99,
+                    nearby_reranker_runner_up.text: 0.98,
+                },
+                "remote slot": {
+                    remote_channel_leader.text: 0.10,
+                    remote_reranker_leader.text: 0.99,
+                    remote_reranker_runner_up.text: 0.98,
+                    **{
+                        item.text: 0.97 - index / 100
+                        for index, item in enumerate(remote_reranker_tail)
+                    },
+                },
+            }
+        ),
+        top_k=8,
+    )
+
+    result = await service.search(
+        knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+        queries=("original", "nearby slot", "remote slot"),
+    )
+
+    nearby_selected = {
+        candidate.evidence.chunk_id
+        for candidate in result.query_results[1].candidates
+        if candidate.selected_for_query_coverage
+    }
+    remote_selected = {
+        candidate.evidence.chunk_id
+        for candidate in result.query_results[2].candidates
+        if candidate.selected_for_query_coverage
+    }
+    assert nearby_selected == {nearby_channel_leader.chunk_id, nearby_reranker_leader.chunk_id}
+    assert remote_selected == {remote_reranker_leader.chunk_id, remote_reranker_runner_up.chunk_id}
+
+
 async def test_low_top_k_balances_query_coverage_within_the_final_budget() -> None:
     original = [
         _evidence(
