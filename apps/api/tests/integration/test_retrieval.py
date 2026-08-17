@@ -436,6 +436,7 @@ async def test_retrieval_service_owns_bounded_query_plan_resolution(
         question_planner=planner,
         reranker=PreserveOrderReranker(),
         top_k=8,
+        retrieval_plan_version="test-plan-v1",
     )
 
     direct_plan = await service.resolve_plan(

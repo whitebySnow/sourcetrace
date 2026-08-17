@@ -227,6 +227,7 @@ def get_answer_service(
         question_planner=question_planner,
         reranker=reranker,
         top_k=settings.retrieval_top_k,
+        retrieval_plan_version=settings.llm_retrieval_plan_prompt_version,
         page_neighbor_count=settings.retrieval_page_neighbor_count,
         rrf_rank_constant=settings.retrieval_rrf_rank_constant,
     )

@@ -1250,6 +1250,217 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
     assert '"document_title": "Method A.pdf"' in refinement_system_prompt
 
 
+async def test_question_planner_anchors_unassigned_components_to_stable_titles() -> None:
+    initial_prompt: str | None = None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal initial_prompt
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_input = json.loads(messages[-1]["content"])
+        proposed = user_input.get("proposed_evidence_group")
+        if proposed is None:
+            initial_prompt = messages[0]["content"]
+            content = (
+                {
+                    "evidence_groups": [
+                        {"query": "DPR and BART components", "document_title": "RAG.pdf"},
+                        {
+                            "query": "ReAct environment actions component",
+                            "document_title": "ReAct.pdf",
+                        },
+                        {
+                            "query": "Self-RAG critique tokens component",
+                            "document_title": "Self-RAG.pdf",
+                        },
+                    ]
+                }
+                if "unassigned named component" in initial_prompt
+                else {"evidence_groups": []}
+            )
+        else:
+            content = {
+                "evidence_group": {
+                    "query": proposed["query"] + " source terminology",
+                    "document_title": proposed["document_title"],
+                }
+            }
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question=(
+                "DPR, BART, environment actions, and critique tokens belong to which "
+                "paper components?"
+            ),
+            recent_questions=[],
+            document_titles=["RAG.pdf", "ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == (
+        "ReAct environment actions component source terminology",
+        "Self-RAG critique tokens component source terminology",
+    )
+    assert initial_prompt is not None
+    assert "unassigned named component" in initial_prompt
+    assert "search hypothesis, not answer evidence" in initial_prompt
+
+
+async def test_question_planner_leaves_ambiguous_components_unanchored() -> None:
+    initial_prompt: str | None = None
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts, initial_prompt
+        attempts += 1
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        initial_prompt = messages[0]["content"]
+        content = (
+            {
+                "evidence_groups": [
+                    {
+                        "query": "Unknown component from ReAct",
+                        "document_title": "ReAct.pdf",
+                    }
+                ]
+            }
+            if attempts == 1
+            else {"evidence_groups": []}
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Which paper introduced the unsupported control signal?",
+            recent_questions=[],
+            document_titles=["ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == ()
+    assert initial_prompt is not None
+    assert "no stable title is a defensible lexical anchor" in initial_prompt
+    assert attempts == 2
+
+
+async def test_question_planner_rejects_title_attribution_with_normalized_chinese_space() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        content = (
+            {
+                "evidence_groups": [
+                    {
+                        "query": "环境动作 属于 ReAct",
+                        "document_title": "ReAct.pdf",
+                    }
+                ]
+            }
+            if attempts == 1
+            else {"evidence_groups": []}
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Which paper owns the environment action component?",
+            recent_questions=[],
+            document_titles=["ReAct.pdf"],
+        )
+
+    assert proposal.additional_queries == ()
+    assert attempts == 2
+
+
+async def test_question_planner_discards_refinement_that_asserts_title_attribution() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        proposed = json.loads(messages[-1]["content"]).get("proposed_evidence_group")
+        content = (
+            {
+                "evidence_groups": [
+                    {"query": "ReAct environment actions", "document_title": "ReAct.pdf"},
+                    {
+                        "query": "Self-RAG critique tokens",
+                        "document_title": "Self-RAG.pdf",
+                    },
+                ]
+            }
+            if proposed is None
+            else {
+                "evidence_group": {
+                    "query": (
+                        "environment action component in ReAct"
+                        if proposed["document_title"] == "ReAct.pdf"
+                        else "Self-RAG critique token reflection mechanism"
+                    ),
+                    "document_title": proposed["document_title"],
+                }
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Compare the components of ReAct and Self-RAG",
+            recent_questions=[],
+            document_titles=["ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == ("Self-RAG critique token reflection mechanism",)
+
+
 async def test_question_planner_discards_refinement_that_changes_document() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)

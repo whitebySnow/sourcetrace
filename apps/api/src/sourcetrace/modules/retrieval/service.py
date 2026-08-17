@@ -16,7 +16,6 @@ _MAX_ADDITIONAL_QUERIES = 2
 _ORIGINAL_QUERY_COVERAGE_CANDIDATES = 4
 _MAX_ADDITIONAL_QUERY_COVERAGE_CANDIDATES = 2
 _PLANNER_DOCUMENT_TITLE_LIMIT = 50
-_RETRIEVAL_PLAN_VERSION = "two-stage-evidence-slots-v6"
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +131,7 @@ class RetrievalService:
         question_planner: QuestionPlanner,
         reranker: Reranker,
         top_k: int,
+        retrieval_plan_version: str | None = None,
         page_neighbor_count: int = 0,
         rrf_rank_constant: int = 60,
     ) -> None:
@@ -148,6 +148,7 @@ class RetrievalService:
         self._question_planner = question_planner
         self._reranker = reranker
         self._top_k = top_k
+        self._retrieval_plan_version = retrieval_plan_version
         self._page_neighbor_count = page_neighbor_count
         self._rrf_rank_constant = rrf_rank_constant
 
@@ -161,6 +162,8 @@ class RetrievalService:
         original_query = question.strip()
         if not original_query:
             raise ValueError("retrieval question must not be blank")
+        if self._retrieval_plan_version is None:
+            raise ValueError("retrieval plan version must be configured")
         document_titles = await self._repository.list_searchable_document_titles(
             knowledge_base_id,
             limit=_PLANNER_DOCUMENT_TITLE_LIMIT,
@@ -181,7 +184,7 @@ class RetrievalService:
             normalized.add(normalized_candidate)
             if len(queries) == _MAX_ADDITIONAL_QUERIES + 1:
                 break
-        return RetrievalPlan(version=_RETRIEVAL_PLAN_VERSION, queries=tuple(queries))
+        return RetrievalPlan(version=self._retrieval_plan_version, queries=tuple(queries))
 
     async def search(
         self,
