@@ -98,8 +98,8 @@ parser、切分、embedding、四个 prompt、工作流和检索参数/版本；
 真实运行在供应商或模型基础设施错误后以非零状态退出，并在指定正常报告同目录写入
 `<report>-failure.json`。该文件是不可评分的失败取证工件：只含数据集快照、可获得的运行元数据、
 失败 case ID、阶段和安全错误分类；不含问题、参考答案、模型回答、提示词、文档或证据正文，也
-没有 `cases` 或任何四轴汇总。它不能传给 `review`、`diagnose-retrieval` 或
-`diagnose-citations`，不能用于声明质量结论。Schema 位于
+没有 `cases` 或任何四轴汇总。它不能传给 `review`、`diagnose-retrieval`、
+`diagnose-retrieval-stages`、`diagnose-citations` 或 `diagnose-assessments`，不能用于声明质量结论。Schema 位于
 `schema/failure-report-v1.schema.json`。真实命令拒绝覆盖已有正常报告；每次运行使用新的
 `--output` 路径，并要求配对的 `-failure.json` 路径同样不存在，防止旧报告或失败工件被误读
 或覆盖。
@@ -126,6 +126,23 @@ uv run --project apps/api --extra cu130 python -m sourcetrace.evaluation.cli hyb
 “critique token”和知识库稳定标题中的 `ReAct`、`Self-RAG`；它不包含参考答案、规范摘录或
 评测不可见的目标词，因此可以作为本地检索覆盖分配的可重放输入。
 
-报告逐题记录 dense、lexical、通道融合和 reranker 排名，但不复制文档正文。任何线上接入、索引
+v2 报告逐题记录 raw dense、raw lexical、通道融合、reranker、query coverage、primary selection、
+页面扩展和最低分门禁。运行时按 Dataset 摘录精确匹配 claim，但序列化结果只保存 claim ID、Chunk UUID、
+文档版本、页码、排名和分数，不复制文档正文。任何线上接入、索引
 迁移或阈值调整都必须另开 Issue，并以本实验报告作为决策输入。没有可用 NVIDIA GPU 时可移除
 上述两个临时环境变量并改用 `--extra cpu`，但完整 30 题双路径重排会明显更慢。
+
+诊断历史 Retrieval 失败时，查询计划必须逐字复制源 Evaluation Report 最后一轮已经执行的查询；
+`query-plans/agentic-rag-foundations-v1-issue77-retrieval-failures-v1.json` 只复现 Issue #77 中
+`ARF-023` 和 `ARF-024` 的该输入，不包含答案或证据正文。stage report 生成后运行：
+
+```powershell
+pnpm eval:diagnose-retrieval-stages -- `
+  --dataset evals/datasets/agentic-rag-foundations-v1.json `
+  --report output/evals/<source-report>.json `
+  --stage-report output/evals/<hybrid-stage-report>.json `
+  --output output/evals/<retrieval-stage-diagnostics>.json
+```
+
+离线命令要求 stage report 的查询及顺序与源报告最后一轮完全一致，并绑定 Dataset、源报告和
+stage report 三个 SHA-256。输出不构成检索调参授权，不修改 Dataset 或历史四轴结果。

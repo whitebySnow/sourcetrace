@@ -6,11 +6,15 @@ from uuid import UUID
 
 from sourcetrace.core.config import Settings
 from sourcetrace.db.session import session_factory
+from sourcetrace.evaluation.evidence_matching import match_evidence_claims
 from sourcetrace.evaluation.harness import EvaluationHarness
 from sourcetrace.evaluation.hybrid_retrieval import resolve_query_plans
 from sourcetrace.evaluation.models import (
+    EvaluationCase,
     EvaluationDataset,
     HybridCandidateTrace,
+    HybridChannelCandidateTrace,
+    HybridExpandedCandidateTrace,
     HybridQueryPlanFixture,
     HybridQueryTrace,
     HybridRetrievalCaseResult,
@@ -172,14 +176,15 @@ async def run_real_hybrid_retrieval_evaluation(
                 tuple[FusedChannelCandidate[RetrievedEvidence], ...]
             ] = []
             lexical_enabled: list[bool] = []
+            channel_results = []
             for query, embedding in zip(queries, embeddings, strict=True):
-                dense = tuple(
-                    await dense_repository.search_dense(
-                        dataset.knowledge_base_id,
-                        embedding,
-                        limit=pool_limit,
-                    )
+                channels = await dense_repository.search_channels(
+                    dataset.knowledge_base_id,
+                    embedding,
+                    query=query,
+                    limit=pool_limit,
                 )
+                channel_results.append(channels)
                 dense_channel = tuple(
                     RankedChannelCandidate(
                         channel="dense",
@@ -187,7 +192,7 @@ async def run_real_hybrid_retrieval_evaluation(
                         channel_score=item.score,
                         evidence=item,
                     )
-                    for rank, item in enumerate(dense, start=1)
+                    for rank, item in enumerate(channels.dense, start=1)
                 )
                 dense_lists.append(
                     fuse_ranked_channels(
@@ -197,14 +202,7 @@ async def run_real_hybrid_retrieval_evaluation(
                     )
                 )
                 lexical_query = build_lexical_search_query(query)
-                channel_fused = tuple(
-                    await dense_repository.search(
-                        dataset.knowledge_base_id,
-                        embedding,
-                        query=query,
-                        limit=pool_limit,
-                    )
-                )
+                channel_fused = channels.fused
                 hybrid_lists.append(channel_fused)
                 channel_fused_by_query.append(channel_fused)
                 lexical_enabled.append(lexical_query is not None)
@@ -240,6 +238,7 @@ async def run_real_hybrid_retrieval_evaluation(
                 for item in hybrid.primary_evidence
                 if item.score >= settings.retrieval_minimum_score
             }
+            selected_primary_ids = {item.chunk_id for item in hybrid.primary_evidence}
             eligible_expanded_ids = tuple(
                 item.chunk_id
                 for item in hybrid.evidence
@@ -254,6 +253,7 @@ async def run_real_hybrid_retrieval_evaluation(
                         start=1,
                     )
                 }
+                channels = channel_results[query_index]
                 candidate_traces: list[HybridCandidateTrace] = []
                 for candidate in query_result.candidates:
                     channel_rank, channel = channel_by_id[candidate.evidence.chunk_id]
@@ -276,14 +276,35 @@ async def run_real_hybrid_retrieval_evaluation(
                                 candidate.selected_for_query_coverage
                             ),
                             selected_as_primary=(
-                                candidate.evidence.chunk_id in eligible_primary_ids
+                                candidate.evidence.chunk_id in selected_primary_ids
                             ),
+                            **_claim_memberships(case, candidate.evidence),
                         )
                     )
                 query_traces.append(
                     HybridQueryTrace(
                         query=query_result.query,
                         lexical_enabled=lexical_enabled[query_index],
+                        dense_candidates=tuple(
+                            HybridChannelCandidateTrace(
+                                chunk_id=item.chunk_id,
+                                document_version_id=item.document_version_id,
+                                page_number=item.page_number,
+                                rank=rank,
+                                **_claim_memberships(case, item),
+                            )
+                            for rank, item in enumerate(channels.dense, start=1)
+                        ),
+                        lexical_candidates=tuple(
+                            HybridChannelCandidateTrace(
+                                chunk_id=item.evidence.chunk_id,
+                                document_version_id=item.evidence.document_version_id,
+                                page_number=item.evidence.page_number,
+                                rank=item.rank,
+                                **_claim_memberships(case, item.evidence),
+                            )
+                            for item in channels.lexical
+                        ),
                         candidates=tuple(candidate_traces),
                     )
                 )
@@ -300,6 +321,19 @@ async def run_real_hybrid_retrieval_evaluation(
                         if item.chunk_id in eligible_primary_ids
                     ),
                     expanded_evidence_chunk_ids=eligible_expanded_ids,
+                    expanded_candidates=tuple(
+                        HybridExpandedCandidateTrace(
+                            chunk_id=item.chunk_id,
+                            document_version_id=item.document_version_id,
+                            page_number=item.page_number,
+                            cosine_score=item.score,
+                            passed_minimum_score=(
+                                item.score >= settings.retrieval_minimum_score
+                            ),
+                            **_claim_memberships(case, item),
+                        )
+                        for item in hybrid.evidence
+                    ),
                 )
             )
 
@@ -356,6 +390,29 @@ async def run_real_hybrid_retrieval_evaluation(
             regressions=regressions,
         ),
     )
+
+
+def _claim_memberships(
+    case: EvaluationCase,
+    evidence: RetrievedEvidence,
+) -> dict[str, tuple[str, ...]]:
+    observed = ObservedEvidence(
+        chunk_id=evidence.chunk_id,
+        document_version_id=evidence.document_version_id,
+        page_number=evidence.page_number,
+        text=evidence.text,
+    )
+    matches = match_evidence_claims(case.expected.evidence, (observed,))
+    return {
+        "canonical_claim_ids": tuple(
+            item.claim_id for item in matches if item.match_status == "canonical"
+        ),
+        "approved_alternative_claim_ids": tuple(
+            item.claim_id
+            for item in matches
+            if item.match_status == "approved_alternative"
+        ),
+    }
 
 
 async def _run_precomputed_retrieval(

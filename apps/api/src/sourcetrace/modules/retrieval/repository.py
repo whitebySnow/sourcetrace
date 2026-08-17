@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import and_, func, literal_column, or_, select
@@ -16,6 +17,13 @@ from sourcetrace.modules.retrieval.hybrid import (
 from sourcetrace.modules.retrieval.service import RetrievedEvidence
 
 _TEXT_SEARCH_CONFIG: ColumnElement[object] = literal_column("'english'::regconfig")
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalChannelResult:
+    dense: tuple[RetrievedEvidence, ...]
+    lexical: tuple[RankedChannelCandidate[RetrievedEvidence], ...]
+    fused: tuple[FusedChannelCandidate[RetrievedEvidence], ...]
 
 
 class PgVectorRetrievalRepository:
@@ -98,6 +106,23 @@ class PgVectorRetrievalRepository:
         query: str,
         limit: int,
     ) -> list[FusedChannelCandidate[RetrievedEvidence]]:
+        result = await self.search_channels(
+            knowledge_base_id,
+            query_embedding,
+            query=query,
+            limit=limit,
+        )
+        return list(result.fused)
+
+    async def search_channels(
+        self,
+        knowledge_base_id: UUID,
+        query_embedding: Sequence[float],
+        *,
+        query: str,
+        limit: int,
+    ) -> RetrievalChannelResult:
+        """Return bounded raw channels and their production fusion for diagnostics."""
         dense = await self.search_dense(
             knowledge_base_id,
             query_embedding,
@@ -123,12 +148,14 @@ class PgVectorRetrievalRepository:
             if lexical_query is not None
             else ()
         )
-        return list(
-            fuse_ranked_channels(
+        return RetrievalChannelResult(
+            dense=tuple(dense),
+            lexical=tuple(lexical),
+            fused=fuse_ranked_channels(
                 (*dense_channel, *lexical),
                 rank_constant=self._channel_rrf_rank_constant,
                 limit=limit,
-            )
+            ),
         )
 
     async def search_dense(

@@ -267,6 +267,15 @@ candidate 和 observed final evidence 的可靠映射，因此同页邻居 Chunk
 不会把检索不足归因于模型评估。
 来源页选中只是轨迹定位，不等于声明语义已获支持；诊断不能改变 Evidence Decision、Dataset 真值或原 Report 评分。
 
+Retrieval Stage Diagnostics 使用两个分离步骤。`hybrid-retrieval` 在本地 PostgreSQL、固定
+embedding 与 reranker 上重放源 Evaluation Report 最后一轮实际查询，v2 stage report 记录每条查询的
+raw dense、raw lexical、channel fusion、reranker、query coverage、primary selection 与页面扩展轨迹，
+并在运行时用 Dataset 摘录做精确 claim 匹配；序列化结果只保存匹配 claim ID、Chunk UUID、文档版本、
+页码、排名和分数，不保存正文。离线 `diagnose-retrieval-stages` 再校验 Dataset SHA、两个报告 SHA 与
+查询顺序。源 Report 已命中的 claim 保留其原始 match status，最早丢失阶段记为不适用；只有源 Report
+中 `not_matched` 的 claim 才分类到最早不可恢复阶段。stage replay 使用当前固定代码和本地模型重现
+历史输入，不会改写源 Report；缺失 claim 若重放通过，只能记录“未重现”，不能反向修改历史评分。
+
 ## 7. API 契约
 
 - 业务 API 位于 `/api/v1`，健康检查保持在 `/health` 与 `/ready`。

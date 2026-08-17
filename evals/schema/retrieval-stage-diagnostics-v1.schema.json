@@ -1,0 +1,737 @@
+{
+  "$defs": {
+    "EvaluationRunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "code_commit": {
+          "minLength": 1,
+          "title": "Code Commit",
+          "type": "string"
+        },
+        "model_provider": {
+          "minLength": 1,
+          "title": "Model Provider",
+          "type": "string"
+        },
+        "model_name": {
+          "minLength": 1,
+          "title": "Model Name",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minLength": 1,
+          "title": "Workflow Version",
+          "type": "string"
+        },
+        "parser_version": {
+          "minLength": 1,
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "tokenizer": {
+          "minLength": 1,
+          "title": "Tokenizer",
+          "type": "string"
+        },
+        "chunk_size": {
+          "exclusiveMinimum": 0,
+          "title": "Chunk Size",
+          "type": "integer"
+        },
+        "chunk_overlap": {
+          "minimum": 0,
+          "title": "Chunk Overlap",
+          "type": "integer"
+        },
+        "chunking_version": {
+          "minLength": 1,
+          "title": "Chunking Version",
+          "type": "string"
+        },
+        "embedding_provider": {
+          "minLength": 1,
+          "title": "Embedding Provider",
+          "type": "string"
+        },
+        "embedding_model": {
+          "minLength": 1,
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "embedding_revision": {
+          "minLength": 1,
+          "title": "Embedding Revision",
+          "type": "string"
+        },
+        "embedding_dimension": {
+          "exclusiveMinimum": 0,
+          "title": "Embedding Dimension",
+          "type": "integer"
+        },
+        "embedding_version": {
+          "minLength": 1,
+          "title": "Embedding Version",
+          "type": "string"
+        },
+        "retrieval_version": {
+          "minLength": 1,
+          "title": "Retrieval Version",
+          "type": "string"
+        },
+        "retrieval_top_k": {
+          "exclusiveMinimum": 0,
+          "title": "Retrieval Top K",
+          "type": "integer"
+        },
+        "retrieval_page_neighbor_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Retrieval Page Neighbor Count",
+          "type": "integer"
+        },
+        "retrieval_rrf_rank_constant": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieval Rrf Rank Constant"
+        },
+        "retrieval_minimum_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Retrieval Minimum Score",
+          "type": "number"
+        },
+        "retrieval_minimum_evidence": {
+          "exclusiveMinimum": 0,
+          "title": "Retrieval Minimum Evidence",
+          "type": "integer"
+        },
+        "generation_prompt_version": {
+          "minLength": 1,
+          "title": "Generation Prompt Version",
+          "type": "string"
+        },
+        "question_rewrite_prompt_version": {
+          "minLength": 1,
+          "title": "Question Rewrite Prompt Version",
+          "type": "string"
+        },
+        "evidence_assessment_prompt_version": {
+          "minLength": 1,
+          "title": "Evidence Assessment Prompt Version",
+          "type": "string"
+        },
+        "citation_repair_prompt_version": {
+          "minLength": 1,
+          "title": "Citation Repair Prompt Version",
+          "type": "string"
+        },
+        "provider_connect_timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Connect Timeout Seconds"
+        },
+        "provider_read_timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Read Timeout Seconds"
+        },
+        "provider_request_timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Request Timeout Seconds"
+        },
+        "provider_operation_deadline_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Operation Deadline Seconds"
+        }
+      },
+      "required": [
+        "code_commit",
+        "model_provider",
+        "model_name",
+        "workflow_version",
+        "parser_version",
+        "tokenizer",
+        "chunk_size",
+        "chunk_overlap",
+        "chunking_version",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_revision",
+        "embedding_dimension",
+        "embedding_version",
+        "retrieval_version",
+        "retrieval_top_k",
+        "retrieval_minimum_score",
+        "retrieval_minimum_evidence",
+        "generation_prompt_version",
+        "question_rewrite_prompt_version",
+        "evidence_assessment_prompt_version",
+        "citation_repair_prompt_version"
+      ],
+      "title": "EvaluationRunMetadata",
+      "type": "object"
+    },
+    "EvidenceMatchStatus": {
+      "enum": [
+        "canonical",
+        "approved_alternative",
+        "not_matched"
+      ],
+      "type": "string"
+    },
+    "HybridRetrievalRunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "code_commit": {
+          "minLength": 1,
+          "title": "Code Commit",
+          "type": "string"
+        },
+        "dataset_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Dataset Sha256",
+          "type": "string"
+        },
+        "query_plan_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Query Plan Sha256",
+          "type": "string"
+        },
+        "retrieval_version": {
+          "minLength": 1,
+          "title": "Retrieval Version",
+          "type": "string"
+        },
+        "planner_version": {
+          "minLength": 1,
+          "title": "Planner Version",
+          "type": "string"
+        },
+        "parser_version": {
+          "minLength": 1,
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "chunking_version": {
+          "minLength": 1,
+          "title": "Chunking Version",
+          "type": "string"
+        },
+        "embedding_provider": {
+          "minLength": 1,
+          "title": "Embedding Provider",
+          "type": "string"
+        },
+        "embedding_model": {
+          "minLength": 1,
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "embedding_revision": {
+          "minLength": 1,
+          "title": "Embedding Revision",
+          "type": "string"
+        },
+        "embedding_version": {
+          "minLength": 1,
+          "title": "Embedding Version",
+          "type": "string"
+        },
+        "embedding_device": {
+          "minLength": 1,
+          "title": "Embedding Device",
+          "type": "string"
+        },
+        "reranker_provider": {
+          "minLength": 1,
+          "title": "Reranker Provider",
+          "type": "string"
+        },
+        "reranker_model": {
+          "minLength": 1,
+          "title": "Reranker Model",
+          "type": "string"
+        },
+        "reranker_revision": {
+          "minLength": 1,
+          "title": "Reranker Revision",
+          "type": "string"
+        },
+        "reranker_weight_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reranker Weight Sha256",
+          "type": "string"
+        },
+        "reranker_version": {
+          "minLength": 1,
+          "title": "Reranker Version",
+          "type": "string"
+        },
+        "reranker_device": {
+          "minLength": 1,
+          "title": "Reranker Device",
+          "type": "string"
+        },
+        "lexical_version": {
+          "const": "postgres-english-or-phrase-v1",
+          "default": "postgres-english-or-phrase-v1",
+          "title": "Lexical Version",
+          "type": "string"
+        },
+        "text_search_configuration": {
+          "const": "english",
+          "default": "english",
+          "title": "Text Search Configuration",
+          "type": "string"
+        },
+        "phrase_weight": {
+          "minimum": 0,
+          "title": "Phrase Weight",
+          "type": "number"
+        },
+        "channel_rrf_rank_constant": {
+          "exclusiveMinimum": 0,
+          "title": "Channel Rrf Rank Constant",
+          "type": "integer"
+        },
+        "channel_candidate_limit": {
+          "exclusiveMinimum": 0,
+          "title": "Channel Candidate Limit",
+          "type": "integer"
+        },
+        "retrieval_top_k": {
+          "exclusiveMinimum": 0,
+          "maximum": 8,
+          "title": "Retrieval Top K",
+          "type": "integer"
+        },
+        "retrieval_minimum_score": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Retrieval Minimum Score",
+          "type": "number"
+        },
+        "retrieval_page_neighbor_count": {
+          "minimum": 0,
+          "title": "Retrieval Page Neighbor Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code_commit",
+        "dataset_sha256",
+        "query_plan_sha256",
+        "retrieval_version",
+        "planner_version",
+        "parser_version",
+        "chunking_version",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_revision",
+        "embedding_version",
+        "embedding_device",
+        "reranker_provider",
+        "reranker_model",
+        "reranker_revision",
+        "reranker_weight_sha256",
+        "reranker_version",
+        "reranker_device",
+        "phrase_weight",
+        "channel_rrf_rank_constant",
+        "channel_candidate_limit",
+        "retrieval_top_k",
+        "retrieval_minimum_score",
+        "retrieval_page_neighbor_count"
+      ],
+      "title": "HybridRetrievalRunMetadata",
+      "type": "object"
+    },
+    "RetrievalStageCaseDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "primary_mechanism": {
+          "$ref": "#/$defs/RetrievalStageFailureMechanism"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/RetrievalStageClaimDiagnostic"
+          },
+          "minItems": 1,
+          "title": "Claims",
+          "type": "array"
+        }
+      },
+      "required": [
+        "case_id",
+        "primary_mechanism",
+        "claims"
+      ],
+      "title": "RetrievalStageCaseDiagnostic",
+      "type": "object"
+    },
+    "RetrievalStageClaimDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "expected": {
+          "$ref": "#/$defs/SanitizedEvidenceLocation"
+        },
+        "source_match_status": {
+          "$ref": "#/$defs/EvidenceMatchStatus"
+        },
+        "dense_hits": {
+          "items": {
+            "$ref": "#/$defs/RetrievalStageRankedHit"
+          },
+          "title": "Dense Hits",
+          "type": "array"
+        },
+        "lexical_hits": {
+          "items": {
+            "$ref": "#/$defs/RetrievalStageRankedHit"
+          },
+          "title": "Lexical Hits",
+          "type": "array"
+        },
+        "channel_fusion_hits": {
+          "items": {
+            "$ref": "#/$defs/RetrievalStageFusedHit"
+          },
+          "title": "Channel Fusion Hits",
+          "type": "array"
+        },
+        "expanded_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Expanded Chunk Ids",
+          "type": "array"
+        },
+        "final_chunk_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Final Chunk Ids",
+          "type": "array"
+        },
+        "earliest_loss_stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetrievalStageFailureMechanism"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "claim_id",
+        "expected",
+        "source_match_status",
+        "dense_hits",
+        "lexical_hits",
+        "channel_fusion_hits",
+        "expanded_chunk_ids",
+        "final_chunk_ids",
+        "earliest_loss_stage"
+      ],
+      "title": "RetrievalStageClaimDiagnostic",
+      "type": "object"
+    },
+    "RetrievalStageDiagnosticsSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "failed_answerable_cases": {
+          "minimum": 0,
+          "title": "Failed Answerable Cases",
+          "type": "integer"
+        },
+        "channel_recall": {
+          "minimum": 0,
+          "title": "Channel Recall",
+          "type": "integer"
+        },
+        "channel_fusion": {
+          "minimum": 0,
+          "title": "Channel Fusion",
+          "type": "integer"
+        },
+        "primary_selection": {
+          "minimum": 0,
+          "title": "Primary Selection",
+          "type": "integer"
+        },
+        "page_expansion": {
+          "minimum": 0,
+          "title": "Page Expansion",
+          "type": "integer"
+        },
+        "minimum_score": {
+          "minimum": 0,
+          "title": "Minimum Score",
+          "type": "integer"
+        },
+        "replay_did_not_reproduce": {
+          "minimum": 0,
+          "title": "Replay Did Not Reproduce",
+          "type": "integer"
+        },
+        "mixed": {
+          "minimum": 0,
+          "title": "Mixed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "failed_answerable_cases",
+        "channel_recall",
+        "channel_fusion",
+        "primary_selection",
+        "page_expansion",
+        "minimum_score",
+        "replay_did_not_reproduce",
+        "mixed"
+      ],
+      "title": "RetrievalStageDiagnosticsSummary",
+      "type": "object"
+    },
+    "RetrievalStageFailureMechanism": {
+      "enum": [
+        "channel_recall",
+        "channel_fusion",
+        "primary_selection",
+        "page_expansion",
+        "minimum_score",
+        "replay_did_not_reproduce",
+        "mixed"
+      ],
+      "type": "string"
+    },
+    "RetrievalStageFusedHit": {
+      "additionalProperties": false,
+      "properties": {
+        "query_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Query Sha256",
+          "type": "string"
+        },
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "channel_fused_rank": {
+          "exclusiveMinimum": 0,
+          "title": "Channel Fused Rank",
+          "type": "integer"
+        },
+        "reranked_rank": {
+          "exclusiveMinimum": 0,
+          "title": "Reranked Rank",
+          "type": "integer"
+        },
+        "selected_for_query_coverage": {
+          "title": "Selected For Query Coverage",
+          "type": "boolean"
+        },
+        "selected_as_primary": {
+          "title": "Selected As Primary",
+          "type": "boolean"
+        },
+        "match_status": {
+          "enum": [
+            "canonical",
+            "approved_alternative"
+          ],
+          "title": "Match Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query_sha256",
+        "chunk_id",
+        "channel_fused_rank",
+        "reranked_rank",
+        "selected_for_query_coverage",
+        "selected_as_primary",
+        "match_status"
+      ],
+      "title": "RetrievalStageFusedHit",
+      "type": "object"
+    },
+    "RetrievalStageRankedHit": {
+      "additionalProperties": false,
+      "properties": {
+        "query_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Query Sha256",
+          "type": "string"
+        },
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "rank": {
+          "exclusiveMinimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "match_status": {
+          "enum": [
+            "canonical",
+            "approved_alternative"
+          ],
+          "title": "Match Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query_sha256",
+        "chunk_id",
+        "rank",
+        "match_status"
+      ],
+      "title": "RetrievalStageRankedHit",
+      "type": "object"
+    },
+    "SanitizedEvidenceLocation": {
+      "additionalProperties": false,
+      "properties": {
+        "document_version_id": {
+          "format": "uuid",
+          "title": "Document Version Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "document_version_id",
+        "page_number"
+      ],
+      "title": "SanitizedEvidenceLocation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "dataset_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Dataset Sha256",
+      "type": "string"
+    },
+    "source_report_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Report Sha256",
+      "type": "string"
+    },
+    "stage_report_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Stage Report Sha256",
+      "type": "string"
+    },
+    "source_metadata": {
+      "$ref": "#/$defs/EvaluationRunMetadata"
+    },
+    "stage_metadata": {
+      "$ref": "#/$defs/HybridRetrievalRunMetadata"
+    },
+    "summary": {
+      "$ref": "#/$defs/RetrievalStageDiagnosticsSummary"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/RetrievalStageCaseDiagnostic"
+      },
+      "title": "Cases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "dataset_sha256",
+    "source_report_sha256",
+    "stage_report_sha256",
+    "source_metadata",
+    "stage_metadata",
+    "summary",
+    "cases"
+  ],
+  "title": "RetrievalStageDiagnosticsReport",
+  "type": "object"
+}

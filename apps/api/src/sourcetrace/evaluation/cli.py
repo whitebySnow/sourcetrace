@@ -12,6 +12,7 @@ from sourcetrace.evaluation.citation_diagnostics import build_citation_diagnosti
 from sourcetrace.evaluation.dataset import (
     load_dataset,
     load_hybrid_query_plan,
+    load_hybrid_retrieval_report,
     load_judgments,
     load_report,
 )
@@ -26,6 +27,9 @@ from sourcetrace.evaluation.models import (
     EvaluationRunMetadata,
 )
 from sourcetrace.evaluation.retrieval_diagnostics import build_retrieval_diagnostics
+from sourcetrace.evaluation.retrieval_stage_diagnostics import (
+    build_retrieval_stage_diagnostics,
+)
 from sourcetrace.evaluation.review import apply_judgments
 
 
@@ -77,6 +81,11 @@ def _parser() -> argparse.ArgumentParser:
         diagnose.add_argument("--dataset", type=Path, required=True)
         diagnose.add_argument("--report", type=Path, required=True)
         diagnose.add_argument("--output", type=Path, required=True)
+    retrieval_stages = subparsers.add_parser("diagnose-retrieval-stages")
+    retrieval_stages.add_argument("--dataset", type=Path, required=True)
+    retrieval_stages.add_argument("--report", type=Path, required=True)
+    retrieval_stages.add_argument("--stage-report", type=Path, required=True)
+    retrieval_stages.add_argument("--output", type=Path, required=True)
     rerank = subparsers.add_parser("rerank")
     rerank.add_argument("--dataset", type=Path, required=True)
     rerank.add_argument("--report", type=Path, required=True)
@@ -216,6 +225,21 @@ def _run_diagnostics(
     _write_json_artifact(args.output, diagnostics)
 
 
+def _run_retrieval_stage_diagnostics(args: argparse.Namespace) -> None:
+    dataset_bytes = args.dataset.read_bytes()
+    source_report_bytes = args.report.read_bytes()
+    stage_report_bytes = args.stage_report.read_bytes()
+    diagnostics = build_retrieval_stage_diagnostics(
+        load_dataset(args.dataset),
+        load_report(args.report),
+        load_hybrid_retrieval_report(args.stage_report),
+        dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(),
+        source_report_sha256=hashlib.sha256(source_report_bytes).hexdigest(),
+        stage_report_sha256=hashlib.sha256(stage_report_bytes).hexdigest(),
+    )
+    _write_json_artifact(args.output, diagnostics)
+
+
 def _write_json_artifact(output: Path, artifact: _JsonArtifact) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(artifact.model_dump_json(indent=2) + "\n", encoding="utf-8")
@@ -233,6 +257,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.mode in _DIAGNOSTIC_BUILDERS:
         _run_diagnostics(args, _DIAGNOSTIC_BUILDERS[args.mode])
+        return 0
+    if args.mode == "diagnose-retrieval-stages":
+        _run_retrieval_stage_diagnostics(args)
         return 0
     if args.mode == "rerank":
         asyncio.run(_run_rerank(args))

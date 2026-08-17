@@ -14,6 +14,7 @@ from sourcetrace.evaluation.models import (
     HybridQueryPlanFixture,
     HybridRetrievalEvaluationReport,
     RerankerEvaluationReport,
+    RetrievalStageDiagnosticsReport,
 )
 from sourcetrace.evaluation.real import RealEvaluationFailure
 
@@ -482,7 +483,7 @@ def test_repository_failure_report_schema_matches_model() -> None:
     ("filename", "model"),
     [
         ("hybrid-query-plan-v1.schema.json", HybridQueryPlanFixture),
-        ("hybrid-retrieval-report-v1.schema.json", HybridRetrievalEvaluationReport),
+        ("hybrid-retrieval-report-v2.schema.json", HybridRetrievalEvaluationReport),
     ],
 )
 def test_repository_hybrid_evaluation_schemas_match_models(
@@ -493,6 +494,17 @@ def test_repository_hybrid_evaluation_schemas_match_models(
     schema = json.loads((root / "evals/schema" / filename).read_text(encoding="utf-8"))
 
     assert schema == model.model_json_schema()
+
+
+def test_repository_retrieval_stage_diagnostics_schema_matches_model() -> None:
+    root = Path(__file__).resolve().parents[4]
+    schema = json.loads(
+        (root / "evals/schema/retrieval-stage-diagnostics-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert schema == RetrievalStageDiagnosticsReport.model_json_schema()
 
 
 def test_repository_fixture_replays_all_four_categories(tmp_path) -> None:

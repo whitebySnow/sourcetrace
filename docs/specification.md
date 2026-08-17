@@ -352,6 +352,14 @@ LangGraph 是首版 Agent 编排核心。固定工作流为：
 - 真实工作流新生成的 Evaluation Report 必须为 observed evidence 记录 Chunk UUID；迁移前报告和不执行
   检索的 deterministic fake fixture 可为 null，且不得为其伪造 Chunk 身份。诊断只能使用 Report 内的
   query candidate 或 observed evidence 身份定位选中 Chunk，不得查询可变数据库或从正文猜测历史身份。
+- Retrieval 失败必须能通过本地 PostgreSQL、固定 embedding/reranker 和旧报告最后一轮实际查询生成
+  独立 stage replay，再离线生成绑定 Dataset、源 Evaluation Report 和 stage replay 三个 SHA-256 的
+  Retrieval Stage Diagnostics Report。诊断逐 claim 记录 dense、lexical、通道融合、reranker 排名、
+  query coverage、primary selection、页面扩展和最低分门禁，只保存 case/claim ID、Chunk UUID、不可变
+  文档版本、页码、排名、布尔选择状态和查询 SHA-256，不保存问题、查询原文、答案、提示词或证据正文。
+  诊断必须保留源 Report 的逐 claim match status；已命中的 claim 不参与失败机制统计，只有
+  `not_matched` claim 才能被分类到丢失阶段或“重放未复现”。
+  stage replay 的查询与源报告最后一轮不完全一致时必须失败，不能用不同查询的结果解释历史失败。
 - 所有结果绑定评测集、配置和代码版本；未实际运行不得填写指标。
 - 真实评测在供应商或模型基础设施错误后终止时，只能输出独立的去敏失败工件。该工件记录
   数据集快照、已知运行元数据、失败 case ID、工作流阶段和安全错误分类，不含题目、回答、

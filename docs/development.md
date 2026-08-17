@@ -240,6 +240,11 @@ BGE-M3、pgvector 和 `AnswerWorkflow`，但检索只允许数据集声明的不
 或诊断命令。真实运行不覆盖已有正常报告，必须使用新的输出路径，避免旧结果被误读为本轮结果。
 真实运行同样不覆盖该输出路径配对的既有失败工件。完整参数和数据审核规则见 `evals/README.md`。
 
+检索阶段诊断先用 `hybrid-retrieval` 在本地数据库与固定模型上重放源报告最后一轮查询，再运行
+`pnpm eval:diagnose-retrieval-stages` 离线绑定 Dataset、源报告和 stage report。前一步不调用 LLM
+供应商但会加载本地 embedding/reranker；后一步不连接数据库、模型或网络。v2 hybrid report 和
+Retrieval Stage Diagnostics Report 分别使用独立 JSON Schema，旧 v1 hybrid report 保持历史语义。
+
 Windows 宿主机上的 CPU PyTorch 原生算子发生异常时，真实评测应使用 Compose 的 Linux CPU
 镜像，避免把宿主机崩溃误判为供应商或 RAG 失败。下面的脚本会重建当前 API 镜像、把宿主机
 `output/` 显式挂载到容器，并保留 CLI 的正常报告/去敏失败工件互斥规则：

@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "dataset_id": "agentic-rag-foundations",
+  "dataset_version": "1.2.0",
+  "planner_version": "issue77-final-retrieval-round-v1",
+  "cases": [
+    {
+      "case_id": "ARF-023",
+      "additional_queries": [
+        "Self-RAG can still produce outputs not fully supported by sources",
+        "Self-RAG's claim about citation support guarantee"
+      ]
+    },
+    {
+      "case_id": "ARF-024",
+      "additional_queries": [
+        "RAG 2020 retrieves top-k documents once before decoder generation",
+        "Self-RAG adaptive retrieval trigger token during generation"
+      ]
+    }
+  ]
+}

@@ -531,6 +531,63 @@ class EvidenceAssessmentDiagnosticsReport(StrictModel):
     cases: tuple[EvidenceAssessmentCaseDiagnostic, ...]
 
 
+type RetrievalStageFailureMechanism = Literal[
+    "channel_recall",
+    "channel_fusion",
+    "primary_selection",
+    "page_expansion",
+    "minimum_score",
+    "replay_did_not_reproduce",
+    "mixed",
+]
+
+
+class RetrievalStageRankedHit(StrictModel):
+    query_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_id: UUID
+    rank: int = Field(gt=0)
+    match_status: Literal["canonical", "approved_alternative"]
+
+
+class RetrievalStageFusedHit(StrictModel):
+    query_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_id: UUID
+    channel_fused_rank: int = Field(gt=0)
+    reranked_rank: int = Field(gt=0)
+    selected_for_query_coverage: bool
+    selected_as_primary: bool
+    match_status: Literal["canonical", "approved_alternative"]
+
+
+class RetrievalStageClaimDiagnostic(StrictModel):
+    claim_id: str = Field(min_length=1)
+    expected: SanitizedEvidenceLocation
+    source_match_status: EvidenceMatchStatus
+    dense_hits: tuple[RetrievalStageRankedHit, ...]
+    lexical_hits: tuple[RetrievalStageRankedHit, ...]
+    channel_fusion_hits: tuple[RetrievalStageFusedHit, ...]
+    expanded_chunk_ids: tuple[UUID, ...]
+    final_chunk_ids: tuple[UUID, ...]
+    earliest_loss_stage: RetrievalStageFailureMechanism | None
+
+
+class RetrievalStageCaseDiagnostic(StrictModel):
+    case_id: str = Field(min_length=1)
+    primary_mechanism: RetrievalStageFailureMechanism
+    claims: tuple[RetrievalStageClaimDiagnostic, ...] = Field(min_length=1)
+
+
+class RetrievalStageDiagnosticsSummary(StrictModel):
+    failed_answerable_cases: int = Field(ge=0)
+    channel_recall: int = Field(ge=0)
+    channel_fusion: int = Field(ge=0)
+    primary_selection: int = Field(ge=0)
+    page_expansion: int = Field(ge=0)
+    minimum_score: int = Field(ge=0)
+    replay_did_not_reproduce: int = Field(ge=0)
+    mixed: int = Field(ge=0)
+
+
 class HybridQueryPlanCase(StrictModel):
     case_id: str = Field(min_length=1)
     additional_queries: tuple[str, ...] = Field(max_length=2)
@@ -573,6 +630,19 @@ class HybridRetrievalRunMetadata(StrictModel):
     retrieval_page_neighbor_count: int = Field(ge=0)
 
 
+class RetrievalStageDiagnosticsReport(StrictModel):
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    stage_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_metadata: EvaluationRunMetadata
+    stage_metadata: HybridRetrievalRunMetadata
+    summary: RetrievalStageDiagnosticsSummary
+    cases: tuple[RetrievalStageCaseDiagnostic, ...]
+
+
 class HybridCandidateTrace(StrictModel):
     chunk_id: UUID
     document_version_id: UUID
@@ -587,12 +657,35 @@ class HybridCandidateTrace(StrictModel):
     reranked_rank: int = Field(gt=0)
     selected_for_query_coverage: bool
     selected_as_primary: bool
+    canonical_claim_ids: tuple[str, ...] = ()
+    approved_alternative_claim_ids: tuple[str, ...] = ()
+
+
+class HybridChannelCandidateTrace(StrictModel):
+    chunk_id: UUID
+    document_version_id: UUID
+    page_number: int = Field(gt=0)
+    rank: int = Field(gt=0)
+    canonical_claim_ids: tuple[str, ...] = ()
+    approved_alternative_claim_ids: tuple[str, ...] = ()
 
 
 class HybridQueryTrace(StrictModel):
     query: str = Field(min_length=1)
     lexical_enabled: bool
+    dense_candidates: tuple[HybridChannelCandidateTrace, ...]
+    lexical_candidates: tuple[HybridChannelCandidateTrace, ...]
     candidates: tuple[HybridCandidateTrace, ...]
+
+
+class HybridExpandedCandidateTrace(StrictModel):
+    chunk_id: UUID
+    document_version_id: UUID
+    page_number: int = Field(gt=0)
+    cosine_score: float = Field(ge=-1, le=1)
+    passed_minimum_score: bool
+    canonical_claim_ids: tuple[str, ...] = ()
+    approved_alternative_claim_ids: tuple[str, ...] = ()
 
 
 class HybridRetrievalCaseResult(StrictModel):
@@ -603,6 +696,7 @@ class HybridRetrievalCaseResult(StrictModel):
     query_traces: tuple[HybridQueryTrace, ...]
     selected_primary_chunk_ids: tuple[UUID, ...]
     expanded_evidence_chunk_ids: tuple[UUID, ...]
+    expanded_candidates: tuple[HybridExpandedCandidateTrace, ...]
 
 
 class HybridRetrievalSummary(StrictModel):
@@ -614,7 +708,7 @@ class HybridRetrievalSummary(StrictModel):
 
 
 class HybridRetrievalEvaluationReport(StrictModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     dataset_id: str = Field(min_length=1)
     dataset_version: str = Field(min_length=1)
     knowledge_base_id: UUID

@@ -13,6 +13,7 @@ from sourcetrace.evaluation.models import (
     HybridRetrievalEvaluationReport,
     RerankerEvaluationReport,
     RetrievalDiagnosticsReport,
+    RetrievalStageDiagnosticsReport,
 )
 
 
@@ -28,13 +29,16 @@ def main() -> None:
         "failure-report-v1.schema.json": EvaluationFailureReport.model_json_schema(),
         "fixture-observations-v1.schema.json": FixtureObservationSet.model_json_schema(),
         "hybrid-query-plan-v1.schema.json": HybridQueryPlanFixture.model_json_schema(),
-        "hybrid-retrieval-report-v1.schema.json": (
+        "hybrid-retrieval-report-v2.schema.json": (
             HybridRetrievalEvaluationReport.model_json_schema()
         ),
         "judgments-v1.schema.json": EvaluationJudgmentSet.model_json_schema(),
         "report-v1.schema.json": EvaluationReport.model_json_schema(),
         "reranker-report-v1.schema.json": RerankerEvaluationReport.model_json_schema(),
         "retrieval-diagnostics-v1.schema.json": RetrievalDiagnosticsReport.model_json_schema(),
+        "retrieval-stage-diagnostics-v1.schema.json": (
+            RetrievalStageDiagnosticsReport.model_json_schema()
+        ),
     }
     for filename, schema in schemas.items():
         (output_dir / filename).write_text(
