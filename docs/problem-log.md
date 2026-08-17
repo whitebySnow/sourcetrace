@@ -775,3 +775,24 @@ reranker 首位和通道融合首位。策略只读取运行时排名，不读�
 **结论**：`ARF-026` 证明 reranker 第二名可能是多槽位问题不可替代的证据，不能把通道融合首位
 无条件塞入同一个固定名额。后续若继续处理 primary selection，必须先提出能同时保留这些两类
 候选的通用规则，并再次用完整本地差异回放证伪或验证；不得扩大配额、硬编码评测证据或放宽门禁。
+
+## 37. 有界的 reranker 分歧窗口可保留通道首位而不挤掉严重降级的证据
+
+**根因与规则**：上一轮实验说明额外槽位不能无条件用通道融合首位替换 reranker 第二名：严重
+降级的候选会挤掉必要证据。Issue #87 因此仅在通道首位仍处于有界 reranker 分歧窗口内时才
+允许替换第二名。窗口由最终 Top-K 加上两个额外槽位的最大覆盖数计算，默认 Top-8 为第 12 名；
+窗口之外仍保留 reranker 前两名。规则只读取已有通道融合与逐查询 reranker 排名，不读取
+Dataset、case ID、答案或文档正文，也不改变 `4/2/2`、候选池、查询预算、页面邻居或三类门禁。
+
+**验证**：提交 `502811c071c247d509ba079628428b3af9a840c7` 在 Dataset `1.2.0`、查询计划
+`two-stage-evidence-slots-v6`、本地 PostgreSQL、CPU BGE-M3 与固定
+`BAAI/bge-reranker-v2-m3` 上进行了两次完整 30 题混合检索回放。两份被忽略报告
+`output/evals/issue87-502811c-hybrid-v9{,-repeat}.json` 的 SHA-256 均为
+`ba2e99d7e050fdbaf160f3249d4494b2cdce367b7522b6ec701500b8fbbb8af7`。两次均为 baseline
+26 passed、hybrid 27 passed、3 not applicable；只改善 `ARF-023`，无 regression。报告绑定
+检索版本 `pgvector-hybrid-query-aware-bge-reranker-v9`、Dataset SHA-256
+`99abe02e752bb4bb53d93e9a9ba73c831c63c5348f4d95a47fcb34cb2e04e683` 与查询计划 SHA-256
+`0ac1ca6ff89120710de7a077b25487ad35e66ebcaccd2884c8076e2133a2779c`。
+
+**边界**：这是固定数据集和本地检索轴的可重放结果，不调用供应商、不生成回答、不改写
+Dataset 或既有评测评分，不能表述为端到端或通用产品准确率。后续真实供应商评测仍须独立授权。
