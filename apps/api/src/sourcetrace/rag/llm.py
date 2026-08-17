@@ -286,8 +286,14 @@ def _evidence_assessment_prompt(
                 "metadata for the candidate content. matched_retrieval_queries only explain "
                 "why a candidate was retrieved: use them to group candidates by the requested "
                 "evidence component, but never treat query text as evidence. Before declaring "
-                "insufficiency, check every candidate against each named component in the "
-                "question. For a correctness check, negated claim, or absolute claim, candidate "
+                "insufficiency, complete a candidate-by-candidate closure check in "
+                "candidate_index order. For every named method, term, source, or component in "
+                "the question, independently inspect every candidate's content and source "
+                "identity. Select every candidate that directly supports at least one requested "
+                "component, even if other components remain missing. Do not return an empty "
+                "selection when a candidate directly supports a named component, and do not let "
+                "evidence for one named source substitute for another named source. For a "
+                "correctness check, negated claim, or absolute claim, candidate "
                 "content that explicitly gives a counterexample or limitation is sufficient to "
                 "refute that claim; do not require evidence for both sides. For multi-component "
                 "questions, sufficient may be true only when every requested component is "
@@ -320,6 +326,7 @@ def _evidence_assessment_prompt(
                     "supplemental_query_limit": supplemental_query_limit,
                     "candidates": [
                         {
+                            "candidate_index": index,
                             "chunk_id": item.chunk_id,
                             "document_title": item.document_title,
                             "page_number": item.page_number,
@@ -328,7 +335,7 @@ def _evidence_assessment_prompt(
                             "content": item.content,
                             "score": item.score,
                         }
-                        for item in evidence
+                        for index, item in enumerate(evidence, start=1)
                     ],
                 },
                 ensure_ascii=False,

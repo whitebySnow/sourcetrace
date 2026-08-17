@@ -19,6 +19,7 @@ from sourcetrace.rag.llm import (
 from sourcetrace.rag.ports import (
     CitationValidationFeedback,
     ClaimSupportValidationError,
+    EvidenceDecision,
     RetrievalCandidate,
 )
 
@@ -82,6 +83,28 @@ def _evidence() -> list[RetrievalCandidate]:
         )
     ]
 
+
+def _multi_source_evidence() -> list[RetrievalCandidate]:
+    return [
+        RetrievalCandidate(
+            chunk_id="react-signals",
+            content="ReAct generates reasoning traces and task-specific actions.",
+            score=0.91,
+            citation_id="citation-react",
+            document_title="ReAct.pdf",
+            page_number=1,
+            matched_queries=("intermediate signals",),
+        ),
+        RetrievalCandidate(
+            chunk_id="self-rag-signals",
+            content="Self-RAG reflection tokens signal the need for retrieval.",
+            score=0.9,
+            citation_id="citation-self-rag",
+            document_title="Self-RAG.pdf",
+            page_number=3,
+            matched_queries=("intermediate signals",),
+        ),
+    ]
 
 def _validation_feedback() -> CitationValidationFeedback:
     return CitationValidationFeedback(
@@ -1704,6 +1727,7 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     user_input = json.loads(user_message["content"])
     assert user_input["candidates"][0]["document_title"] == "BGE-M3.pdf"
     assert user_input["candidates"][0]["page_number"] == 7
+    assert user_input["candidates"][0]["candidate_index"] == 1
     assert user_input["candidates"][0]["previously_selected"] is True
     assert user_input["candidates"][0]["matched_retrieval_queries"] == [
         "How are vectors indexed?",
@@ -1722,6 +1746,145 @@ async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None
     assert "never treat query text as evidence" in system_prompt
     assert "explicitly gives a counterexample or limitation" in system_prompt
     assert "every requested component is covered" in system_prompt
+
+
+async def test_evidence_assessor_preserves_multisource_candidate_selection() -> None:
+    captured_candidates: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_input = json.loads(messages[1]["content"])
+        captured_candidates.extend(user_input["candidates"])
+        content = {
+            "sufficient": True,
+            "selected_chunk_ids": ["react-signals", "self-rag-signals"],
+            "supplemental_queries": [],
+        }
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(content)}, "finish_reason": "stop"}
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+        decision = await assessor.assess(
+            question="How do ReAct and Self-RAG use intermediate signals?",
+            queries=("intermediate signals",),
+            evidence=_multi_source_evidence(),
+            supplemental_query_limit=0,
+        )
+
+    assert decision.sufficient is True
+    assert decision.selected_chunk_ids == ("react-signals", "self-rag-signals")
+    assert [item["candidate_index"] for item in captured_candidates] == [1, 2]
+    assert [item["document_title"] for item in captured_candidates] == ["ReAct.pdf", "Self-RAG.pdf"]
+
+
+async def test_evidence_assessor_preserves_direct_evidence_selection() -> None:
+    captured_candidates: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        user_input = json.loads(messages[1]["content"])
+        captured_candidates.extend(user_input["candidates"])
+        content = {
+            "sufficient": True,
+            "selected_chunk_ids": ["bounded-agent"],
+            "supplemental_queries": [],
+        }
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(content)}, "finish_reason": "stop"}
+                ]
+            },
+        )
+
+    evidence = [
+        RetrievalCandidate(
+            chunk_id="bounded-agent",
+            content="Agent workflows must remain bounded.",
+            score=0.9,
+            citation_id="citation-bounded-agent",
+            document_title="Agents.pdf",
+            page_number=2,
+            matched_queries=("why must agent workflows remain bounded",),
+        )
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+        decision = await assessor.assess(
+            question="Why must agent workflows remain bounded?",
+            queries=("why must agent workflows remain bounded",),
+            evidence=evidence,
+            supplemental_query_limit=0,
+        )
+
+    assert decision == EvidenceDecision(True, ("bounded-agent",), ())
+    assert captured_candidates == [
+        {
+            "candidate_index": 1,
+            "chunk_id": "bounded-agent",
+            "document_title": "Agents.pdf",
+            "page_number": 2,
+            "matched_retrieval_queries": ["why must agent workflows remain bounded"],
+            "previously_selected": False,
+            "content": "Agent workflows must remain bounded.",
+            "score": 0.9,
+        }
+    ]
+
+
+async def test_evidence_assessor_keeps_refusal_for_candidates_without_direct_support() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "sufficient": False,
+                                    "selected_chunk_ids": [],
+                                    "supplemental_queries": [],
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    unrelated_evidence = [
+        RetrievalCandidate(
+            chunk_id="unrelated",
+            content="A separate system uses a different storage backend.",
+            score=0.9,
+            citation_id="citation-unrelated",
+            document_title="Other.pdf",
+            page_number=1,
+            matched_queries=("storage backend",),
+        )
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assessor = OpenAICompatibleEvidenceAssessor(_config(), client=client)
+        decision = await assessor.assess(
+            question="How do ReAct and Self-RAG use intermediate signals?",
+            queries=("intermediate signals",),
+            evidence=unrelated_evidence,
+            supplemental_query_limit=0,
+        )
+
+    assert decision == EvidenceDecision(False, (), ())
 
 
 async def test_evidence_assessor_does_not_invite_unsupported_query_associations() -> None:
