@@ -1079,6 +1079,7 @@ async def test_question_planner_uses_only_recent_user_questions() -> None:
                                         {
                                             "query": "Why are BGE-M3 dense vectors normalized?",
                                             "document_title": "BGE-M3.pdf",
+                                            "title_anchor": "BGE-M3",
                                         },
                                     ]
                                 }
@@ -1189,6 +1190,7 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
                 "evidence_group": {
                     "query": refined_queries[title],
                     "document_title": title,
+                    "title_anchor": title.removesuffix(".pdf"),
                 }
             }
         else:
@@ -1197,10 +1199,12 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
                     {
                         "query": "ReAct task-specific environment actions",
                         "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
                     },
                     {
                         "query": "Self-RAG three types of Critique tokens",
                         "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
                     },
                 ]
             }
@@ -1241,6 +1245,7 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
     assert "expected answers" in react_payload
     assert "must differ from the proposed query" in react_payload
     assert "do not satisfy refinement" in react_payload
+    assert "title_anchor" in react_payload
     refinement_messages = refinement_payloads["ReAct.pdf"]["messages"]
     assert isinstance(refinement_messages, list)
     refinement_system_prompt = refinement_messages[0]["content"]
@@ -1248,6 +1253,7 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
     assert '{"evidence_group": {' in refinement_system_prompt
     assert '"query": "Method A distinctive mechanism"' in refinement_system_prompt
     assert '"document_title": "Method A.pdf"' in refinement_system_prompt
+    assert '"title_anchor": "Method A"' in refinement_system_prompt
 
 
 async def test_question_planner_anchors_unassigned_components_to_stable_titles() -> None:
@@ -1264,14 +1270,20 @@ async def test_question_planner_anchors_unassigned_components_to_stable_titles()
             content = (
                 {
                     "evidence_groups": [
-                        {"query": "DPR and BART components", "document_title": "RAG.pdf"},
+                        {
+                            "query": "RAG DPR and BART components",
+                            "document_title": "RAG.pdf",
+                            "title_anchor": "RAG",
+                        },
                         {
                             "query": "ReAct environment actions component",
                             "document_title": "ReAct.pdf",
+                            "title_anchor": "ReAct",
                         },
                         {
                             "query": "Self-RAG critique tokens component",
                             "document_title": "Self-RAG.pdf",
+                            "title_anchor": "Self-RAG",
                         },
                     ]
                 }
@@ -1283,6 +1295,7 @@ async def test_question_planner_anchors_unassigned_components_to_stable_titles()
                 "evidence_group": {
                     "query": proposed["query"] + " source terminology",
                     "document_title": proposed["document_title"],
+                    "title_anchor": proposed["title_anchor"],
                 }
             }
         return httpx.Response(
@@ -1334,6 +1347,7 @@ async def test_question_planner_leaves_ambiguous_components_unanchored() -> None
                     {
                         "query": "Unknown component from ReAct",
                         "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
                     }
                 ]
             }
@@ -1379,6 +1393,7 @@ async def test_question_planner_rejects_title_attribution_with_normalized_chines
                     {
                         "query": "环境动作 属于 ReAct",
                         "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
                     }
                 ]
             }
@@ -1418,10 +1433,15 @@ async def test_question_planner_discards_refinement_that_asserts_title_attributi
         content = (
             {
                 "evidence_groups": [
-                    {"query": "ReAct environment actions", "document_title": "ReAct.pdf"},
+                    {
+                        "query": "ReAct environment actions",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
+                    },
                     {
                         "query": "Self-RAG critique tokens",
                         "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
                     },
                 ]
             }
@@ -1434,6 +1454,7 @@ async def test_question_planner_discards_refinement_that_asserts_title_attributi
                         else "Self-RAG critique token reflection mechanism"
                     ),
                     "document_title": proposed["document_title"],
+                    "title_anchor": proposed["title_anchor"],
                 }
             }
         )
@@ -1470,10 +1491,15 @@ async def test_question_planner_discards_refinement_that_changes_document() -> N
         content = (
             {
                 "evidence_groups": [
-                    {"query": "ReAct actions", "document_title": "ReAct.pdf"},
+                    {
+                        "query": "ReAct actions",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
+                    },
                     {
                         "query": "Self-RAG critique tokens",
                         "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
                     },
                 ]
             }
@@ -1482,6 +1508,7 @@ async def test_question_planner_discards_refinement_that_changes_document() -> N
                 "evidence_group": {
                     "query": f"refined {proposed['query']}",
                     "document_title": "Self-RAG.pdf",
+                    "title_anchor": proposed["title_anchor"],
                 }
             }
         )
@@ -1509,6 +1536,179 @@ async def test_question_planner_discards_refinement_that_changes_document() -> N
     assert proposal.additional_queries == ("refined Self-RAG critique tokens",)
 
 
+async def test_question_planner_discards_refinement_that_drops_title_anchor() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        proposed = json.loads(messages[-1]["content"]).get("proposed_evidence_group")
+        content = (
+            {
+                "evidence_groups": [
+                    {
+                        "query": "ReAct environment actions",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
+                    },
+                    {
+                        "query": "Self-RAG critique tokens",
+                        "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
+                    },
+                ]
+            }
+            if proposed is None
+            else {
+                "evidence_group": (
+                    {
+                        "query": "ReAct environment action semantics",
+                        "document_title": "ReAct.pdf",
+                    }
+                    if proposed["document_title"] == "ReAct.pdf"
+                    else {
+                        "query": "Self-RAG critique token semantics",
+                        "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
+                    }
+                )
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Compare ReAct and Self-RAG components",
+            recent_questions=[],
+            document_titles=["ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == ("Self-RAG critique token semantics",)
+
+
+async def test_question_planner_discards_refinement_that_changes_title_anchor() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        messages = payload["messages"]
+        proposed = json.loads(messages[-1]["content"]).get("proposed_evidence_group")
+        content = (
+            {
+                "evidence_groups": [
+                    {
+                        "query": "ReAct environment actions",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
+                    },
+                    {
+                        "query": "Self-RAG critique tokens",
+                        "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
+                    },
+                ]
+            }
+            if proposed is None
+            else {
+                "evidence_group": (
+                    {
+                        "query": "Act environment action semantics",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "Act",
+                    }
+                    if proposed["document_title"] == "ReAct.pdf"
+                    else {
+                        "query": "Self-RAG critique token semantics",
+                        "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
+                    }
+                )
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="Compare ReAct and Self-RAG components",
+            recent_questions=[],
+            document_titles=["ReAct.pdf", "Self-RAG.pdf"],
+        )
+
+    assert proposal.additional_queries == ("Self-RAG critique token semantics",)
+
+
+async def test_question_planner_corrects_an_invalid_title_anchor() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        content = (
+            {
+                "evidence_groups": [
+                    {
+                        "query": "ReAct environment actions",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "environment",
+                    }
+                ]
+            }
+            if attempts == 1
+            else {
+                "evidence_groups": [
+                    {
+                        "query": "ReAct environment actions",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
+                    }
+                ]
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": json.dumps(content)},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="What does ReAct use to interact with an environment?",
+            recent_questions=[],
+            document_titles=["ReAct.pdf"],
+        )
+
+    assert attempts == 2
+    assert proposal.additional_queries == ("ReAct environment actions",)
+
+
 async def test_question_planner_discards_unchanged_refinement() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
@@ -1518,10 +1718,15 @@ async def test_question_planner_discards_unchanged_refinement() -> None:
         content = (
             {
                 "evidence_groups": [
-                    {"query": "ReAct actions", "document_title": "ReAct.pdf"},
+                    {
+                        "query": "ReAct actions",
+                        "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
+                    },
                     {
                         "query": "Self-RAG critique tokens",
                         "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
                     },
                 ]
             }
@@ -1627,6 +1832,7 @@ async def test_question_planner_corrects_duplicate_document_groups() -> None:
                 "evidence_group": {
                     "query": f"refined {proposed['query']}",
                     "document_title": proposed["document_title"],
+                    "title_anchor": proposed["title_anchor"],
                 }
             }
             return httpx.Response(
@@ -1643,18 +1849,28 @@ async def test_question_planner_corrects_duplicate_document_groups() -> None:
         initial_attempts += 1
         queries = (
             [
-                {"query": "DPR component", "document_title": "RAG.pdf"},
-                {"query": "BART component", "document_title": "RAG.pdf"},
+                {
+                    "query": "RAG DPR component",
+                    "document_title": "RAG.pdf",
+                    "title_anchor": "RAG",
+                },
+                {
+                    "query": "RAG BART component",
+                    "document_title": "RAG.pdf",
+                    "title_anchor": "RAG",
+                },
             ]
             if initial_attempts == 1
             else [
                 {
                     "query": "ReAct task-specific environment actions",
                     "document_title": "ReAct.pdf",
+                    "title_anchor": "ReAct",
                 },
                 {
                     "query": "Self-RAG three types of Critique tokens",
                     "document_title": "Self-RAG.pdf",
+                    "title_anchor": "Self-RAG",
                 },
             ]
         )
@@ -1702,12 +1918,14 @@ async def test_question_planner_discards_persistently_duplicate_document_groups(
                                 {
                                     "evidence_groups": [
                                         {
-                                            "query": "DPR component",
+                                            "query": "RAG DPR component",
                                             "document_title": "RAG.pdf",
+                                            "title_anchor": "RAG",
                                         },
                                         {
-                                            "query": "BART component",
+                                            "query": "RAG BART component",
                                             "document_title": "RAG.pdf",
+                                            "title_anchor": "RAG",
                                         },
                                     ]
                                 }
@@ -1743,6 +1961,7 @@ async def test_question_planner_uses_original_for_first_of_three_evidence_groups
                 "evidence_group": {
                     "query": f"refined {proposed['query']}",
                     "document_title": proposed["document_title"],
+                    "title_anchor": proposed["title_anchor"],
                 }
             }
             if proposed is not None
@@ -1751,14 +1970,17 @@ async def test_question_planner_uses_original_for_first_of_three_evidence_groups
                     {
                         "query": "RAG DPR retriever and BART generator",
                         "document_title": "RAG.pdf",
+                        "title_anchor": "RAG",
                     },
                     {
                         "query": "ReAct task-specific environment actions",
                         "document_title": "ReAct.pdf",
+                        "title_anchor": "ReAct",
                     },
                     {
                         "query": "Self-RAG three types of Critique tokens",
                         "document_title": "Self-RAG.pdf",
+                        "title_anchor": "Self-RAG",
                     },
                 ]
             }
@@ -1806,7 +2028,13 @@ async def test_question_planner_corrects_one_invalid_response() -> None:
                 {"query": "forbidden fourth", "document_title": "Fourth.pdf"},
             ]
             if attempts == 1
-            else [{"query": "grouped first", "document_title": "First.pdf"}]
+            else [
+                {
+                    "query": "First grouped first",
+                    "document_title": "First.pdf",
+                    "title_anchor": "First",
+                }
+            ]
         )
         return httpx.Response(
             200,
@@ -1830,7 +2058,7 @@ async def test_question_planner_corrects_one_invalid_response() -> None:
         )
 
     assert attempts == 2
-    assert proposal.additional_queries == ("grouped first",)
+    assert proposal.additional_queries == ("First grouped first",)
     retry_messages = payloads[1]["messages"]
     assert isinstance(retry_messages, list)
     assert "previous response violated" in retry_messages[-1]["content"]
@@ -1854,8 +2082,9 @@ async def test_question_planner_retries_one_transient_disconnect() -> None:
                                 {
                                     "evidence_groups": [
                                         {
-                                            "query": "standalone expansion",
+                                            "query": "Paper standalone expansion",
                                             "document_title": "Paper.pdf",
+                                            "title_anchor": "Paper",
                                         }
                                     ]
                                 }
@@ -1877,7 +2106,7 @@ async def test_question_planner_retries_one_transient_disconnect() -> None:
         )
 
     assert attempts == 2
-    assert proposal.additional_queries == ("standalone expansion",)
+    assert proposal.additional_queries == ("Paper standalone expansion",)
 
 
 async def test_evidence_assessor_returns_a_structured_bounded_decision() -> None:
