@@ -23,6 +23,7 @@ from sourcetrace.rag.ports import (
     ClaimSupportValidationError,
     ClaimSupportVerifier,
     EvidenceAssessor,
+    QueryPlanningTrace,
     RetrievalCandidate,
 )
 
@@ -195,6 +196,7 @@ class RetrievalRoundTrace:
 @dataclass(frozen=True, slots=True)
 class WorkflowTrace:
     retrieval_plan_version: str | None = None
+    planning: QueryPlanningTrace | None = None
     retrieval_queries: tuple[str, ...] = ()
     retrieval_rounds: tuple[RetrievalRoundTrace, ...] = ()
     assessments: tuple[EvidenceAssessmentTrace, ...] = ()
@@ -205,6 +207,22 @@ class WorkflowTrace:
     def to_payload(self) -> dict[str, object]:
         return {
             "retrieval_plan_version": self.retrieval_plan_version,
+            "planning": (
+                None
+                if self.planning is None
+                else {
+                    "initial_disposition": self.planning.initial_disposition,
+                    "initial_correction_applied": self.planning.initial_correction_applied,
+                    "initial_slot_count": self.planning.initial_slot_count,
+                    "selected_slots": [
+                        {
+                            "title_anchor": slot.title_anchor,
+                            "refinement_disposition": slot.refinement_disposition,
+                        }
+                        for slot in self.planning.selected_slots
+                    ],
+                }
+            ),
             "retrieval_queries": list(self.retrieval_queries),
             "retrieval_rounds": [item.to_payload() for item in self.retrieval_rounds],
             "assessments": [item.to_payload() for item in self.assessments],
@@ -453,6 +471,7 @@ class AnswerWorkflow:
             raise _WorkflowCancellation
         trace = WorkflowTrace(
             retrieval_plan_version=plan.version,
+            planning=plan.planning_trace,
             retrieval_queries=plan.queries,
         )
         await self._record_trace(state["run_id"], trace)

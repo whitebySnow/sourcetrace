@@ -18,6 +18,9 @@ from sourcetrace.rag.ports import (
     ClaimSupportValidationError,
     EvidenceDecision,
     GroundedClaim,
+    QueryPlanningSlotTrace,
+    QueryPlanningTrace,
+    RefinementDisposition,
     RetrievalCandidate,
     RetrievalPlanProposal,
 )
@@ -91,6 +94,12 @@ class _PlannedEvidenceGroup:
     query: str
     document_title: str
     title_anchor: str
+
+
+@dataclass(frozen=True, slots=True)
+class _RefinementResult:
+    group: _PlannedEvidenceGroup | None
+    disposition: RefinementDisposition
 
 
 def _http_timeout(config: OpenAICompatibleConfig) -> httpx.Timeout:
@@ -734,8 +743,22 @@ class OpenAICompatibleQuestionPlanner:
                         if len(selected_groups) < 2:
                             return RetrievalPlanProposal(
                                 additional_queries=tuple(group.query for group in selected_groups),
+                                planning_trace=QueryPlanningTrace(
+                                    initial_disposition=(
+                                        "empty" if not validated else "accepted"
+                                    ),
+                                    initial_correction_applied=attempt == 1,
+                                    initial_slot_count=len(validated),
+                                    selected_slots=tuple(
+                                        QueryPlanningSlotTrace(
+                                            title_anchor=group.title_anchor,
+                                            refinement_disposition="not_required",
+                                        )
+                                        for group in selected_groups
+                                    ),
+                                ),
                             )
-                        refined_groups = await asyncio.gather(
+                        refinement_results = await asyncio.gather(
                             *(
                                 self._refine_group(
                                     question=question,
@@ -748,7 +771,25 @@ class OpenAICompatibleQuestionPlanner:
                         )
                         return RetrievalPlanProposal(
                             additional_queries=tuple(
-                                group.query for group in refined_groups if group is not None
+                                result.group.query
+                                for result in refinement_results
+                                if result.group is not None
+                            ),
+                            planning_trace=QueryPlanningTrace(
+                                initial_disposition="accepted",
+                                initial_correction_applied=attempt == 1,
+                                initial_slot_count=len(validated),
+                                selected_slots=tuple(
+                                    QueryPlanningSlotTrace(
+                                        title_anchor=group.title_anchor,
+                                        refinement_disposition=result.disposition,
+                                    )
+                                    for group, result in zip(
+                                        selected_groups,
+                                        refinement_results,
+                                        strict=True,
+                                    )
+                                ),
                             ),
                         )
                     semantic_violation_count += 1
@@ -771,7 +812,15 @@ class OpenAICompatibleQuestionPlanner:
                         },
                     ]
             if semantic_violation_count == 2:
-                return RetrievalPlanProposal(additional_queries=())
+                return RetrievalPlanProposal(
+                    additional_queries=(),
+                    planning_trace=QueryPlanningTrace(
+                        initial_disposition="rejected",
+                        initial_correction_applied=True,
+                        initial_slot_count=0,
+                        selected_slots=(),
+                    ),
+                )
             raise ValueError
         except (TypeError, ValueError) as error:
             raise LlmProviderError(
@@ -786,7 +835,7 @@ class OpenAICompatibleQuestionPlanner:
         recent_questions: Sequence[str],
         document_titles: Sequence[str],
         proposed_group: _PlannedEvidenceGroup,
-    ) -> _PlannedEvidenceGroup | None:
+    ) -> _RefinementResult:
         try:
             parsed = await _structured_completion(
                 self.config,
@@ -800,13 +849,14 @@ class OpenAICompatibleQuestionPlanner:
                 temperature=0,
             )
         except LlmProviderError:
-            return None
+            return _RefinementResult(group=None, disposition="provider_error")
         if set(parsed) != {"evidence_group"}:
-            return None
-        return _validate_refined_evidence_group(
+            return _RefinementResult(group=None, disposition="invalid_shape")
+        group, disposition = _validate_refined_evidence_group(
             parsed["evidence_group"],
             proposed_group=proposed_group,
         )
+        return _RefinementResult(group=group, disposition=disposition)
 
 
 def _validate_planned_evidence_groups(
@@ -889,30 +939,35 @@ def _validate_refined_evidence_group(
     value: object,
     *,
     proposed_group: _PlannedEvidenceGroup,
-) -> _PlannedEvidenceGroup | None:
+) -> tuple[_PlannedEvidenceGroup | None, RefinementDisposition]:
     if not isinstance(value, dict) or set(value) != {
         "query",
         "document_title",
         "title_anchor",
     }:
-        return None
+        return None, "invalid_shape"
     query = value["query"]
     document_title = value["document_title"]
     title_anchor = value["title_anchor"]
-    if (
-        not isinstance(query, str)
-        or not query.strip()
-        or document_title != proposed_group.document_title
-        or title_anchor != proposed_group.title_anchor
-        or not _is_valid_title_anchor(title_anchor, proposed_group.document_title, query)
-        or query.strip().casefold() == proposed_group.query.casefold()
-        or _contains_title_attribution(query, proposed_group.document_title)
-    ):
-        return None
-    return _PlannedEvidenceGroup(
-        query=query.strip(),
-        document_title=proposed_group.document_title,
-        title_anchor=proposed_group.title_anchor,
+    if not isinstance(query, str) or not query.strip():
+        return None, "invalid_shape"
+    if document_title != proposed_group.document_title:
+        return None, "document_changed"
+    if title_anchor != proposed_group.title_anchor:
+        return None, "anchor_changed"
+    if not _is_valid_title_anchor(title_anchor, proposed_group.document_title, query):
+        return None, "anchor_invalid"
+    if query.strip().casefold() == proposed_group.query.casefold():
+        return None, "unchanged_query"
+    if _contains_title_attribution(query, proposed_group.document_title):
+        return None, "title_attribution"
+    return (
+        _PlannedEvidenceGroup(
+            query=query.strip(),
+            document_title=proposed_group.document_title,
+            title_anchor=proposed_group.title_anchor,
+        ),
+        "accepted",
     )
 
 

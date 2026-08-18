@@ -9,7 +9,12 @@ from sourcetrace.modules.retrieval.service import (
     RetrievalResult,
     RetrievedEvidence,
 )
-from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
+from sourcetrace.rag.ports import (
+    EvidenceDecision,
+    QueryPlanningSlotTrace,
+    QueryPlanningTrace,
+    RetrievalCandidate,
+)
 from sourcetrace.rag.workflow import AnswerWorkflow, WorkflowRequest, WorkflowTrace
 from tests.helpers import CitationPreservingClaimSupportVerifier, PreserveOrderReranker
 
@@ -145,6 +150,15 @@ async def test_initial_plan_uses_the_shared_extra_query_budget() -> None:
         RetrievalPlan(
             version="bounded-multi-query-v1",
             queries=("original", "expansion one", "expansion two"),
+            planning_trace=QueryPlanningTrace(
+                initial_disposition="accepted",
+                initial_correction_applied=False,
+                initial_slot_count=3,
+                selected_slots=(
+                    QueryPlanningSlotTrace("ReAct", "accepted"),
+                    QueryPlanningSlotTrace("Self-RAG", "anchor_changed"),
+                ),
+            ),
         ),
         evidence,
     )
@@ -169,6 +183,19 @@ async def test_initial_plan_uses_the_shared_extra_query_budget() -> None:
     assert assessor.queries == [("original", "expansion one", "expansion two")]
     assert events[-1].type == "refused"
     assert control.traces[-1].retrieval_plan_version == "bounded-multi-query-v1"
+    assert control.traces[-1].planning is not None
+    assert control.traces[-1].planning.selected_slots[1].refinement_disposition == (
+        "anchor_changed"
+    )
+    assert control.traces[-1].to_payload()["planning"] == {
+        "initial_disposition": "accepted",
+        "initial_correction_applied": False,
+        "initial_slot_count": 3,
+        "selected_slots": [
+            {"title_anchor": "ReAct", "refinement_disposition": "accepted"},
+            {"title_anchor": "Self-RAG", "refinement_disposition": "anchor_changed"},
+        ],
+    }
     assert len(control.traces[-1].retrieval_rounds) == 1
     candidate_trace = control.traces[-1].to_payload()["retrieval_rounds"][0][
         "query_results"

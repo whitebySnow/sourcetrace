@@ -156,8 +156,31 @@ class WorkflowCitationValidationTrace(BaseModel):
     unknown_label_unit_indices: list[int] = Field(default_factory=list)
 
 
+class WorkflowPlanningSlotTrace(BaseModel):
+    title_anchor: str = Field(min_length=3, max_length=255)
+    refinement_disposition: Literal[
+        "not_required",
+        "accepted",
+        "provider_error",
+        "invalid_shape",
+        "document_changed",
+        "anchor_changed",
+        "anchor_invalid",
+        "unchanged_query",
+        "title_attribution",
+    ]
+
+
+class WorkflowPlanningTrace(BaseModel):
+    initial_disposition: Literal["empty", "accepted", "rejected"]
+    initial_correction_applied: bool
+    initial_slot_count: int = Field(ge=0, le=3)
+    selected_slots: list[WorkflowPlanningSlotTrace] = Field(max_length=2)
+
+
 class AnswerWorkflowTrace(BaseModel):
     retrieval_plan_version: str | None = None
+    planning: WorkflowPlanningTrace | None = None
     retrieval_queries: list[str] = Field(default_factory=list)
     retrieval_rounds: list[WorkflowRetrievalRoundTrace] = Field(default_factory=list)
     assessments: list[WorkflowEvidenceAssessmentTrace] = Field(default_factory=list)

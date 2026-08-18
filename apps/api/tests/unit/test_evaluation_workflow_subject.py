@@ -17,7 +17,12 @@ from sourcetrace.modules.retrieval.service import (
     RetrievedEvidence,
 )
 from sourcetrace.rag.llm import LlmProviderError
-from sourcetrace.rag.ports import EvidenceDecision, RetrievalCandidate
+from sourcetrace.rag.ports import (
+    EvidenceDecision,
+    QueryPlanningSlotTrace,
+    QueryPlanningTrace,
+    RetrievalCandidate,
+)
 from sourcetrace.rag.workflow import AnswerWorkflow
 from tests.helpers import CitationPreservingClaimSupportVerifier, PreserveOrderReranker
 
@@ -33,7 +38,19 @@ class StaticRetrieval:
         question: str,
         recent_questions: Sequence[str],
     ) -> RetrievalPlan:
-        return RetrievalPlan("bounded-multi-query-v1", (question,))
+        return RetrievalPlan(
+            "bounded-multi-query-v1",
+            (question,),
+            QueryPlanningTrace(
+                initial_disposition="accepted",
+                initial_correction_applied=True,
+                initial_slot_count=2,
+                selected_slots=(
+                    QueryPlanningSlotTrace("ReAct", "accepted"),
+                    QueryPlanningSlotTrace("Self-RAG", "anchor_changed"),
+                ),
+            ),
+        )
 
     async def search(
         self,
@@ -231,6 +248,12 @@ async def test_workflow_subject_records_trace_for_retrieved_but_refused_evidence
     assert candidate.score == 0.9
     assert candidate.raw_rank == 1
     assert observation.decision_trace.retrieval_plan_version == ("bounded-multi-query-v1")
+    assert observation.decision_trace.planning is not None
+    assert observation.decision_trace.planning.initial_correction_applied is True
+    assert [
+        item.refinement_disposition
+        for item in observation.decision_trace.planning.selected_slots
+    ] == ["accepted", "anchor_changed"]
     retrieval_round = observation.decision_trace.retrieval_rounds[0]
     assert retrieval_round.round_number == 1
     assert retrieval_round.queries == (case.question,)

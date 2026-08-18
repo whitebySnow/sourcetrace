@@ -45,9 +45,38 @@ class ClaimSupportValidationError(Exception):
     """Raised when a claim-support decision cannot be safely used."""
 
 
+type InitialPlanDisposition = Literal["empty", "accepted", "rejected"]
+type RefinementDisposition = Literal[
+    "not_required",
+    "accepted",
+    "provider_error",
+    "invalid_shape",
+    "document_changed",
+    "anchor_changed",
+    "anchor_invalid",
+    "unchanged_query",
+    "title_attribution",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class QueryPlanningSlotTrace:
+    title_anchor: str
+    refinement_disposition: RefinementDisposition
+
+
+@dataclass(frozen=True, slots=True)
+class QueryPlanningTrace:
+    initial_disposition: InitialPlanDisposition
+    initial_correction_applied: bool
+    initial_slot_count: int
+    selected_slots: tuple[QueryPlanningSlotTrace, ...]
+
+
 @dataclass(frozen=True, slots=True)
 class RetrievalPlanProposal:
     additional_queries: tuple[str, ...]
+    planning_trace: QueryPlanningTrace | None = None
 
 
 @dataclass(frozen=True, slots=True)

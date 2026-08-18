@@ -204,9 +204,32 @@ class ObservedRetrievalRoundTrace(StrictModel):
     reranker: ObservedRerankerTrace | None = None
 
 
+class ObservedPlanningSlotTrace(StrictModel):
+    title_anchor: str = Field(min_length=3, max_length=255)
+    refinement_disposition: Literal[
+        "not_required",
+        "accepted",
+        "provider_error",
+        "invalid_shape",
+        "document_changed",
+        "anchor_changed",
+        "anchor_invalid",
+        "unchanged_query",
+        "title_attribution",
+    ]
+
+
+class ObservedPlanningTrace(StrictModel):
+    initial_disposition: Literal["empty", "accepted", "rejected"]
+    initial_correction_applied: bool
+    initial_slot_count: int = Field(ge=0, le=3)
+    selected_slots: tuple[ObservedPlanningSlotTrace, ...] = Field(max_length=2)
+
+
 class EvaluationDecisionTrace(StrictModel):
     retrievals: tuple[ObservedRetrieval, ...]
     retrieval_plan_version: str | None = None
+    planning: ObservedPlanningTrace | None = None
     retrieval_rounds: tuple[ObservedRetrievalRoundTrace, ...] = ()
     assessments: tuple[ObservedEvidenceAssessment, ...]
     citation_validations: tuple[ObservedCitationValidation, ...]

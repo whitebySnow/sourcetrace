@@ -1774,6 +1774,16 @@
             ],
             "title": "Retrieval Plan Version"
           },
+          "planning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowPlanningTrace"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "retrieval_queries": {
             "items": {
               "type": "string"
@@ -2699,6 +2709,76 @@
           "selected_as_primary"
         ],
         "title": "WorkflowFusedCandidateTrace"
+      },
+      "WorkflowPlanningSlotTrace": {
+        "properties": {
+          "title_anchor": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Title Anchor"
+          },
+          "refinement_disposition": {
+            "type": "string",
+            "enum": [
+              "not_required",
+              "accepted",
+              "provider_error",
+              "invalid_shape",
+              "document_changed",
+              "anchor_changed",
+              "anchor_invalid",
+              "unchanged_query",
+              "title_attribution"
+            ],
+            "title": "Refinement Disposition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title_anchor",
+          "refinement_disposition"
+        ],
+        "title": "WorkflowPlanningSlotTrace"
+      },
+      "WorkflowPlanningTrace": {
+        "properties": {
+          "initial_disposition": {
+            "type": "string",
+            "enum": [
+              "empty",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Initial Disposition"
+          },
+          "initial_correction_applied": {
+            "type": "boolean",
+            "title": "Initial Correction Applied"
+          },
+          "initial_slot_count": {
+            "type": "integer",
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Initial Slot Count"
+          },
+          "selected_slots": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowPlanningSlotTrace"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Selected Slots"
+          }
+        },
+        "type": "object",
+        "required": [
+          "initial_disposition",
+          "initial_correction_applied",
+          "initial_slot_count",
+          "selected_slots"
+        ],
+        "title": "WorkflowPlanningTrace"
       },
       "WorkflowQueryRetrievalTrace": {
         "properties": {

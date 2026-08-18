@@ -12,6 +12,8 @@ from sourcetrace.evaluation.models import (
     ObservedEvidence,
     ObservedEvidenceAssessment,
     ObservedFusedCandidateTrace,
+    ObservedPlanningSlotTrace,
+    ObservedPlanningTrace,
     ObservedQueryCandidateTrace,
     ObservedQueryRetrievalTrace,
     ObservedRerankerTrace,
@@ -252,6 +254,22 @@ class WorkflowEvaluationSubject:
                 for retrieval in self._retrieval.retrievals
             ),
             retrieval_plan_version=trace.retrieval_plan_version,
+            planning=(
+                None
+                if trace.planning is None
+                else ObservedPlanningTrace(
+                    initial_disposition=trace.planning.initial_disposition,
+                    initial_correction_applied=trace.planning.initial_correction_applied,
+                    initial_slot_count=trace.planning.initial_slot_count,
+                    selected_slots=tuple(
+                        ObservedPlanningSlotTrace(
+                            title_anchor=slot.title_anchor,
+                            refinement_disposition=slot.refinement_disposition,
+                        )
+                        for slot in trace.planning.selected_slots
+                    ),
+                )
+            ),
             retrieval_rounds=tuple(
                 ObservedRetrievalRoundTrace(
                     round_number=retrieval_round.round_number,

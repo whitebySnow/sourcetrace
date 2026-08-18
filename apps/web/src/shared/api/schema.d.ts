@@ -449,6 +449,7 @@ export interface components {
         AnswerWorkflowTrace: {
             /** Retrieval Plan Version */
             retrieval_plan_version?: string | null;
+            planning?: components["schemas"]["WorkflowPlanningTrace"] | null;
             /** Retrieval Queries */
             retrieval_queries?: string[];
             /** Retrieval Rounds */
@@ -816,6 +817,30 @@ export interface components {
             reranked_rank?: number | null;
             /** Selected As Primary */
             selected_as_primary: boolean;
+        };
+        /** WorkflowPlanningSlotTrace */
+        WorkflowPlanningSlotTrace: {
+            /** Title Anchor */
+            title_anchor: string;
+            /**
+             * Refinement Disposition
+             * @enum {string}
+             */
+            refinement_disposition: "not_required" | "accepted" | "provider_error" | "invalid_shape" | "document_changed" | "anchor_changed" | "anchor_invalid" | "unchanged_query" | "title_attribution";
+        };
+        /** WorkflowPlanningTrace */
+        WorkflowPlanningTrace: {
+            /**
+             * Initial Disposition
+             * @enum {string}
+             */
+            initial_disposition: "empty" | "accepted" | "rejected";
+            /** Initial Correction Applied */
+            initial_correction_applied: boolean;
+            /** Initial Slot Count */
+            initial_slot_count: number;
+            /** Selected Slots */
+            selected_slots: components["schemas"]["WorkflowPlanningSlotTrace"][];
         };
         /** WorkflowQueryRetrievalTrace */
         WorkflowQueryRetrievalTrace: {
