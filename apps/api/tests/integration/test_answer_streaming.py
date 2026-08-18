@@ -476,7 +476,7 @@ async def test_user_receives_a_streamed_answer_with_validated_citations(
         assert persisted["provider_operation_deadline_seconds"] == 361
         trace = persisted["workflow_trace"]
         assert trace["retrieval_queries"] == ["How are vectors stored?"]
-        assert trace["retrieval_plan_version"] == "two-stage-evidence-slots-v6"
+        assert trace["retrieval_plan_version"] == get_settings().llm_retrieval_plan_prompt_version
         assert len(trace["retrieval_rounds"]) == 1
         candidate_trace = trace["retrieval_rounds"][0]["query_results"][0]["candidates"][0]
         assert "dense_rank" in candidate_trace
@@ -564,7 +564,7 @@ async def test_follow_up_uses_bounded_questions_for_fresh_retrieval(
     ]
     persisted = history_response.json()["items"][0]
     assert persisted["retrieval_query"] == "Why is it normalized?"
-    assert persisted["query_rewrite_version"] == "two-stage-evidence-slots-v6"
+    assert persisted["query_rewrite_version"] == get_settings().llm_retrieval_plan_prompt_version
 
 
 async def test_two_initial_slot_queries_exhaust_supplemental_budget_and_are_traced(
@@ -626,7 +626,7 @@ async def test_two_initial_slot_queries_exhaust_supplemental_budget_and_are_trac
     persisted = history_response.json()["items"][0]
     assert persisted["outcome"] == "refused"
     trace = persisted["workflow_trace"]
-    assert trace["retrieval_plan_version"] == "two-stage-evidence-slots-v6"
+    assert trace["retrieval_plan_version"] == get_settings().llm_retrieval_plan_prompt_version
     assert trace["retrieval_queries"] == queries
     assert trace["supplemental_retrieval_attempts"] == 0
     assert len(trace["retrieval_rounds"]) == 1

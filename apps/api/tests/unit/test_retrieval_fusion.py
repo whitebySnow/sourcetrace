@@ -208,6 +208,7 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
         question_planner=planner,
         reranker=PreserveOrderReranker(),
         top_k=8,
+        retrieval_plan_version="test-plan-v7",
     )
 
     plan = await service.resolve_plan(
@@ -217,7 +218,7 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
     )
 
     assert plan == RetrievalPlan(
-        version="two-stage-evidence-slots-v6",
+        version="test-plan-v7",
         queries=(
             "What does ReAct combine?",
             "ReAct reasoning and acting interaction",
@@ -230,6 +231,23 @@ async def test_plan_keeps_original_question_and_skips_normalized_duplicates() ->
             ("ReAct.pdf", "Self-RAG.pdf"),
         ),
     ]
+
+
+async def test_plan_requires_an_injected_prompt_version() -> None:
+    service = RetrievalService(
+        repository=RankedListRepository({}),
+        embedding_provider=RecordingEmbeddingProvider([]),
+        question_planner=StaticPlanner(),
+        reranker=PreserveOrderReranker(),
+        top_k=8,
+    )
+
+    with pytest.raises(ValueError, match="retrieval plan version must be configured"):
+        await service.resolve_plan(
+            knowledge_base_id=UUID("30000000-0000-0000-0000-000000000001"),
+            question="What does ReAct combine?",
+            recent_questions=(),
+        )
 
 
 async def test_plan_keeps_at_most_two_unique_evidence_slot_queries() -> None:
@@ -245,6 +263,7 @@ async def test_plan_keeps_at_most_two_unique_evidence_slot_queries() -> None:
         question_planner=planner,
         reranker=PreserveOrderReranker(),
         top_k=8,
+        retrieval_plan_version="test-plan-v7",
     )
 
     plan = await service.resolve_plan(
@@ -254,7 +273,7 @@ async def test_plan_keeps_at_most_two_unique_evidence_slot_queries() -> None:
     )
 
     assert plan == RetrievalPlan(
-        version="two-stage-evidence-slots-v6",
+        version="test-plan-v7",
         queries=(
             "Compare RAG, ReAct, and Self-RAG components",
             "ReAct task-specific environment actions",

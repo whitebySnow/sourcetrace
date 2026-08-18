@@ -175,7 +175,13 @@ def _retrieval_plan_prompt(
                 "using likely source-paper terminology. You may use model knowledge for "
                 "well-known method aliases or framework associations only as search hypotheses. "
                 "Use the supplied searchable document titles to constrain framework and paper "
-                "associations. Titles are retrieval hints, not answer evidence. "
+                "associations. For an unassigned named component in a multi-source ownership "
+                "question, a stable title may be a defensible lexical anchor when it names a "
+                "candidate method or framework: create one separate slot query that combines "
+                "that title's method name with the component. Keep it a search hypothesis, not "
+                "answer evidence, and do not state that the component belongs to that method. "
+                "If no stable title is a defensible lexical anchor, return [] rather than "
+                "inventing an owner. Titles are retrieval hints, not answer evidence. "
                 "Never create a paper or framework that is absent from the supplied titles. Do not "
                 "assign concepts to unrelated frameworks; when an association is uncertain, use "
                 "only names present in the question and supplied titles. "
@@ -814,6 +820,7 @@ def _validate_planned_evidence_groups(
             or not isinstance(document_title, str)
             or document_title not in allowed_titles
             or document_title in seen_titles
+            or _contains_title_attribution(query, document_title)
         ):
             return None
         groups.append(
@@ -824,6 +831,33 @@ def _validate_planned_evidence_groups(
         )
         seen_titles.add(document_title)
     return tuple(groups)
+
+
+def _contains_title_attribution(query: str, document_title: str) -> bool:
+    title_stem = document_title.rsplit(".", maxsplit=1)[0].casefold()
+    normalized_query = " ".join(query.casefold().split())
+    compact_query = "".join(query.casefold().split())
+    compact_title_stem = "".join(title_stem.split())
+    english_attribution_markers = (
+        f"belongs to {title_stem}",
+        f"belongs in {title_stem}",
+        f"from {title_stem}",
+        f"introduced by {title_stem}",
+        f"proposed by {title_stem}",
+        f"component of {title_stem}",
+        f"component in {title_stem}",
+        f"{title_stem}'s ",
+    )
+    chinese_attribution_markers = (
+        f"属于{compact_title_stem}",
+        f"来自{compact_title_stem}",
+        f"由{compact_title_stem}提出",
+        f"在{compact_title_stem}中",
+        f"{compact_title_stem}的",
+    )
+    return any(marker in normalized_query for marker in english_attribution_markers) or any(
+        marker in compact_query for marker in chinese_attribution_markers
+    )
 
 
 def _validate_refined_evidence_group(
@@ -840,6 +874,7 @@ def _validate_refined_evidence_group(
         or not query.strip()
         or document_title != proposed_group.document_title
         or query.strip().casefold() == proposed_group.query.casefold()
+        or _contains_title_attribution(query, proposed_group.document_title)
     ):
         return None
     return _PlannedEvidenceGroup(
