@@ -72,6 +72,17 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="confirm that this command may use the database, embedding model, and LLM API",
     )
+    planning_probe = subparsers.add_parser("planning-probe")
+    planning_probe.add_argument("--dataset", type=Path, required=True)
+    planning_probe.add_argument("--case-id", dest="case_ids", action="append", required=True)
+    planning_probe.add_argument("--code-commit", required=True)
+    planning_probe.add_argument("--output", type=Path, required=True)
+    planning_probe.add_argument(
+        "--confirm-real-provider",
+        action="store_true",
+        required=True,
+        help="confirm that this command may use the database and LLM API",
+    )
     review = subparsers.add_parser("review")
     review.add_argument("--report", type=Path, required=True)
     review.add_argument("--judgments", type=Path, required=True)
@@ -154,6 +165,21 @@ async def _run_real(args: argparse.Namespace) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return 0
+
+
+async def _run_planning_probe(args: argparse.Namespace) -> None:
+    from sourcetrace.core.config import get_settings
+    from sourcetrace.evaluation.real import run_real_planning_probe
+
+    if args.output.exists():
+        raise FileExistsError("planning probe output already exists; choose a new output path")
+    report = await run_real_planning_probe(
+        load_dataset(args.dataset),
+        case_ids=tuple(args.case_ids),
+        code_commit=args.code_commit,
+        settings=get_settings(),
+    )
+    _write_json_artifact(args.output, report)
 
 
 async def _run_rerank(args: argparse.Namespace) -> None:
@@ -254,6 +280,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.mode == "real":
         return asyncio.run(_run_real(args))
+    if args.mode == "planning-probe":
+        asyncio.run(_run_planning_probe(args))
+        return 0
     if args.mode == "review":
         _run_review(args)
         return 0

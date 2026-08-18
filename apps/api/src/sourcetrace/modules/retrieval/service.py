@@ -21,7 +21,7 @@ _MAX_PRIMARY_CANDIDATES = 8
 _MAX_ADDITIONAL_QUERIES = 2
 _ORIGINAL_QUERY_COVERAGE_CANDIDATES = 4
 _MAX_ADDITIONAL_QUERY_COVERAGE_CANDIDATES = 2
-_PLANNER_DOCUMENT_TITLE_LIMIT = 50
+PLANNER_DOCUMENT_TITLE_LIMIT = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +174,7 @@ class RetrievalService:
             raise ValueError("retrieval plan version must be configured")
         document_titles = await self._repository.list_searchable_document_titles(
             knowledge_base_id,
-            limit=_PLANNER_DOCUMENT_TITLE_LIMIT,
+            limit=PLANNER_DOCUMENT_TITLE_LIMIT,
         )
         proposal = await self._question_planner.plan(
             question=question,

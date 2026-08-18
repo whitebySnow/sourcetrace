@@ -252,6 +252,10 @@ PostgreSQL 部分唯一索引保证同一 Conversation 在 `pending`、`running`
 Dataset 保存完整不可变文档版本快照，以及预期回答或拒答、页码和证据摘录；Harness 分别计算检索召回、
 引用正确性、拒答和端到端结果。离线模式消费确定性 fixture，真实模式用记录型检索适配器包装
 生产 RetrievalService，把 pgvector 限定在该快照，并消费 AnswerWorkflow 的最终事件。真实
+规划探针则只复用同一数据集快照、标题读取和 `QuestionPlanner` 适配器，最多处理两个显式 case，
+在检索前停止。它生成独立的非评分去敏工件，只含 case ID、运行溯源、终态和规划轨迹；不读取或
+持久化评测真值、查询原文、文档正文、Chunk ID、证据、回答或质量汇总，不能接入 Harness、review
+或任一诊断评分命令。
 运行从快照 chunk 对应的 completed Ingestion Run 读取实际 parser、切分和 embedding
 provenance；不完整或混用配置的快照不能运行。Report 绑定 Dataset、代码提交、模型、四个
 prompt、工作流、切分、embedding 和检索参数/版本。端到端 Judgment 只能在运行后离线应用，

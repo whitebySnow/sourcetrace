@@ -108,6 +108,28 @@ parser、切分、embedding、四个 prompt、工作流和检索参数/版本；
 `--output` 路径，并要求配对的 `-failure.json` 路径同样不存在，防止旧报告或失败工件被误读
 或覆盖。
 
+## 真实规划探针
+
+当需要区分规划器空计划、一次纠正、槽位细化丢弃或初始规划失败时，可以只调用生产规划器，
+而不支付完整 30 题评测、检索或生成的成本。探针只能选一个或两个显式的已审核 case：
+
+```powershell
+pnpm eval:planning-probe -- `
+  --dataset evals/datasets/<dataset>.json `
+  --case-id ARF-025 `
+  --case-id ARF-026 `
+  --code-commit (git rev-parse HEAD) `
+  --output output/evals/<planning-probe>.json `
+  --confirm-real-provider
+```
+
+命令仍访问数据库以读取固定语料快照的可检索标题，并调用 LLM 规划器；不加载 embedding/reranker，
+不执行检索、证据判断、生成、引用校验或 Harness 评分。输出 Schema 为
+`schema/planning-probe-v1.schema.json`，仅保存数据集/配置溯源、case ID、终态和去敏规划轨迹。
+它不保存问题、预期答案、回答、查询、提示词、完整标题列表、文档/证据正文、Chunk ID 或汇总分数，
+不能用于 `review`、任一 `diagnose-*` 命令或产品质量结论。初始规划错误按 case 记录为非评分失败观察；
+每次使用新的输出路径，防止覆盖已有探针工件。
+
 ## 离线混合检索实验
 
 `query-plans/` 存放人工版本化的有界查询计划，只能增加由原问题直接派生的检索表达，不能写入
