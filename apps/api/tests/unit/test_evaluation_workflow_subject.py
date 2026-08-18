@@ -19,6 +19,7 @@ from sourcetrace.modules.retrieval.service import (
 from sourcetrace.rag.llm import LlmProviderError
 from sourcetrace.rag.ports import (
     EvidenceDecision,
+    QueryPlanningFailure,
     QueryPlanningSlotTrace,
     QueryPlanningTrace,
     RetrievalCandidate,
@@ -120,6 +121,25 @@ class InvalidResponseAssessor:
             "Language model returned an invalid response",
             reason="provider_structured_invalid_json",
         )
+
+
+class PlanningFailureRetrieval:
+    async def resolve_plan(self, **kwargs: object) -> RetrievalPlan:
+        raise QueryPlanningFailure(
+            code="LLM_INVALID_RESPONSE",
+            safe_message="Language model returned an invalid response",
+            reason="provider_structured_invalid_json",
+            planning_trace=QueryPlanningTrace(
+                initial_disposition="failed",
+                initial_correction_applied=True,
+                initial_slot_count=0,
+                selected_slots=(),
+            ),
+            retrieval_plan_version="two-stage-evidence-slots-v8",
+        )
+
+    async def search(self, **kwargs: object) -> RetrievalResult:
+        raise AssertionError("retrieval must not start after planning fails")
 
 
 class CitingGenerator:
@@ -332,3 +352,46 @@ async def test_workflow_subject_classifies_provider_failure_without_an_observati
     assert error.value.phase == "assessing"
     assert error.value.error_code == "LLM_INVALID_RESPONSE"
     assert error.value.error_reason == "provider_structured_invalid_json"
+    assert error.value.planning is not None
+    assert error.value.planning.initial_disposition == "accepted"
+
+
+async def test_workflow_subject_preserves_planning_failure_trace() -> None:
+    subject = WorkflowEvaluationSubject(
+        retrieval=PlanningFailureRetrieval(),
+        workflow_factory=lambda retrieval, run_control: AnswerWorkflow(
+            retrieval=retrieval,
+            assessor=RefusingAssessor(),
+            generator=CitingGenerator(),
+            citation_repairer=UnusedRepairer(),
+            run_control=run_control,
+            minimum_score=0.5,
+            minimum_evidence=1,
+        ),
+        knowledge_base_id=uuid4(),
+    )
+    case = EvaluationCase.model_validate(
+        {
+            "id": "planning-failure-001",
+            "category": "direct",
+            "question": "How many retries are allowed?",
+            "expected": {
+                "outcome": "refused",
+                "reference_answer": None,
+                "evidence": [],
+            },
+        }
+    )
+
+    with pytest.raises(EvaluationExecutionFailure) as error:
+        await subject.evaluate(case)
+
+    assert error.value.phase == "analyzing"
+    assert error.value.error_code == "LLM_INVALID_RESPONSE"
+    assert error.value.planning is not None
+    assert error.value.planning.model_dump() == {
+        "initial_disposition": "failed",
+        "initial_correction_applied": True,
+        "initial_slot_count": 0,
+        "selected_slots": (),
+    }

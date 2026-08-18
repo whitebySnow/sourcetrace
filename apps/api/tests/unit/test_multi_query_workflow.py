@@ -1,6 +1,8 @@
 from collections.abc import AsyncIterator, Sequence
 from uuid import UUID, uuid4, uuid5
 
+import pytest
+
 from sourcetrace.modules.retrieval.service import (
     FusedRetrievalCandidate,
     QueryRetrievalResult,
@@ -11,6 +13,7 @@ from sourcetrace.modules.retrieval.service import (
 )
 from sourcetrace.rag.ports import (
     EvidenceDecision,
+    QueryPlanningFailure,
     QueryPlanningSlotTrace,
     QueryPlanningTrace,
     RetrievalCandidate,
@@ -92,6 +95,25 @@ class PlannedRetrieval:
         return _result(executed, self.evidence)
 
 
+class FailingPlanningRetrieval:
+    async def resolve_plan(self, **kwargs: object) -> RetrievalPlan:
+        raise QueryPlanningFailure(
+            code="LLM_INVALID_RESPONSE",
+            safe_message="Language model returned an invalid response",
+            reason=None,
+            planning_trace=QueryPlanningTrace(
+                initial_disposition="failed",
+                initial_correction_applied=False,
+                initial_slot_count=0,
+                selected_slots=(),
+            ),
+            retrieval_plan_version="two-stage-evidence-slots-v8",
+        )
+
+    async def search(self, **kwargs: object) -> RetrievalResult:
+        raise AssertionError("retrieval must not start after planning fails")
+
+
 class SequentialAssessor:
     def __init__(self, *decisions: EvidenceDecision) -> None:
         self.decisions = list(decisions)
@@ -142,6 +164,32 @@ class ActiveControl:
 
     async def is_cancel_requested(self, run_id: UUID) -> bool:
         return False
+
+
+async def test_planning_failure_records_sanitized_trace_before_it_propagates() -> None:
+    control = ActiveControl()
+    workflow = AnswerWorkflow(
+        retrieval=FailingPlanningRetrieval(),
+        assessor=SequentialAssessor(),
+        generator=UnusedGenerator(),
+        citation_repairer=UnusedRepairer(),
+        run_control=control,
+        minimum_score=0.5,
+        minimum_evidence=1,
+    )
+
+    with pytest.raises(QueryPlanningFailure):
+        async for _event in workflow.run(WorkflowRequest(uuid4(), uuid4(), "original", ())):
+            pass
+
+    assert len(control.traces) == 1
+    assert control.traces[0].retrieval_plan_version == "two-stage-evidence-slots-v8"
+    assert control.traces[0].to_payload()["planning"] == {
+        "initial_disposition": "failed",
+        "initial_correction_applied": False,
+        "initial_slot_count": 0,
+        "selected_slots": [],
+    }
 
 
 async def test_initial_plan_uses_the_shared_extra_query_budget() -> None:

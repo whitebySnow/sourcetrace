@@ -23,6 +23,7 @@ from sourcetrace.rag.ports import (
     ClaimSupportValidationError,
     ClaimSupportVerifier,
     EvidenceAssessor,
+    QueryPlanningFailure,
     QueryPlanningTrace,
     RetrievalCandidate,
 )
@@ -462,11 +463,21 @@ class AnswerWorkflow:
     async def _analyze(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="analyzing"))
-        plan = await self._retrieval.resolve_plan(
-            knowledge_base_id=state["knowledge_base_id"],
-            question=state["question"],
-            recent_questions=state["recent_questions"],
-        )
+        try:
+            plan = await self._retrieval.resolve_plan(
+                knowledge_base_id=state["knowledge_base_id"],
+                question=state["question"],
+                recent_questions=state["recent_questions"],
+            )
+        except QueryPlanningFailure as error:
+            await self._record_trace(
+                state["run_id"],
+                WorkflowTrace(
+                    retrieval_plan_version=error.retrieval_plan_version,
+                    planning=error.planning_trace,
+                ),
+            )
+            raise
         if not await self._run_control.record_retrieval_query(state["run_id"], plan.queries[0]):
             raise _WorkflowCancellation
         trace = WorkflowTrace(

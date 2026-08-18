@@ -549,6 +549,15 @@
       "title": "EvidencePassage",
       "type": "object"
     },
+    "InitialPlanDisposition": {
+      "enum": [
+        "empty",
+        "accepted",
+        "rejected",
+        "failed"
+      ],
+      "type": "string"
+    },
     "ObservedCitationValidation": {
       "additionalProperties": false,
       "properties": {
@@ -757,19 +766,7 @@
           "type": "string"
         },
         "refinement_disposition": {
-          "enum": [
-            "not_required",
-            "accepted",
-            "provider_error",
-            "invalid_shape",
-            "document_changed",
-            "anchor_changed",
-            "anchor_invalid",
-            "unchanged_query",
-            "title_attribution"
-          ],
-          "title": "Refinement Disposition",
-          "type": "string"
+          "$ref": "#/$defs/RefinementDisposition"
         }
       },
       "required": [
@@ -783,13 +780,7 @@
       "additionalProperties": false,
       "properties": {
         "initial_disposition": {
-          "enum": [
-            "empty",
-            "accepted",
-            "rejected"
-          ],
-          "title": "Initial Disposition",
-          "type": "string"
+          "$ref": "#/$defs/InitialPlanDisposition"
         },
         "initial_correction_applied": {
           "title": "Initial Correction Applied",
@@ -1070,6 +1061,20 @@
       ],
       "title": "ObservedRetrievalRoundTrace",
       "type": "object"
+    },
+    "RefinementDisposition": {
+      "enum": [
+        "not_required",
+        "accepted",
+        "provider_error",
+        "invalid_shape",
+        "document_changed",
+        "anchor_changed",
+        "anchor_invalid",
+        "unchanged_query",
+        "title_attribution"
+      ],
+      "type": "string"
     }
   },
   "additionalProperties": false,

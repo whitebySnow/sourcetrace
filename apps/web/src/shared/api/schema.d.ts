@@ -679,6 +679,8 @@ export interface components {
             /** Failure Code */
             failure_code?: string | null;
         };
+        /** @enum {string} */
+        InitialPlanDisposition: "empty" | "accepted" | "rejected" | "failed";
         /** KnowledgeBaseCreate */
         KnowledgeBaseCreate: {
             /** Name */
@@ -755,6 +757,8 @@ export interface components {
                 [key: string]: "ok" | "unavailable";
             };
         };
+        /** @enum {string} */
+        RefinementDisposition: "not_required" | "accepted" | "provider_error" | "invalid_shape" | "document_changed" | "anchor_changed" | "anchor_invalid" | "unchanged_query" | "title_attribution";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -822,19 +826,11 @@ export interface components {
         WorkflowPlanningSlotTrace: {
             /** Title Anchor */
             title_anchor: string;
-            /**
-             * Refinement Disposition
-             * @enum {string}
-             */
-            refinement_disposition: "not_required" | "accepted" | "provider_error" | "invalid_shape" | "document_changed" | "anchor_changed" | "anchor_invalid" | "unchanged_query" | "title_attribution";
+            refinement_disposition: components["schemas"]["RefinementDisposition"];
         };
         /** WorkflowPlanningTrace */
         WorkflowPlanningTrace: {
-            /**
-             * Initial Disposition
-             * @enum {string}
-             */
-            initial_disposition: "empty" | "accepted" | "rejected";
+            initial_disposition: components["schemas"]["InitialPlanDisposition"];
             /** Initial Correction Applied */
             initial_correction_applied: boolean;
             /** Initial Slot Count */

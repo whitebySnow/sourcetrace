@@ -2350,6 +2350,15 @@
         ],
         "title": "IngestionRetryResponse"
       },
+      "InitialPlanDisposition": {
+        "type": "string",
+        "enum": [
+          "empty",
+          "accepted",
+          "rejected",
+          "failed"
+        ]
+      },
       "KnowledgeBaseCreate": {
         "properties": {
           "name": {
@@ -2524,6 +2533,20 @@
           "checks"
         ],
         "title": "ReadinessResponse"
+      },
+      "RefinementDisposition": {
+        "type": "string",
+        "enum": [
+          "not_required",
+          "accepted",
+          "provider_error",
+          "invalid_shape",
+          "document_changed",
+          "anchor_changed",
+          "anchor_invalid",
+          "unchanged_query",
+          "title_attribution"
+        ]
       },
       "ValidationError": {
         "properties": {
@@ -2719,19 +2742,7 @@
             "title": "Title Anchor"
           },
           "refinement_disposition": {
-            "type": "string",
-            "enum": [
-              "not_required",
-              "accepted",
-              "provider_error",
-              "invalid_shape",
-              "document_changed",
-              "anchor_changed",
-              "anchor_invalid",
-              "unchanged_query",
-              "title_attribution"
-            ],
-            "title": "Refinement Disposition"
+            "$ref": "#/components/schemas/RefinementDisposition"
           }
         },
         "type": "object",
@@ -2744,13 +2755,7 @@
       "WorkflowPlanningTrace": {
         "properties": {
           "initial_disposition": {
-            "type": "string",
-            "enum": [
-              "empty",
-              "accepted",
-              "rejected"
-            ],
-            "title": "Initial Disposition"
+            "$ref": "#/components/schemas/InitialPlanDisposition"
           },
           "initial_correction_applied": {
             "type": "boolean",

@@ -228,10 +228,12 @@ def _run_diagnostics(
 def _run_retrieval_stage_diagnostics(args: argparse.Namespace) -> None:
     dataset_bytes = args.dataset.read_bytes()
     source_report_bytes = args.report.read_bytes()
+    dataset = load_dataset(args.dataset)
+    source_report = load_report(args.report)
     stage_report_bytes = args.stage_report.read_bytes()
     diagnostics = build_retrieval_stage_diagnostics(
-        load_dataset(args.dataset),
-        load_report(args.report),
+        dataset,
+        source_report,
         load_hybrid_retrieval_report(args.stage_report),
         dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(),
         source_report_sha256=hashlib.sha256(source_report_bytes).hexdigest(),

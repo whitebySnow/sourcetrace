@@ -45,7 +45,7 @@ class ClaimSupportValidationError(Exception):
     """Raised when a claim-support decision cannot be safely used."""
 
 
-type InitialPlanDisposition = Literal["empty", "accepted", "rejected"]
+type InitialPlanDisposition = Literal["empty", "accepted", "rejected", "failed"]
 type RefinementDisposition = Literal[
     "not_required",
     "accepted",
@@ -71,6 +71,27 @@ class QueryPlanningTrace:
     initial_correction_applied: bool
     initial_slot_count: int
     selected_slots: tuple[QueryPlanningSlotTrace, ...]
+
+
+class QueryPlanningFailure(Exception):
+    """A provider-safe planning failure with its bounded diagnostic trace."""
+
+    def __init__(
+        self,
+        *,
+        code: str,
+        safe_message: str,
+        reason: str | None,
+        planning_trace: QueryPlanningTrace,
+        retrieval_plan_version: str,
+    ) -> None:
+        diagnostic_message = f"{safe_message} [{reason}]" if reason is not None else safe_message
+        super().__init__(diagnostic_message)
+        self.code = code
+        self.safe_message = safe_message
+        self.reason = reason
+        self.planning_trace = planning_trace
+        self.retrieval_plan_version = retrieval_plan_version
 
 
 @dataclass(frozen=True, slots=True)

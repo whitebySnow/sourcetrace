@@ -13,6 +13,7 @@ from sourcetrace.evaluation.models import (
     EvidenceAssessmentDiagnosticsReport,
     HybridQueryPlanFixture,
     HybridRetrievalEvaluationReport,
+    ObservedPlanningTrace,
     RerankerEvaluationReport,
     RetrievalStageDiagnosticsReport,
 )
@@ -296,6 +297,12 @@ def test_real_cli_writes_an_unscored_failure_artifact(tmp_path, monkeypatch) -> 
                 phase="assessing",
                 error_code="LLM_INVALID_RESPONSE",
                 error_reason="provider_structured_invalid_json",
+                planning=ObservedPlanningTrace(
+                    initial_disposition="failed",
+                    initial_correction_applied=True,
+                    initial_slot_count=0,
+                    selected_slots=(),
+                ),
             )
         )
 
@@ -325,6 +332,12 @@ def test_real_cli_writes_an_unscored_failure_artifact(tmp_path, monkeypatch) -> 
     assert failure["phase"] == "assessing"
     assert failure["error_code"] == "LLM_INVALID_RESPONSE"
     assert failure["error_reason"] == "provider_structured_invalid_json"
+    assert failure["planning"] == {
+        "initial_disposition": "failed",
+        "initial_correction_applied": True,
+        "initial_slot_count": 0,
+        "selected_slots": [],
+    }
     assert "cases" not in failure
     assert "question" not in failure
     assert "answer" not in failure
@@ -342,21 +355,23 @@ def test_real_cli_writes_an_unscored_failure_artifact(tmp_path, monkeypatch) -> 
         )
     for mode in (
         "diagnose-retrieval",
+        "diagnose-retrieval-stages",
         "diagnose-citations",
         "diagnose-assessments",
     ):
+        arguments = [
+            mode,
+            "--dataset",
+            str(dataset_path),
+            "--report",
+            str(failure_path),
+            "--output",
+            str(tmp_path / f"{mode}.json"),
+        ]
+        if mode == "diagnose-retrieval-stages":
+            arguments.extend(["--stage-report", str(tmp_path / "stages.json")])
         with pytest.raises(ValidationError):
-            main(
-                [
-                    mode,
-                    "--dataset",
-                    str(dataset_path),
-                    "--report",
-                    str(failure_path),
-                    "--output",
-                    str(tmp_path / f"{mode}.json"),
-                ]
-            )
+            main(arguments)
 
 
 @pytest.mark.parametrize("existing_filename", ["report.json", "report-failure.json"])

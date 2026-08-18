@@ -224,6 +224,83 @@
       ],
       "title": "EvaluationRunMetadata",
       "type": "object"
+    },
+    "InitialPlanDisposition": {
+      "enum": [
+        "empty",
+        "accepted",
+        "rejected",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "ObservedPlanningSlotTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "title_anchor": {
+          "maxLength": 255,
+          "minLength": 3,
+          "title": "Title Anchor",
+          "type": "string"
+        },
+        "refinement_disposition": {
+          "$ref": "#/$defs/RefinementDisposition"
+        }
+      },
+      "required": [
+        "title_anchor",
+        "refinement_disposition"
+      ],
+      "title": "ObservedPlanningSlotTrace",
+      "type": "object"
+    },
+    "ObservedPlanningTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "initial_disposition": {
+          "$ref": "#/$defs/InitialPlanDisposition"
+        },
+        "initial_correction_applied": {
+          "title": "Initial Correction Applied",
+          "type": "boolean"
+        },
+        "initial_slot_count": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Initial Slot Count",
+          "type": "integer"
+        },
+        "selected_slots": {
+          "items": {
+            "$ref": "#/$defs/ObservedPlanningSlotTrace"
+          },
+          "maxItems": 2,
+          "title": "Selected Slots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "initial_disposition",
+        "initial_correction_applied",
+        "initial_slot_count",
+        "selected_slots"
+      ],
+      "title": "ObservedPlanningTrace",
+      "type": "object"
+    },
+    "RefinementDisposition": {
+      "enum": [
+        "not_required",
+        "accepted",
+        "provider_error",
+        "invalid_shape",
+        "document_changed",
+        "anchor_changed",
+        "anchor_invalid",
+        "unchanged_query",
+        "title_attribution"
+      ],
+      "type": "string"
     }
   },
   "additionalProperties": false,
@@ -302,6 +379,17 @@
       ],
       "default": null,
       "title": "Error Reason"
+    },
+    "planning": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ObservedPlanningTrace"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

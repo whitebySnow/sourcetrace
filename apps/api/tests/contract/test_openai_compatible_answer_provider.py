@@ -20,6 +20,7 @@ from sourcetrace.rag.ports import (
     CitationValidationFeedback,
     ClaimSupportValidationError,
     EvidenceDecision,
+    QueryPlanningFailure,
     RetrievalCandidate,
 )
 
@@ -105,6 +106,7 @@ def _multi_source_evidence() -> list[RetrievalCandidate]:
             matched_queries=("intermediate signals",),
         ),
     ]
+
 
 def _validation_feedback() -> CitationValidationFeedback:
     return CitationValidationFeedback(
@@ -1156,13 +1158,15 @@ async def test_question_planner_rejects_an_invalid_response_shape() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
-        with pytest.raises(LlmProviderError) as error:
+        with pytest.raises(QueryPlanningFailure) as error:
             await planner.plan(
                 question="Why is it normalized?",
                 recent_questions=["How are BGE-M3 vectors stored?"],
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.planning_trace.initial_disposition == "failed"
+    assert error.value.planning_trace.initial_correction_applied is False
 
 
 async def test_question_planner_traces_an_empty_initial_plan() -> None:
@@ -1859,7 +1863,7 @@ async def test_question_planner_rejects_more_than_three_evidence_groups() -> Non
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
-        with pytest.raises(LlmProviderError) as error:
+        with pytest.raises(QueryPlanningFailure) as error:
             await planner.plan(
                 question="Question",
                 recent_questions=[],
@@ -1873,6 +1877,10 @@ async def test_question_planner_rejects_more_than_three_evidence_groups() -> Non
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
     assert attempts == 2
+    assert error.value.retrieval_plan_version == _config().prompt_version
+    assert error.value.planning_trace.initial_disposition == "failed"
+    assert error.value.planning_trace.initial_correction_applied is True
+    assert error.value.planning_trace.selected_slots == ()
 
 
 async def test_question_planner_corrects_duplicate_document_groups() -> None:

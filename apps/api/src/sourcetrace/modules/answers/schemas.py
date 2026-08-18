@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from sourcetrace.rag.ports import InitialPlanDisposition, RefinementDisposition
+
 
 class AnswerRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
@@ -158,21 +160,11 @@ class WorkflowCitationValidationTrace(BaseModel):
 
 class WorkflowPlanningSlotTrace(BaseModel):
     title_anchor: str = Field(min_length=3, max_length=255)
-    refinement_disposition: Literal[
-        "not_required",
-        "accepted",
-        "provider_error",
-        "invalid_shape",
-        "document_changed",
-        "anchor_changed",
-        "anchor_invalid",
-        "unchanged_query",
-        "title_attribution",
-    ]
+    refinement_disposition: RefinementDisposition
 
 
 class WorkflowPlanningTrace(BaseModel):
-    initial_disposition: Literal["empty", "accepted", "rejected"]
+    initial_disposition: InitialPlanDisposition
     initial_correction_applied: bool
     initial_slot_count: int = Field(ge=0, le=3)
     selected_slots: list[WorkflowPlanningSlotTrace] = Field(max_length=2)

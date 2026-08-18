@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from sourcetrace.rag.ports import InitialPlanDisposition, RefinementDisposition
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -206,21 +208,11 @@ class ObservedRetrievalRoundTrace(StrictModel):
 
 class ObservedPlanningSlotTrace(StrictModel):
     title_anchor: str = Field(min_length=3, max_length=255)
-    refinement_disposition: Literal[
-        "not_required",
-        "accepted",
-        "provider_error",
-        "invalid_shape",
-        "document_changed",
-        "anchor_changed",
-        "anchor_invalid",
-        "unchanged_query",
-        "title_attribution",
-    ]
+    refinement_disposition: RefinementDisposition
 
 
 class ObservedPlanningTrace(StrictModel):
-    initial_disposition: Literal["empty", "accepted", "rejected"]
+    initial_disposition: InitialPlanDisposition
     initial_correction_applied: bool
     initial_slot_count: int = Field(ge=0, le=3)
     selected_slots: tuple[ObservedPlanningSlotTrace, ...] = Field(max_length=2)
@@ -391,6 +383,7 @@ class EvaluationFailureReport(StrictModel):
         default=None,
         pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$",
     )
+    planning: ObservedPlanningTrace | None = None
 
 
 type RetrievalFailureMechanism = Literal[

@@ -34,6 +34,7 @@ from sourcetrace.rag.ports import (
     ClaimSupportValidationError,
     EvidenceDecision,
     GroundedClaim,
+    QueryPlanningTrace,
     RetrievalCandidate,
     RetrievalPlanProposal,
 )
@@ -147,6 +148,19 @@ class NoAdditionalQueryPlanner:
         return RetrievalPlanProposal(additional_queries=())
 
 
+class TracedEmptyPlanQuestionPlanner:
+    async def plan(self, **kwargs: object) -> RetrievalPlanProposal:
+        return RetrievalPlanProposal(
+            additional_queries=(),
+            planning_trace=QueryPlanningTrace(
+                initial_disposition="empty",
+                initial_correction_applied=False,
+                initial_slot_count=0,
+                selected_slots=(),
+            ),
+        )
+
+
 class SelectingAllEvidenceAssessor:
     async def assess(
         self,
@@ -197,6 +211,57 @@ def _answer_app():
     app.dependency_overrides[get_claim_support_verifier] = CitationPreservingClaimSupportVerifier
     app.dependency_overrides[get_reranker] = PreserveOrderReranker
     return app
+
+
+async def test_history_exposes_sanitized_planning_trace_for_new_answer_run(
+    session: AsyncSession,
+) -> None:
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app = _answer_app()
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_query_embedding_provider] = QueryEmbeddingProvider
+    app.dependency_overrides[get_question_planner] = TracedEmptyPlanQuestionPlanner
+    app.dependency_overrides[get_answer_generator] = GroundedAnswerGenerator
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        knowledge_base = await client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "Planning trace history"},
+        )
+        knowledge_base_id = UUID(knowledge_base.json()["id"])
+        conversation = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations",
+            json={"title": "Planning trace"},
+        )
+        conversation_id = UUID(conversation.json()["id"])
+        await _create_searchable_evidence(session, knowledge_base_id)
+
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers",
+            json={"content": "How are vectors stored?"},
+        )
+        history = await client.get(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}/answers"
+        )
+
+    assert _events(response.text)[-1][0] == "final"
+    planning = history.json()["items"][0]["workflow_trace"]["planning"]
+    assert planning == {
+        "initial_disposition": "empty",
+        "initial_correction_applied": False,
+        "initial_slot_count": 0,
+        "selected_slots": [],
+    }
+    assert set(planning) == {
+        "initial_disposition",
+        "initial_correction_applied",
+        "initial_slot_count",
+        "selected_slots",
+    }
 
 
 class RecordingQuestionPlanner:
@@ -727,6 +792,7 @@ async def test_follow_up_refuses_when_only_a_prior_answer_contains_the_claim(
     assert prior["provider_read_timeout_seconds"] is None
     assert prior["provider_request_timeout_seconds"] is None
     assert prior["provider_operation_deadline_seconds"] is None
+    assert prior["workflow_trace"]["planning"] is None
 
 
 async def test_follow_up_answer_uses_question_language_and_preserves_source_text(

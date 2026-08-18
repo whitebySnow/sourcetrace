@@ -18,6 +18,7 @@ from sourcetrace.rag.ports import (
     ClaimSupportValidationError,
     EvidenceDecision,
     GroundedClaim,
+    QueryPlanningFailure,
     QueryPlanningSlotTrace,
     QueryPlanningTrace,
     RefinementDisposition,
@@ -725,6 +726,7 @@ class OpenAICompatibleQuestionPlanner:
                 document_titles,
             )
             semantic_violation_count = 0
+            correction_applied = False
             for attempt in range(2):
                 parsed = await _structured_completion(
                     self.config,
@@ -744,9 +746,7 @@ class OpenAICompatibleQuestionPlanner:
                             return RetrievalPlanProposal(
                                 additional_queries=tuple(group.query for group in selected_groups),
                                 planning_trace=QueryPlanningTrace(
-                                    initial_disposition=(
-                                        "empty" if not validated else "accepted"
-                                    ),
+                                    initial_disposition=("empty" if not validated else "accepted"),
                                     initial_correction_applied=attempt == 1,
                                     initial_slot_count=len(validated),
                                     selected_slots=tuple(
@@ -794,6 +794,7 @@ class OpenAICompatibleQuestionPlanner:
                         )
                     semantic_violation_count += 1
                 if attempt == 0:
+                    correction_applied = True
                     messages = [
                         *messages,
                         {
@@ -822,12 +823,26 @@ class OpenAICompatibleQuestionPlanner:
                     ),
                 )
             raise ValueError
+        except LlmProviderError as error:
+            raise QueryPlanningFailure(
+                code=error.code,
+                safe_message=error.safe_message,
+                reason=error.reason,
+                planning_trace=_failed_planning_trace(correction_applied),
+                retrieval_plan_version=self.config.prompt_version,
+            ) from error
         except (TypeError, ValueError) as error:
-            raise LlmProviderError(
+            provider_error = LlmProviderError(
                 "LLM_INVALID_RESPONSE",
                 "Language model returned an invalid response",
+            )
+            raise QueryPlanningFailure(
+                code=provider_error.code,
+                safe_message=provider_error.safe_message,
+                reason=provider_error.reason,
+                planning_trace=_failed_planning_trace(correction_applied),
+                retrieval_plan_version=self.config.prompt_version,
             ) from error
-
     async def _refine_group(
         self,
         *,
@@ -857,6 +872,15 @@ class OpenAICompatibleQuestionPlanner:
             proposed_group=proposed_group,
         )
         return _RefinementResult(group=group, disposition=disposition)
+
+
+def _failed_planning_trace(correction_applied: bool) -> QueryPlanningTrace:
+    return QueryPlanningTrace(
+        initial_disposition="failed",
+        initial_correction_applied=correction_applied,
+        initial_slot_count=0,
+        selected_slots=(),
+    )
 
 
 def _validate_planned_evidence_groups(
