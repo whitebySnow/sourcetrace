@@ -90,6 +90,7 @@ class OpenAICompatibleConfig:
 class _PlannedEvidenceGroup:
     query: str
     document_title: str
+    title_anchor: str
 
 
 def _http_timeout(config: OpenAICompatibleConfig) -> httpx.Timeout:
@@ -142,9 +143,12 @@ def _retrieval_plan_prompt(
                 "always executes the original question. Return JSON with exactly one array field "
                 "named evidence_groups. Return at most three groups in the order their methods "
                 "or entities first appear in the question. Each array item must be an object with "
-                "exactly two "
-                "string fields: query and document_title. Copy document_title exactly from "
-                "searchable_document_titles; each title may appear at most once. Follow every "
+                "exactly three "
+                "string fields: query, document_title, and title_anchor. Copy document_title "
+                "exactly from searchable_document_titles; title_anchor must be a substring of "
+                "at least three characters from that title (without the file extension) and "
+                "must also appear in "
+                "query. Each title may appear at most once. Follow every "
                 "rule: "
                 "1. Return zero to three evidence groups, not a final query budget. Treat the "
                 "original question as the baseline query. If three groups are returned, the "
@@ -201,7 +205,8 @@ def _retrieval_plan_prompt(
                 "Use recent questions only to resolve references. Do not answer, add conclusions, "
                 "or include facts that are not needed to retrieve one slot. "
                 'EXAMPLE JSON OUTPUT: {"evidence_groups": [{"query": "Method A '
-                'distinctive mechanism", "document_title": "Method A.pdf"}]}'
+                'distinctive mechanism", "document_title": "Method A.pdf", '
+                '"title_anchor": "Method A"}]}'
             ),
         },
         {
@@ -229,9 +234,10 @@ def _retrieval_slot_refinement_prompt(
             "role": "system",
             "content": (
                 "Refine exactly one proposed retrieval evidence group. Return JSON with exactly "
-                "one object field named evidence_group. That object must contain exactly two "
-                "non-empty string fields: query and document_title. Copy document_title from the "
-                "proposal without changing it. Replace a broad paraphrase with a concise, "
+                "one object field named evidence_group. That object must contain exactly three "
+                "non-empty string fields: query, document_title, and title_anchor. Copy "
+                "document_title and title_anchor from the proposal without changing either. "
+                "The title_anchor must remain in query. Replace a broad paraphrase with a concise, "
                 "source-like search proposition that preserves the current question's entity, "
                 "logical polarity, comparison dimension, and English technical terms while "
                 "adding the distinctive mechanism, trigger, component, control signal, or data "
@@ -248,7 +254,8 @@ def _retrieval_slot_refinement_prompt(
                 "request contains no retrieved chunks, expected answers, evaluation evidence, or "
                 "labels, and you must not infer that they were supplied. "
                 'EXAMPLE JSON OUTPUT: {"evidence_group": {"query": "Method A '
-                'distinctive mechanism", "document_title": "Method A.pdf"}}'
+                'distinctive mechanism", "document_title": "Method A.pdf", '
+                '"title_anchor": "Method A"}}'
             ),
         },
         {
@@ -261,6 +268,7 @@ def _retrieval_slot_refinement_prompt(
                     "proposed_evidence_group": {
                         "query": proposed_group.query,
                         "document_title": proposed_group.document_title,
+                        "title_anchor": proposed_group.title_anchor,
                     },
                 },
                 ensure_ascii=False,
@@ -752,9 +760,11 @@ class OpenAICompatibleQuestionPlanner:
                             "content": (
                                 "The previous response violated the JSON contract. Retry once with "
                                 "exactly one evidence_groups array containing at most three "
-                                "objects. Each object must contain exactly one non-empty query and "
-                                "one document_title copied exactly from the supplied searchable "
-                                "titles. Order groups by first appearance in the question and use "
+                                "objects. Each object must contain a non-empty query, a "
+                                "document_title copied exactly from the supplied titles, and a "
+                                "title_anchor of at least three characters copied from that title "
+                                "which also appears in "
+                                "query. Order groups by first appearance in the question and use "
                                 "each title at most once, or return an empty array. Return no "
                                 "other fields."
                             ),
@@ -810,16 +820,18 @@ def _validate_planned_evidence_groups(
     seen_titles: set[str] = set()
     groups: list[_PlannedEvidenceGroup] = []
     for item in value:
-        if not isinstance(item, dict) or set(item) != {"query", "document_title"}:
+        if not isinstance(item, dict) or set(item) != {"query", "document_title", "title_anchor"}:
             return None
         query = item["query"]
         document_title = item["document_title"]
+        title_anchor = item["title_anchor"]
         if (
             not isinstance(query, str)
             or not query.strip()
             or not isinstance(document_title, str)
             or document_title not in allowed_titles
             or document_title in seen_titles
+            or not _is_valid_title_anchor(title_anchor, document_title, query)
             or _contains_title_attribution(query, document_title)
         ):
             return None
@@ -827,6 +839,7 @@ def _validate_planned_evidence_groups(
             _PlannedEvidenceGroup(
                 query=query.strip(),
                 document_title=document_title,
+                title_anchor=title_anchor.strip(),
             )
         )
         seen_titles.add(document_title)
@@ -860,19 +873,38 @@ def _contains_title_attribution(query: str, document_title: str) -> bool:
     )
 
 
+def _is_valid_title_anchor(anchor: object, document_title: str, query: str) -> bool:
+    if not isinstance(anchor, str):
+        return False
+    normalized_anchor = anchor.strip()
+    title_stem = document_title.rsplit(".", maxsplit=1)[0]
+    return (
+        len(normalized_anchor) >= 3
+        and normalized_anchor in title_stem
+        and normalized_anchor.casefold() in query.casefold()
+    )
+
+
 def _validate_refined_evidence_group(
     value: object,
     *,
     proposed_group: _PlannedEvidenceGroup,
 ) -> _PlannedEvidenceGroup | None:
-    if not isinstance(value, dict) or set(value) != {"query", "document_title"}:
+    if not isinstance(value, dict) or set(value) != {
+        "query",
+        "document_title",
+        "title_anchor",
+    }:
         return None
     query = value["query"]
     document_title = value["document_title"]
+    title_anchor = value["title_anchor"]
     if (
         not isinstance(query, str)
         or not query.strip()
         or document_title != proposed_group.document_title
+        or title_anchor != proposed_group.title_anchor
+        or not _is_valid_title_anchor(title_anchor, proposed_group.document_title, query)
         or query.strip().casefold() == proposed_group.query.casefold()
         or _contains_title_attribution(query, proposed_group.document_title)
     ):
@@ -880,6 +912,7 @@ def _validate_refined_evidence_group(
     return _PlannedEvidenceGroup(
         query=query.strip(),
         document_title=proposed_group.document_title,
+        title_anchor=proposed_group.title_anchor,
     )
 
 
@@ -888,11 +921,13 @@ def _has_planned_query_shape(value: object) -> bool:
         return False
     return all(
         isinstance(item, dict)
-        and set(item) == {"query", "document_title"}
+        and set(item) == {"query", "document_title", "title_anchor"}
         and isinstance(item["query"], str)
         and bool(item["query"].strip())
         and isinstance(item["document_title"], str)
         and bool(item["document_title"].strip())
+        and isinstance(item["title_anchor"], str)
+        and bool(item["title_anchor"].strip())
         for item in value
     )
 
