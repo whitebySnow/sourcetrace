@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from sourcetrace.rag.ports import InitialPlanDisposition, RefinementDisposition
+
 
 class AnswerRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
@@ -156,8 +158,21 @@ class WorkflowCitationValidationTrace(BaseModel):
     unknown_label_unit_indices: list[int] = Field(default_factory=list)
 
 
+class WorkflowPlanningSlotTrace(BaseModel):
+    title_anchor: str = Field(min_length=3, max_length=255)
+    refinement_disposition: RefinementDisposition
+
+
+class WorkflowPlanningTrace(BaseModel):
+    initial_disposition: InitialPlanDisposition
+    initial_correction_applied: bool
+    initial_slot_count: int = Field(ge=0, le=3)
+    selected_slots: list[WorkflowPlanningSlotTrace] = Field(max_length=2)
+
+
 class AnswerWorkflowTrace(BaseModel):
     retrieval_plan_version: str | None = None
+    planning: WorkflowPlanningTrace | None = None
     retrieval_queries: list[str] = Field(default_factory=list)
     retrieval_rounds: list[WorkflowRetrievalRoundTrace] = Field(default_factory=list)
     assessments: list[WorkflowEvidenceAssessmentTrace] = Field(default_factory=list)

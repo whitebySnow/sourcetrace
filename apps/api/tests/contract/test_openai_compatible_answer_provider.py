@@ -20,6 +20,7 @@ from sourcetrace.rag.ports import (
     CitationValidationFeedback,
     ClaimSupportValidationError,
     EvidenceDecision,
+    QueryPlanningFailure,
     RetrievalCandidate,
 )
 
@@ -105,6 +106,7 @@ def _multi_source_evidence() -> list[RetrievalCandidate]:
             matched_queries=("intermediate signals",),
         ),
     ]
+
 
 def _validation_feedback() -> CitationValidationFeedback:
     return CitationValidationFeedback(
@@ -1156,13 +1158,46 @@ async def test_question_planner_rejects_an_invalid_response_shape() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
-        with pytest.raises(LlmProviderError) as error:
+        with pytest.raises(QueryPlanningFailure) as error:
             await planner.plan(
                 question="Why is it normalized?",
                 recent_questions=["How are BGE-M3 vectors stored?"],
             )
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
+    assert error.value.planning_trace.initial_disposition == "failed"
+    assert error.value.planning_trace.initial_correction_applied is False
+
+
+async def test_question_planner_traces_an_empty_initial_plan() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": '{"evidence_groups": []}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
+
+        proposal = await planner.plan(
+            question="What is BGE-M3?",
+            recent_questions=[],
+            document_titles=["BGE-M3.pdf"],
+        )
+
+    assert proposal.additional_queries == ()
+    assert proposal.planning_trace is not None
+    assert proposal.planning_trace.initial_disposition == "empty"
+    assert proposal.planning_trace.initial_correction_applied is False
+    assert proposal.planning_trace.initial_slot_count == 0
+    assert proposal.planning_trace.selected_slots == ()
 
 
 async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
@@ -1236,6 +1271,19 @@ async def test_question_planner_accepts_two_evidence_slot_queries() -> None:
         "ReAct task-specific actions interact with environment",
         "Self-RAG Critique tokens support self-reflection",
     )
+    planning_trace = proposal.planning_trace
+    assert planning_trace is not None
+    assert planning_trace.initial_disposition == "accepted"
+    assert planning_trace.initial_correction_applied is False
+    assert planning_trace.initial_slot_count == 2
+    assert [slot.title_anchor for slot in planning_trace.selected_slots] == [
+        "ReAct",
+        "Self-RAG",
+    ]
+    assert [slot.refinement_disposition for slot in planning_trace.selected_slots] == [
+        "accepted",
+        "accepted",
+    ]
     assert set(refinement_payloads) == {"ReAct.pdf", "Self-RAG.pdf"}
     react_payload = json.dumps(refinement_payloads["ReAct.pdf"])
     self_rag_payload = json.dumps(refinement_payloads["Self-RAG.pdf"])
@@ -1594,6 +1642,11 @@ async def test_question_planner_discards_refinement_that_drops_title_anchor() ->
         )
 
     assert proposal.additional_queries == ("Self-RAG critique token semantics",)
+    assert proposal.planning_trace is not None
+    assert [slot.refinement_disposition for slot in proposal.planning_trace.selected_slots] == [
+        "invalid_shape",
+        "accepted",
+    ]
 
 
 async def test_question_planner_discards_refinement_that_changes_title_anchor() -> None:
@@ -1655,6 +1708,11 @@ async def test_question_planner_discards_refinement_that_changes_title_anchor() 
         )
 
     assert proposal.additional_queries == ("Self-RAG critique token semantics",)
+    assert proposal.planning_trace is not None
+    assert [slot.refinement_disposition for slot in proposal.planning_trace.selected_slots] == [
+        "anchor_changed",
+        "accepted",
+    ]
 
 
 async def test_question_planner_corrects_an_invalid_title_anchor() -> None:
@@ -1707,6 +1765,10 @@ async def test_question_planner_corrects_an_invalid_title_anchor() -> None:
 
     assert attempts == 2
     assert proposal.additional_queries == ("ReAct environment actions",)
+    assert proposal.planning_trace is not None
+    assert proposal.planning_trace.initial_disposition == "accepted"
+    assert proposal.planning_trace.initial_correction_applied is True
+    assert proposal.planning_trace.initial_slot_count == 1
 
 
 async def test_question_planner_discards_unchanged_refinement() -> None:
@@ -1801,7 +1863,7 @@ async def test_question_planner_rejects_more_than_three_evidence_groups() -> Non
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         planner = OpenAICompatibleQuestionPlanner(_config(), client=client)
 
-        with pytest.raises(LlmProviderError) as error:
+        with pytest.raises(QueryPlanningFailure) as error:
             await planner.plan(
                 question="Question",
                 recent_questions=[],
@@ -1815,6 +1877,10 @@ async def test_question_planner_rejects_more_than_three_evidence_groups() -> Non
 
     assert error.value.code == "LLM_INVALID_RESPONSE"
     assert attempts == 2
+    assert error.value.retrieval_plan_version == _config().prompt_version
+    assert error.value.planning_trace.initial_disposition == "failed"
+    assert error.value.planning_trace.initial_correction_applied is True
+    assert error.value.planning_trace.selected_slots == ()
 
 
 async def test_question_planner_corrects_duplicate_document_groups() -> None:

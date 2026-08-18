@@ -55,6 +55,7 @@ class AnswerRepository:
             provider_operation_deadline_seconds=provider_operation_deadline_seconds,
             workflow_trace={
                 "retrieval_plan_version": None,
+                "planning": None,
                 "retrieval_queries": [],
                 "retrieval_rounds": [],
                 "assessments": [],

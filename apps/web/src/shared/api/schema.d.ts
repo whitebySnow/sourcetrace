@@ -449,6 +449,7 @@ export interface components {
         AnswerWorkflowTrace: {
             /** Retrieval Plan Version */
             retrieval_plan_version?: string | null;
+            planning?: components["schemas"]["WorkflowPlanningTrace"] | null;
             /** Retrieval Queries */
             retrieval_queries?: string[];
             /** Retrieval Rounds */
@@ -678,6 +679,8 @@ export interface components {
             /** Failure Code */
             failure_code?: string | null;
         };
+        /** @enum {string} */
+        InitialPlanDisposition: "empty" | "accepted" | "rejected" | "failed";
         /** KnowledgeBaseCreate */
         KnowledgeBaseCreate: {
             /** Name */
@@ -754,6 +757,8 @@ export interface components {
                 [key: string]: "ok" | "unavailable";
             };
         };
+        /** @enum {string} */
+        RefinementDisposition: "not_required" | "accepted" | "provider_error" | "invalid_shape" | "document_changed" | "anchor_changed" | "anchor_invalid" | "unchanged_query" | "title_attribution";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -816,6 +821,22 @@ export interface components {
             reranked_rank?: number | null;
             /** Selected As Primary */
             selected_as_primary: boolean;
+        };
+        /** WorkflowPlanningSlotTrace */
+        WorkflowPlanningSlotTrace: {
+            /** Title Anchor */
+            title_anchor: string;
+            refinement_disposition: components["schemas"]["RefinementDisposition"];
+        };
+        /** WorkflowPlanningTrace */
+        WorkflowPlanningTrace: {
+            initial_disposition: components["schemas"]["InitialPlanDisposition"];
+            /** Initial Correction Applied */
+            initial_correction_applied: boolean;
+            /** Initial Slot Count */
+            initial_slot_count: number;
+            /** Selected Slots */
+            selected_slots: components["schemas"]["WorkflowPlanningSlotTrace"][];
         };
         /** WorkflowQueryRetrievalTrace */
         WorkflowQueryRetrievalTrace: {

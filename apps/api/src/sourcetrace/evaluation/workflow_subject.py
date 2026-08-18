@@ -12,6 +12,8 @@ from sourcetrace.evaluation.models import (
     ObservedEvidence,
     ObservedEvidenceAssessment,
     ObservedFusedCandidateTrace,
+    ObservedPlanningSlotTrace,
+    ObservedPlanningTrace,
     ObservedQueryCandidateTrace,
     ObservedQueryRetrievalTrace,
     ObservedRerankerTrace,
@@ -26,6 +28,7 @@ from sourcetrace.modules.retrieval.service import (
 )
 from sourcetrace.rag.embeddings import EmbeddingProviderError
 from sourcetrace.rag.llm import LlmProviderError
+from sourcetrace.rag.ports import QueryPlanningFailure
 from sourcetrace.rag.rerankers import RerankerProviderError
 from sourcetrace.rag.workflow import (
     WorkflowAnswered,
@@ -47,12 +50,14 @@ class EvaluationExecutionFailure(Exception):
         phase: EvaluationFailurePhase,
         error_code: str,
         error_reason: str | None,
+        planning: ObservedPlanningTrace | None,
     ) -> None:
         super().__init__(error_code)
         self.case_id = case_id
         self.phase = phase
         self.error_code = error_code
         self.error_reason = error_reason
+        self.planning = planning
 
 
 class WorkflowRetrieval(Protocol):
@@ -195,12 +200,22 @@ class WorkflowEvaluationSubject:
                     phase = event.stage
                 if isinstance(event, (WorkflowAnswered, WorkflowRefused, WorkflowCancelled)):
                     final = event
-        except (EmbeddingProviderError, LlmProviderError, RerankerProviderError) as error:
+        except (
+            EmbeddingProviderError,
+            LlmProviderError,
+            QueryPlanningFailure,
+            RerankerProviderError,
+        ) as error:
             raise EvaluationExecutionFailure(
                 case_id=case.id,
                 phase=phase,
                 error_code=error.code,
-                error_reason=error.reason if isinstance(error, LlmProviderError) else None,
+                error_reason=(
+                    error.reason
+                    if isinstance(error, (LlmProviderError, QueryPlanningFailure))
+                    else None
+                ),
+                planning=self._to_observed_planning_trace(self._run_control.trace),
             ) from error
         if final is None:
             raise RuntimeError("answer workflow completed without a final event")
@@ -252,6 +267,7 @@ class WorkflowEvaluationSubject:
                 for retrieval in self._retrieval.retrievals
             ),
             retrieval_plan_version=trace.retrieval_plan_version,
+            planning=self._to_observed_planning_trace(trace),
             retrieval_rounds=tuple(
                 ObservedRetrievalRoundTrace(
                     round_number=retrieval_round.round_number,
@@ -327,4 +343,21 @@ class WorkflowEvaluationSubject:
             ),
             supplemental_retrieval_attempts=trace.supplemental_retrieval_attempts,
             citation_repair_attempts=trace.citation_repair_attempts,
+        )
+
+    @staticmethod
+    def _to_observed_planning_trace(trace: WorkflowTrace) -> ObservedPlanningTrace | None:
+        if trace.planning is None:
+            return None
+        return ObservedPlanningTrace(
+            initial_disposition=trace.planning.initial_disposition,
+            initial_correction_applied=trace.planning.initial_correction_applied,
+            initial_slot_count=trace.planning.initial_slot_count,
+            selected_slots=tuple(
+                ObservedPlanningSlotTrace(
+                    title_anchor=slot.title_anchor,
+                    refinement_disposition=slot.refinement_disposition,
+                )
+                for slot in trace.planning.selected_slots
+            ),
         )

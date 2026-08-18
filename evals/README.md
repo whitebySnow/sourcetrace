@@ -101,7 +101,7 @@ parser、切分、embedding、四个 prompt、工作流和检索参数/版本；
 
 真实运行在供应商或模型基础设施错误后以非零状态退出，并在指定正常报告同目录写入
 `<report>-failure.json`。该文件是不可评分的失败取证工件：只含数据集快照、可获得的运行元数据、
-失败 case ID、阶段和安全错误分类；不含问题、参考答案、模型回答、提示词、文档或证据正文，也
+失败 case ID、阶段、安全错误分类，以及在初始规划失败时的去敏规划轨迹；不含问题、参考答案、模型回答、提示词、文档或证据正文，也
 没有 `cases` 或任何四轴汇总。它不能传给 `review`、`diagnose-retrieval`、
 `diagnose-retrieval-stages`、`diagnose-citations` 或 `diagnose-assessments`，不能用于声明质量结论。Schema 位于
 `schema/failure-report-v1.schema.json`。真实命令拒绝覆盖已有正常报告；每次运行使用新的

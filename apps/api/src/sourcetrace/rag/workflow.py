@@ -23,6 +23,8 @@ from sourcetrace.rag.ports import (
     ClaimSupportValidationError,
     ClaimSupportVerifier,
     EvidenceAssessor,
+    QueryPlanningFailure,
+    QueryPlanningTrace,
     RetrievalCandidate,
 )
 
@@ -195,6 +197,7 @@ class RetrievalRoundTrace:
 @dataclass(frozen=True, slots=True)
 class WorkflowTrace:
     retrieval_plan_version: str | None = None
+    planning: QueryPlanningTrace | None = None
     retrieval_queries: tuple[str, ...] = ()
     retrieval_rounds: tuple[RetrievalRoundTrace, ...] = ()
     assessments: tuple[EvidenceAssessmentTrace, ...] = ()
@@ -205,6 +208,22 @@ class WorkflowTrace:
     def to_payload(self) -> dict[str, object]:
         return {
             "retrieval_plan_version": self.retrieval_plan_version,
+            "planning": (
+                None
+                if self.planning is None
+                else {
+                    "initial_disposition": self.planning.initial_disposition,
+                    "initial_correction_applied": self.planning.initial_correction_applied,
+                    "initial_slot_count": self.planning.initial_slot_count,
+                    "selected_slots": [
+                        {
+                            "title_anchor": slot.title_anchor,
+                            "refinement_disposition": slot.refinement_disposition,
+                        }
+                        for slot in self.planning.selected_slots
+                    ],
+                }
+            ),
             "retrieval_queries": list(self.retrieval_queries),
             "retrieval_rounds": [item.to_payload() for item in self.retrieval_rounds],
             "assessments": [item.to_payload() for item in self.assessments],
@@ -444,15 +463,26 @@ class AnswerWorkflow:
     async def _analyze(self, state: _WorkflowState) -> _WorkflowState:
         await self._ensure_active(state["run_id"])
         get_stream_writer()(WorkflowStatus(stage="analyzing"))
-        plan = await self._retrieval.resolve_plan(
-            knowledge_base_id=state["knowledge_base_id"],
-            question=state["question"],
-            recent_questions=state["recent_questions"],
-        )
+        try:
+            plan = await self._retrieval.resolve_plan(
+                knowledge_base_id=state["knowledge_base_id"],
+                question=state["question"],
+                recent_questions=state["recent_questions"],
+            )
+        except QueryPlanningFailure as error:
+            await self._record_trace(
+                state["run_id"],
+                WorkflowTrace(
+                    retrieval_plan_version=error.retrieval_plan_version,
+                    planning=error.planning_trace,
+                ),
+            )
+            raise
         if not await self._run_control.record_retrieval_query(state["run_id"], plan.queries[0]):
             raise _WorkflowCancellation
         trace = WorkflowTrace(
             retrieval_plan_version=plan.version,
+            planning=plan.planning_trace,
             retrieval_queries=plan.queries,
         )
         await self._record_trace(state["run_id"], trace)

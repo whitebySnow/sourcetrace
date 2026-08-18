@@ -7,7 +7,13 @@ from typing import Protocol
 from uuid import UUID
 
 from sourcetrace.modules.retrieval.hybrid import FusedChannelCandidate
-from sourcetrace.rag.ports import EmbeddingProvider, QuestionPlanner, Reranker, RerankerIdentity
+from sourcetrace.rag.ports import (
+    EmbeddingProvider,
+    QueryPlanningTrace,
+    QuestionPlanner,
+    Reranker,
+    RerankerIdentity,
+)
 
 _PAGE_DIVERSITY_POOL_MULTIPLIER = 4
 _MAX_CANDIDATE_POOL_SIZE = 100
@@ -35,6 +41,7 @@ class RetrievedEvidence:
 class RetrievalPlan:
     version: str
     queries: tuple[str, ...]
+    planning_trace: QueryPlanningTrace | None = None
 
     def with_additional_queries(self, queries: Sequence[str]) -> RetrievalPlan | None:
         accepted = list(self.queries)
@@ -53,6 +60,7 @@ class RetrievalPlan:
         return RetrievalPlan(
             version=self.version,
             queries=tuple(accepted),
+            planning_trace=self.planning_trace,
         )
 
 
@@ -184,7 +192,11 @@ class RetrievalService:
             normalized.add(normalized_candidate)
             if len(queries) == _MAX_ADDITIONAL_QUERIES + 1:
                 break
-        return RetrievalPlan(version=self._retrieval_plan_version, queries=tuple(queries))
+        return RetrievalPlan(
+            version=self._retrieval_plan_version,
+            queries=tuple(queries),
+            planning_trace=proposal.planning_trace,
+        )
 
     async def search(
         self,

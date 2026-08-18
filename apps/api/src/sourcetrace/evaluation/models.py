@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from sourcetrace.rag.ports import InitialPlanDisposition, RefinementDisposition
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -204,9 +206,22 @@ class ObservedRetrievalRoundTrace(StrictModel):
     reranker: ObservedRerankerTrace | None = None
 
 
+class ObservedPlanningSlotTrace(StrictModel):
+    title_anchor: str = Field(min_length=3, max_length=255)
+    refinement_disposition: RefinementDisposition
+
+
+class ObservedPlanningTrace(StrictModel):
+    initial_disposition: InitialPlanDisposition
+    initial_correction_applied: bool
+    initial_slot_count: int = Field(ge=0, le=3)
+    selected_slots: tuple[ObservedPlanningSlotTrace, ...] = Field(max_length=2)
+
+
 class EvaluationDecisionTrace(StrictModel):
     retrievals: tuple[ObservedRetrieval, ...]
     retrieval_plan_version: str | None = None
+    planning: ObservedPlanningTrace | None = None
     retrieval_rounds: tuple[ObservedRetrievalRoundTrace, ...] = ()
     assessments: tuple[ObservedEvidenceAssessment, ...]
     citation_validations: tuple[ObservedCitationValidation, ...]
@@ -368,6 +383,7 @@ class EvaluationFailureReport(StrictModel):
         default=None,
         pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$",
     )
+    planning: ObservedPlanningTrace | None = None
 
 
 type RetrievalFailureMechanism = Literal[

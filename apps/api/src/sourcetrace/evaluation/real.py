@@ -229,5 +229,6 @@ async def run_real_evaluation(
                     phase=error.phase,
                     error_code=error.error_code,
                     error_reason=error.error_reason,
+                    planning=error.planning,
                 )
             ) from error
