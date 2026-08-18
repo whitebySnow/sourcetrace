@@ -8,14 +8,19 @@ from sourcetrace.evaluation.models import (
     EvaluationFailureReport,
     EvaluationReport,
     EvaluationRunMetadata,
+    PlanningProbeReport,
 )
+from sourcetrace.evaluation.planning_probe import run_planning_probe
 from sourcetrace.evaluation.repository import CorpusProvenance, EvaluationCorpusRepository
 from sourcetrace.evaluation.workflow_subject import (
     EvaluationExecutionFailure,
     WorkflowEvaluationSubject,
 )
 from sourcetrace.modules.retrieval.repository import PgVectorRetrievalRepository
-from sourcetrace.modules.retrieval.service import RetrievalService
+from sourcetrace.modules.retrieval.service import (
+    PLANNER_DOCUMENT_TITLE_LIMIT,
+    RetrievalService,
+)
 from sourcetrace.rag.embeddings import BgeM3EmbeddingProvider, EmbeddingConfig
 from sourcetrace.rag.llm import (
     OpenAICompatibleAnswerGenerator,
@@ -232,3 +237,44 @@ async def run_real_evaluation(
                     planning=error.planning,
                 )
             ) from error
+
+
+async def run_real_planning_probe(
+    dataset: EvaluationDataset,
+    *,
+    case_ids: tuple[str, ...],
+    code_commit: str,
+    settings: Settings,
+) -> PlanningProbeReport:
+    """Observe the production planner without retrieval or answer execution."""
+
+    if dataset.review.status != "reviewed":
+        raise ValueError("real planning probes require a human-reviewed dataset")
+    async with session_factory() as session, httpx.AsyncClient() as client:
+        provenance = await EvaluationCorpusRepository(session).get_provenance(
+            dataset.knowledge_base_id,
+            dataset.document_version_ids,
+        )
+        metadata = _run_metadata(provenance, code_commit=code_commit, settings=settings)
+        document_titles = await PgVectorRetrievalRepository(
+            session,
+            document_version_ids=dataset.document_version_ids,
+            channel_rrf_rank_constant=settings.retrieval_rrf_rank_constant,
+        ).list_searchable_document_titles(
+            dataset.knowledge_base_id,
+            limit=PLANNER_DOCUMENT_TITLE_LIMIT,
+        )
+        planner = OpenAICompatibleQuestionPlanner(
+            _llm_config(
+                settings,
+                prompt_version=settings.llm_retrieval_plan_prompt_version,
+            ),
+            client=client,
+        )
+        return await run_planning_probe(
+            dataset,
+            case_ids=case_ids,
+            planner=planner,
+            document_titles=document_titles,
+            metadata=metadata,
+        )

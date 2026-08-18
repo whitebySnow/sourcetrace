@@ -14,6 +14,8 @@ from sourcetrace.evaluation.models import (
     HybridQueryPlanFixture,
     HybridRetrievalEvaluationReport,
     ObservedPlanningTrace,
+    PlanningProbeObservation,
+    PlanningProbeReport,
     RerankerEvaluationReport,
     RetrievalStageDiagnosticsReport,
 )
@@ -242,6 +244,182 @@ def test_real_cli_requires_explicit_provider_confirmation() -> None:
         )
 
     assert error.value.code == 2
+
+
+def test_planning_probe_cli_requires_explicit_provider_confirmation() -> None:
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "planning-probe",
+                "--dataset",
+                "reviewed-dataset.json",
+                "--case-id",
+                "ARF-026",
+                "--code-commit",
+                "abc123",
+                "--output",
+                "probe.json",
+            ]
+        )
+
+    assert error.value.code == 2
+
+
+def test_planning_probe_cli_writes_a_sanitized_non_scoreable_artifact(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    knowledge_base_id = uuid4()
+    document_version_id = uuid4()
+    dataset_path = tmp_path / "dataset.json"
+    output_path = tmp_path / "reports" / "probe.json"
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "dataset_id": "reviewed-fixture",
+                "dataset_version": "1.0.0",
+                "knowledge_base_id": str(knowledge_base_id),
+                "document_version_ids": [str(document_version_id)],
+                "review": {
+                    "status": "reviewed",
+                    "reviewed_by": "project-owner",
+                    "reviewed_at": "2026-08-18T00:00:00Z",
+                },
+                "cases": [
+                    {
+                        "id": "ARF-026",
+                        "category": "confusing",
+                        "question": "Question text must not appear in the artifact.",
+                        "expected": {
+                            "outcome": "answered",
+                            "reference_answer": "Reference answer must not appear in the artifact.",
+                            "evidence": [
+                                {
+                                    "document_version_id": str(document_version_id),
+                                    "page_number": 3,
+                                    "text": "Evidence text must not appear in the artifact.",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_planning_probe(dataset, *, case_ids, code_commit, settings):
+        assert dataset.dataset_id == "reviewed-fixture"
+        assert case_ids == ("ARF-026",)
+        assert code_commit == "test-commit"
+        return PlanningProbeReport(
+            dataset_id=dataset.dataset_id,
+            dataset_version=dataset.dataset_version,
+            knowledge_base_id=dataset.knowledge_base_id,
+            document_version_ids=dataset.document_version_ids,
+            metadata={
+                "code_commit": "test-commit",
+                "model_provider": "openai-compatible",
+                "model_name": "test-model",
+                "workflow_version": "planning-probe-v1",
+                "parser_version": "test-parser",
+                "tokenizer": "test-tokenizer",
+                "chunk_size": 512,
+                "chunk_overlap": 64,
+                "chunking_version": "test-chunking",
+                "embedding_provider": "sentence-transformers",
+                "embedding_model": "test-embedding",
+                "embedding_revision": "test-revision",
+                "embedding_dimension": 1024,
+                "embedding_version": "test-embedding-v1",
+                "retrieval_version": "test-retrieval-v1",
+                "retrieval_top_k": 8,
+                "retrieval_minimum_score": 0.2,
+                "retrieval_minimum_evidence": 1,
+                "generation_prompt_version": "unused",
+                "question_rewrite_prompt_version": "retrieval-plan-v8",
+                "evidence_assessment_prompt_version": "unused",
+                "citation_repair_prompt_version": "unused",
+            },
+            observations=(
+                PlanningProbeObservation(
+                    case_id="ARF-026",
+                    status="planned",
+                    planning=ObservedPlanningTrace(
+                        initial_disposition="accepted",
+                        initial_correction_applied=False,
+                        initial_slot_count=2,
+                        selected_slots=(),
+                    ),
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        "sourcetrace.evaluation.real.run_real_planning_probe",
+        fake_planning_probe,
+    )
+
+    exit_code = main(
+        [
+            "planning-probe",
+            "--dataset",
+            str(dataset_path),
+            "--case-id",
+            "ARF-026",
+            "--code-commit",
+            "test-commit",
+            "--output",
+            str(output_path),
+            "--confirm-real-provider",
+        ]
+    )
+
+    payload = output_path.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert "retrieval_summary" not in payload
+    assert "Question text" not in payload
+    assert "Reference answer" not in payload
+    assert "Evidence text" not in payload
+
+
+def test_planning_probe_cli_refuses_to_overwrite_a_previous_artifact(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    output_path = tmp_path / "reports" / "probe.json"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_text("previous probe", encoding="utf-8")
+    invoked = False
+
+    async def unexpected_planning_probe(*args, **kwargs):
+        nonlocal invoked
+        invoked = True
+        raise AssertionError("existing output must fail before a real provider invocation")
+
+    monkeypatch.setattr(
+        "sourcetrace.evaluation.real.run_real_planning_probe",
+        unexpected_planning_probe,
+    )
+
+    with pytest.raises(FileExistsError, match="planning probe output already exists"):
+        main(
+            [
+                "planning-probe",
+                "--dataset",
+                str(tmp_path / "dataset.json"),
+                "--case-id",
+                "ARF-026",
+                "--code-commit",
+                "test-commit",
+                "--output",
+                str(output_path),
+                "--confirm-real-provider",
+            ]
+        )
+
+    assert invoked is False
 
 
 def test_real_cli_writes_an_unscored_failure_artifact(tmp_path, monkeypatch) -> None:
@@ -492,6 +670,15 @@ def test_repository_failure_report_schema_matches_model() -> None:
     )
 
     assert schema == EvaluationFailureReport.model_json_schema()
+
+
+def test_repository_planning_probe_schema_matches_model() -> None:
+    root = Path(__file__).resolve().parents[4]
+    schema = json.loads(
+        (root / "evals/schema/planning-probe-v1.schema.json").read_text(encoding="utf-8")
+    )
+
+    assert schema == PlanningProbeReport.model_json_schema()
 
 
 @pytest.mark.parametrize(

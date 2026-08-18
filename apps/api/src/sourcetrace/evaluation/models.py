@@ -4,7 +4,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from sourcetrace.rag.ports import InitialPlanDisposition, RefinementDisposition
+from sourcetrace.rag.ports import (
+    InitialPlanDisposition,
+    RefinementDisposition,
+)
 
 
 class StrictModel(BaseModel):
@@ -384,6 +387,46 @@ class EvaluationFailureReport(StrictModel):
         pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$",
     )
     planning: ObservedPlanningTrace | None = None
+
+
+class PlanningProbeObservation(StrictModel):
+    case_id: str = Field(min_length=1)
+    status: Literal["planned", "failed"]
+    planning: ObservedPlanningTrace
+    error_code: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    error_reason: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$",
+    )
+
+    @model_validator(mode="after")
+    def require_consistent_terminal_status(self) -> "PlanningProbeObservation":
+        if self.status == "planned" and (
+            self.error_code is not None or self.error_reason is not None
+        ):
+            raise ValueError("planned probes cannot include an error")
+        if self.status == "failed" and self.error_code is None:
+            raise ValueError("failed probes require a safe error code")
+        return self
+
+
+class PlanningProbeReport(StrictModel):
+    """A non-scoreable, bounded record of real query-planning decisions."""
+
+    schema_version: Literal["1"] = "1"
+    dataset_id: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    knowledge_base_id: UUID
+    document_version_ids: list[UUID]
+    metadata: EvaluationRunMetadata
+    observations: tuple[PlanningProbeObservation, ...] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode="after")
+    def require_unique_observed_cases(self) -> "PlanningProbeReport":
+        case_ids = [observation.case_id for observation in self.observations]
+        if len(case_ids) != len(set(case_ids)):
+            raise ValueError("planning probe case IDs must be unique")
+        return self
 
 
 type RetrievalFailureMechanism = Literal[
